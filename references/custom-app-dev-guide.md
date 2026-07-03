@@ -395,3 +395,166 @@ TypeScript（前端）和 Python（後端 Server Action）是 AI GO 精選的開
 2. **建議建立新專案重構**：在 AI GO 上建立全新 Custom App 專案，以 AI GO 架構重新設計
 3. **原專案不更動**：用戶的本地原始專案保持不變，AI GO 專案獨立開發
 4. **業務邏輯遷移**：引導用戶將現有系統的業務邏輯和資料結構，對應到 AI GO 的 SaaS 表 + Custom Table 架構
+
+## 22. 外部 Schema 映射指引
+
+當用戶要將外部系統（Supabase / Google Sheet / MySQL 等）遷入 AI GO 時，需要將外部 DB 的表結構映射到 AI GO 的資料架構。
+
+### 22.1 映射流程
+
+```
+1. 列出外部系統的所有資料表與欄位
+2. 用 Refs API 查詢 AI GO 可用 SaaS 表（見 §20）
+3. 逐表比對：
+   外部欄位 → SaaS 表原生欄位？ → 直接對應
+   外部欄位 → 無原生對應？       → custom_data JSONB 擴充
+   整張表都不適用 SaaS 表？      → Custom Table
+4. 處理外鍵 / 關聯
+5. 產出映射表（模板見 resources/migration_mapping_template.md）
+```
+
+### 22.2 語意重疊表的合併 / 分離決策
+
+當多個外部系統有語意相同的表（如都有「客戶表」）時：
+
+| 判斷條件 | 結果 | 說明 |
+|---------|------|------|
+| 指向同一群實體 + 未來需統一檢視 | **合併** | 進同一張 SaaS 表，各 App 用 `app_domain` 標籤區分來源 |
+| 指向同一群實體 + 各自獨立運作 | **合併** | 但各 App 只過濾自己 `app_domain` 的資料 |
+| 指向不同群實體（如不同市場的客戶） | **分離** | 各自建 Custom Table 或用不同 `app_domain` 隔離 |
+| 欄位結構差異過大（>50% 不同） | **分離** | 硬塞進同一張表會造成 custom_data 過於複雜 |
+
+決策樹：
+
+```
+多個外部系統都有語意相同的表
+  ├─ 是同一群實體？
+  │   ├─ 是 → 合併進同一張 SaaS / Custom Table
+  │   │       ├─ 欄位聯集 → 共有欄位用原生欄位，各自特有欄位放 custom_data
+  │   │       └─ 去重策略 → 以 email / 名稱為 key，衝突時由用戶決定保留哪邊
+  │   └─ 否 → 分離
+  │           ├─ 各自對應不同 AI GO App
+  │           └─ 各自做 Schema 映射
+  └─ 不確定 → 問用戶確認
+```
+
+### 22.3 外鍵 / 關聯處理
+
+AI GO 的 SaaS 表和 Custom Table 沒有原生外鍵約束。外部 DB 的 FK 關係需要轉換：
+
+| 外部 FK 類型 | AI GO 處理方式 |
+|-------------|---------------|
+| `tasks.project_id → projects.id` | Custom Table 中建立 `project_id`（relation 型別）欄位；或 SaaS 表中存入 `custom_data.project_id` |
+| `orders.customer_id → customers.id` | 若兩表都用 SaaS 表，可直接用 SaaS 表的 `customer_id` 欄位 |
+| 多對多（junction table） | 轉為 Custom Table 存放關聯，或在 `custom_data` 中存 ID 陣列 |
+
+> **重要**：參照完整性需由前端 / Server Action 程式碼維護，AI GO 不會自動做 cascading delete 等操作。
+
+### 22.4 多系統遷入時的 custom_data 命名空間
+
+當多個 App 共用同一張 SaaS 表時，建議在 `custom_data` 中使用 `app_domain` 作為命名空間前綴：
+
+```json
+{
+  "app_domain": "crm_leads",
+  "crm_leads__level": "VIP",
+  "crm_leads__source": "官網"
+}
+```
+
+或使用巢狀結構：
+
+```json
+{
+  "app_domain": "crm_leads",
+  "ext": {
+    "level": "VIP",
+    "source": "官網"
+  }
+}
+```
+
+選擇哪種取決於查詢複雜度，但**必須在 Phase 1.25 全景表中統一決定**，所有 App 遵循同一規範。
+
+## 23. 資料遷移方法
+
+當用戶決定要將外部系統的歷史資料遷入 AI GO 時，使用以下指引。
+
+### 23.1 遷移策略矩陣
+
+| 資料量 | 關聯複雜度 | 建議方式 |
+|--------|-----------|---------|
+| 少（< 200 筆） | 簡單（無 FK） | API 逐筆寫入，可手動或簡單 script |
+| 少（< 200 筆） | 複雜（有 FK） | Server Action 批次匯入，先匯主表再匯子表 |
+| 中（200~2000 筆） | 任意 | Server Action 批次匯入 |
+| 多（> 2000 筆） | 任意 | Server Action 分批匯入（每批 100 筆），加入錯誤處理與斷點續傳 |
+
+### 23.2 Server Action 批次匯入範例
+
+```python
+def execute(ctx):
+    """批次匯入外部資料到 SaaS 表或 Custom Table"""
+    records = ctx.params.get("records", [])
+    table = ctx.params.get("table", "")
+    app_domain = ctx.params.get("app_domain", "")
+    
+    results = {"success": 0, "failed": 0, "errors": [], "id_mapping": {}}
+    
+    for record in records:
+        try:
+            # 注入 app_domain 標籤（SaaS 表適用）
+            if app_domain:
+                record.setdefault("custom_data", {})
+                record["custom_data"]["app_domain"] = app_domain
+            
+            # 記住外部 ID 用於後續關聯映射
+            old_id = record.pop("_external_id", None)
+            
+            result = ctx.db.insert(table, {"data": record})
+            results["success"] += 1
+            
+            if old_id and result.get("id"):
+                results["id_mapping"][str(old_id)] = result["id"]
+        except Exception as e:
+            results["failed"] += 1
+            results["errors"].append({"record": record, "error": str(e)})
+    
+    ctx.response.json(results)
+```
+
+### 23.3 ID 體系轉換
+
+外部系統通常使用自增整數 ID 或 Google Sheet 行號，AI GO 使用 UUID。遷移時需要：
+
+1. **匯入主表**，記錄 `{外部 old_id → AI GO new_uuid}` 映射
+2. **匯入子表**時，用映射表替換 FK 欄位的值
+3. 映射表可存在 Server Action 的回傳結果中，或暫存為 Custom Table
+
+```
+遷移順序（有 FK 時）：
+1. 匯入 customers → 取得 old_id → new_uuid 映射
+2. 匯入 orders → 用映射表替換 orders.customer_id
+3. 匯入 order_items → 用映射表替換 order_items.order_id
+```
+
+### 23.4 Google Sheet 遷移特殊考量
+
+| 問題 | 處理方式 |
+|------|---------|
+| 無明確型別（全部是字串） | 遷入時在 Server Action 中做型別轉換（數字、日期） |
+| 無外鍵 | 需人工識別哪些欄位是關聯欄位（如「客戶名稱」→ 對應到 customers 表） |
+| 欄位名稱為中文 | 映射時建立「中文欄位名 → AI GO 英文欄位名」對照表 |
+| 空行 / 重複行 | 遷入前先清洗：去除空行、依關鍵欄位去重 |
+| 格式不一致（日期混用） | 在 Server Action 中統一格式化 |
+
+### 23.5 遷移後驗證 Checklist
+
+```
+✓ 總筆數比對：外部系統 N 筆 → AI GO N 筆
+✓ 關鍵欄位抽驗：隨機抽 5~10 筆，比對名稱/金額/日期等關鍵欄位
+✓ 關聯完整性：子表的 FK 欄位都能對應到主表的有效記錄
+✓ app_domain 標籤：所有 SaaS 表記錄都帶有正確的 app_domain
+✓ custom_data 結構：JSONB 欄位的 key 符合映射表定義
+✓ 無殘留測試資料：遷移過程中的測試記錄已清除
+```
+
