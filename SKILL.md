@@ -392,7 +392,7 @@ verify_server_action(base_url, token, app_id, action_name, params)
    print(format_verification_report(results))
    ```
 6. **External Auth**（可選）— 註冊 → 登入 → 取得用戶 → 登出
-7. **Public 匿名**（可選）— 設定公開 → pub/ API 讀取 → 確認寫入被拒
+7. **匿名存取驗證**（可選）— 確認 allow_anonymous_access 已啟用 → /pub/ API 讀取 → 確認寫入被拒
 
 可使用 `scripts/aigo_e2e.py` 和 `scripts/aigo_runtime_verify.py`。
 
@@ -406,7 +406,7 @@ verify_server_action(base_url, token, app_id, action_name, params)
                    └─ (若涉及路由/元件) → publish → ✅ Publish 一致性
 
 里程碑交付：
-  上述全部 + External Auth + Public 匿名（如適用）
+  上述全部 + External Auth + 匿名存取（如適用）
 ```
 
 ## 錯誤處理速查
@@ -427,7 +427,7 @@ verify_server_action(base_url, token, app_id, action_name, params)
 | pub/ API 403 | 確認 `allow_anonymous_access=true` |
 | Compile 產物驗證失敗 | 檢查 main.tsx 入口和 App.css import |
 | CRUD 驗證失敗 | 確認 Custom Table 已建立且欄位正確 |
-| Action 驗證失敗 | 檢查 execute(ctx) 函式、依賴模組白名單 |
+| Action 驗證失敗 | 檢查 execute(ctx) 函式、依賴模組是否可用 |
 | Publish 一致性失敗 | 重新 sync → compile → publish 完整循環 |
 
 ## 參考文件

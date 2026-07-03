@@ -7,7 +7,8 @@
 - VFS（Virtual File System）：以 JSON `{"路徑": "內容"}` 儲存原始碼
 - esbuild 編譯器：React TSX → JS bundle
 - Runtime 沙箱：在 Shadow DOM 隔離環境中執行
-- 三種模式：Internal（組織內部）/ External（對外客戶）/ Public（匿名檢視）
+- 兩種模式（access_mode）：Internal（組織內部）/ External（對外客戶）
+- 匿名存取：任何 App 皆可啟用，透過 /pub/* 端點 + allow_anonymous_access 旗標（見 §15）
 - 語言選擇：TypeScript（前端）+ Python（後端），為 AI Coding 最佳化的精選組合（詳見 §21）
 - 資料架構：統一走 API 存取，不直連資料庫——避免結構混亂（詳見 §21）
 
@@ -169,7 +170,7 @@ api_slug：`^[a-z0-9]([a-z0-9_]*[a-z0-9])?$`。
 
 Auth SDK：`window.__auth__.login()`, `.register()`, `.logout()`, `.getToken()`
 
-## 15. Public 匿名 API
+## 15. 匿名存取 API（/pub/* 端點）
 
 啟用條件：`allow_anonymous_access=true` + `is_public_readable=true`
 
