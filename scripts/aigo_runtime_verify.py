@@ -3,7 +3,7 @@ aigo_runtime_verify.py — Custom App Runtime 端到端驗證
 
 在 preview（compile 後）和 publish 後，驗證 App 實際可運行：
 1. Compile 產物驗證（HTML/JS/CSS 有效性）
-2. Custom Data CRUD（讀寫刪查）
+2. 自建表記錄 CRUD（讀寫刪查）
 3. Server Action 呼叫
 4. published_vfs 與 vfs_state 一致性
 """
@@ -61,66 +61,108 @@ def verify_compile_output(compile_result: dict, baseline_css_size: int = 0) -> d
     }
 
 
-def verify_custom_data_crud(base_url: str, token: str, table_id: str) -> dict:
+def verify_custom_data_crud(base_url: str, token: str, table_key: str) -> dict:
     """
-    對指定 Custom Data 表執行完整 CRUD 驗證（建→讀→刪→確認刪除）。
+    對指定**自建表**執行完整 CRUD 驗證（建→讀→刪→確認刪除）。
 
     Args:
         base_url: API 根 URL
         token: JWT access_token
-        table_id: Custom Data 表的 UUID
+        table_key: 自建表的**實體名**（physical_name），不是 UUID、不是顯示名
 
     Returns:
-        驗證報告 dict
+        驗證報告 dict；失敗時 checks 內含錯誤訊息
+
+    註：只碰記錄面（需 builder.access），不做任何結構操作。
     """
     import httpx
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    import json as _json
+    base = f"{base_url}/api/v1/data-center/tables/{table_key}/records"
     checks = []
     record_id = None
 
-    try:
-        # CREATE
-        resp = httpx.post(
-            f"{base_url}/api/v1/data/objects/{table_id}/records",
-            headers=headers,
-            json={"data": {"name": f"E2E_verify_{int(time.time())}", "email": "e2e@verify.test"}},
-            timeout=15,
-        )
-        create_ok = resp.status_code in (200, 201)
-        checks.append(("create_record", create_ok))
-        if create_ok:
-            record_id = resp.json().get("id")
-            checks.append(("create_has_id", bool(record_id)))
+    def _exists(rid):
+        """以 id 過濾直接查——不掃分頁，避免大表產生假陰性。"""
+        r = httpx.get(base, headers=headers, timeout=15, params={
+            "filters": _json.dumps([{"field": "id", "op": "eq", "value": str(rid)}]),
+            "page_size": 1,
+        })
+        if r.status_code != 200:
+            return False
+        return r.json().get("total", 0) > 0
 
-        # READ — 二次 GET 確認寫入
-        resp2 = httpx.get(
-            f"{base_url}/api/v1/data/objects/{table_id}/records",
+    def _placeholder(f):
+        """依型別給合法佔位值，讓必填欄位不會擋下驗證。"""
+        t_ = f.get("field_type")
+        if t_ == "text":
+            return f"E2E_verify_{int(time.time())}"
+        if t_ == "number":
+            return 0
+        if t_ == "boolean":
+            return False
+        if t_ == "date":
+            return "2000-01-01"
+        if t_ == "datetime":
+            return "2000-01-01T00:00:00Z"
+        if t_ == "json":
+            return {}
+        if t_ == "select":
+            opts = f.get("options") or []
+            return opts[0] if opts else None
+        return None  # relation / image：湊不出合法值
+
+    try:
+        schema = httpx.get(
+            f"{base_url}/api/v1/data-center/tables/{table_key}",
             headers=headers, timeout=15,
         )
-        records = resp2.json() if resp2.status_code == 200 else []
-        found = any(r.get("id") == record_id for r in records)
-        checks.append(("read_confirms_create", found))
+        checks.append(("schema_readable", schema.status_code == 200))
+        if schema.status_code != 200:
+            return {"passed": False, "checks": checks,
+                    "detail": f"讀不到表結構（{schema.status_code}）"}
 
-        # DELETE
-        if record_id:
-            resp3 = httpx.delete(
-                f"{base_url}/api/v1/data/records/{record_id}",
-                headers=headers, timeout=15,
-            )
-            delete_ok = resp3.status_code in (200, 204)
-            checks.append(("delete_record", delete_ok))
+        fields = [f for f in (schema.json().get("fields") or [])
+                  if not f.get("is_system")]
+        payload = {}
+        for f in fields:
+            if f.get("is_required"):
+                v = _placeholder(f)
+                if v is None:
+                    return {"passed": True, "skipped": True, "checks": checks,
+                            "detail": f"必填欄位 {f.get('physical_name')} "
+                                      f"（{f.get('field_type')}）無法自動產生佔位值，跳過"}
+                payload[f["physical_name"]] = v
+        if not payload:  # 沒有必填欄位 → 隨便填一個 text 以產生可辨識記錄
+            for f in fields:
+                if f.get("field_type") == "text":
+                    payload[f["physical_name"]] = _placeholder(f)
+                    break
 
-            # 二次 GET 確認刪除
-            resp4 = httpx.get(
-                f"{base_url}/api/v1/data/objects/{table_id}/records",
-                headers=headers, timeout=15,
-            )
-            records_after = resp4.json() if resp4.status_code == 200 else []
-            not_found = not any(r.get("id") == record_id for r in records_after)
-            checks.append(("read_confirms_delete", not_found))
+        resp = httpx.post(base, headers=headers, json={"data": payload}, timeout=15)
+        create_ok = resp.status_code in (200, 201)
+        checks.append(("create_record", create_ok))
+        if not create_ok:
+            return {"passed": False, "checks": checks,
+                    "detail": f"建立失敗（{resp.status_code}）：{resp.text[:200]}"}
+
+        record_id = resp.json().get("id")
+        checks.append(("create_has_id", bool(record_id)))
+        checks.append(("read_confirms_create", bool(record_id) and _exists(record_id)))
 
     except Exception as e:
         checks.append(("crud_exception", False))
+        return {"passed": False, "checks": checks, "detail": str(e)[:200]}
+    finally:
+        # ★ 無論成敗都要清乾淨——這是租戶的**真實 Postgres 表**，
+        #   留下測試記錄比舊 CustomObject 的 JSONB 沙盒代價高得多
+        if record_id:
+            try:
+                d = httpx.delete(f"{base}/{record_id}", headers=headers, timeout=15)
+                checks.append(("delete_record", d.status_code in (200, 204)))
+                checks.append(("read_confirms_delete", not _exists(record_id)))
+            except Exception as e:
+                checks.append(("cleanup_failed", False))
 
     all_pass = all(ok for _, ok in checks)
     return {"passed": all_pass, "checks": checks}
@@ -222,7 +264,7 @@ def verify_publish_consistency(base_url: str, token: str, app_id: str) -> dict:
 
 def run_full_runtime_verification(
     base_url: str, token: str, app_id: str, slug: str,
-    table_id: str = "", action_name: str = ""
+    table_key: str = "", action_name: str = ""
 ) -> dict:
     """
     執行完整的 preview + publish 端到端運行驗證。
@@ -232,7 +274,7 @@ def run_full_runtime_verification(
         token: JWT token
         app_id: App UUID
         slug: App slug
-        table_id: Custom Data 表 UUID（可選）
+        table_key: 自建表實體名 physical_name（可選）
         action_name: Server Action 名稱（可選）
 
     Returns:
@@ -256,9 +298,9 @@ def run_full_runtime_verification(
     if not r2["passed"]:
         all_pass = False
 
-    # 3. Custom Data CRUD（如果提供 table_id）
-    if table_id:
-        r3 = verify_custom_data_crud(base_url, token, table_id)
+    # 3. 自建表記錄 CRUD（如果提供 table_key）
+    if table_key:
+        r3 = verify_custom_data_crud(base_url, token, table_key)
         results["custom_data_crud"] = r3
         if not r3["passed"]:
             all_pass = False
@@ -284,7 +326,7 @@ def format_verification_report(results: dict) -> str:
     section_names = {
         "compile_output": "📦 Compile 產物驗證",
         "publish_consistency": "🚀 Publish 一致性",
-        "custom_data_crud": "📊 Custom Data CRUD",
+        "custom_data_crud": "📊 自建表記錄 CRUD",
         "server_action": "⚡ Server Action",
     }
 

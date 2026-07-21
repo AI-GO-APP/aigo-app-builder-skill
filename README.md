@@ -48,7 +48,7 @@ aigo-builder/
     ├── aigo_sync.py                  # 同步模組（差異比對、上傳）
     ├── aigo_compile.py               # 編譯模組（呼叫雲端編譯 API）
     ├── aigo_publish.py               # 發布模組（發布 App、狀態檢查）
-    ├── aigo_table.py                 # Custom Data 模組（表格 CRUD）
+    ├── aigo_data_center.py           # 資料中心自建表（租戶級：結構 + 記錄 CRUD）
     ├── aigo_e2e.py                   # E2E 整合流程
     └── run_e2e_tests.py              # 完整 E2E 測試腳本
 ```

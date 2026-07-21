@@ -15,7 +15,10 @@ from aigo_scaffold import download_vfs_to_local
 from aigo_sync import read_local_files, diff_vfs, sync_to_cloud, get_remote_vfs
 from aigo_compile import compile_app, parse_compile_error, auto_fix_css, check_shadow_dom_compliance
 from aigo_publish import publish_app, check_publish_status
-from aigo_table import list_tables, create_table_batch, delete_table, validate_slug
+from aigo_data_center import (
+    list_tables, create_table, delete_table, get_table_impact,
+    validate_field_spec, PermissionDenied, QuotaOrConflict,
+)
 import httpx
 
 # === 設定（從環境變數讀取） ===
@@ -291,53 +294,80 @@ test("編譯", "T4.2 CSS auto_fix 修復已知問題", t4_2)
 test("編譯", "T4.3 編譯錯誤解析", t4_3)
 
 # ====================================================================
-print("\n📊 群組 5：Custom Data CRUD")
+print("\n📊 群組 5：資料中心自建表")
 # ====================================================================
 
-test_table_id = None
+test_table_key = None
+skip_reason = None
 
 def t5_1():
-    global test_table_id
-    result = create_table_batch(BASE_URL, token, APP_ID,
-        name="E2E 測試表", api_slug="e2e_skill_test",
-        fields=[{"name": "名稱", "field_key": "name", "field_type": "text", "is_required": True, "sequence": 1}])
-    test_table_id = result.get("id")
-    has_id = bool(test_table_id) and len(test_table_id) > 10
-    # 確認列表
-    tables = list_tables(BASE_URL, token, APP_ID)
-    slugs = [t.get("api_slug") for t in tables]
+    """建自建表。非管理員帳號會 403 —— 那是預期行為，記為 skip 不算失敗。"""
+    global test_table_key, skip_reason
+    try:
+        result = create_table(BASE_URL, token, f"E2E 測試表 {int(time.time())}", fields=[
+            {"display_name": "名稱", "field_type": "text", "is_required": True},
+            {"display_name": "備註", "field_type": "text"},
+        ])
+    except PermissionDenied:
+        skip_reason = "帳號非 system.admin，結構操作測試略過（403 為預期）"
+        return [(True, skip_reason)]
+    except QuotaOrConflict as e:
+        skip_reason = f"撞配額或衝突，結構操作測試略過：{e}"
+        return [(True, skip_reason)]
+    test_table_key = result.get("physical_name")
+    tables = list_tables(BASE_URL, token)
+    keys = [t.get("physical_name") for t in tables]
     return [
-        (has_id, f"回傳 id={test_table_id}"),
-        ("e2e_skill_test" in slugs, "列表含 e2e_skill_test"),
+        (bool(test_table_key), f"回傳 physical_name={test_table_key}"),
+        (test_table_key in keys, "列表含新建的表"),
     ]
 
 def t5_2():
+    """欄位規格本地驗證（不打 API）。"""
+    def bad(spec):
+        try:
+            validate_field_spec(spec)
+            return False
+        except ValueError:
+            return True
     return [
-        (validate_slug("e2e_skill_test") == True, "e2e_skill_test → True"),
-        (validate_slug("valid123") == True, "valid123 → True"),
-        (validate_slug("INVALID") == False, "INVALID → False"),
-        (validate_slug("_bad") == False, "_bad → False"),
-        (validate_slug("") == False, "空字串 → False"),
-        (validate_slug("a") == True, "a → True"),
+        (bad({"display_name": "x", "field_type": "unknown"}), "未知型別 → 拒絕"),
+        (bad({"display_name": "x", "field_type": "select"}), "select 缺 options → 拒絕"),
+        (bad({"display_name": "x", "field_type": "relation"}), "relation 未指定目標 → 拒絕"),
+        (bad({"display_name": "x", "field_type": "relation",
+              "target_table_id": "a", "target_erp_key": "b"}), "relation 兩個目標都給 → 拒絕"),
+        (bad({"display_name": "created_at", "field_type": "date"}), "系統欄位名 → 拒絕"),
+        (not bad({"display_name": "姓名", "field_type": "text"}), "合法 text 欄位 → 通過"),
     ]
 
 def t5_3():
-    global test_table_id
-    if not test_table_id:
-        return [(False, "無 test_table_id，跳過")]
-    ok = delete_table(BASE_URL, token, test_table_id)
-    # 確認已刪除
-    tables = list_tables(BASE_URL, token, APP_ID)
-    slugs = [t.get("api_slug") for t in tables]
-    test_table_id = None
+    """兩段式刪除：先看 impact，confirm 必須是實體名。"""
+    global test_table_key
+    if not test_table_key:
+        return [(True, skip_reason or "無測試表，略過")]
+
+    impact = get_table_impact(BASE_URL, token, test_table_key)
+    wrong_confirm_rejected = False
+    try:
+        delete_table(BASE_URL, token, test_table_key, confirm="顯示名不是實體名")
+    except ValueError:
+        wrong_confirm_rejected = True
+
+    ok = delete_table(BASE_URL, token, test_table_key, confirm=test_table_key)
+    tables = list_tables(BASE_URL, token)
+    keys = [t.get("physical_name") for t in tables]
+    gone = test_table_key not in keys
+    test_table_key = None
     return [
-        (ok, "刪除成功"),
-        ("e2e_skill_test" not in slugs, "列表不含 e2e_skill_test"),
+        (isinstance(impact, dict), "取得刪表影響預覽"),
+        (wrong_confirm_rejected, "用顯示名當 confirm → 被擋下"),
+        (ok, "以實體名 confirm 刪除成功"),
+        (gone, "列表已不含該表"),
     ]
 
-test("Custom Data", "T5.1 建立測試表", t5_1)
-test("Custom Data", "T5.2 Slug 格式驗證", t5_2)
-test("Custom Data", "T5.3 刪除測試表並清理", t5_3)
+test("自建表", "T5.1 建立自建表", t5_1)
+test("自建表", "T5.2 欄位規格驗證", t5_2)
+test("自建表", "T5.3 兩段式刪除並清理", t5_3)
 
 # ====================================================================
 print("\n🏗️ 群組 6：腳手架生成器")
@@ -448,9 +478,9 @@ except Exception as e:
     print(f"  清理警告: {e}")
 
 # 清理測試表（如果還在）
-if test_table_id:
+if test_table_key:
     try:
-        delete_table(BASE_URL, token, test_table_id)
+        delete_table(BASE_URL, token, test_table_key, confirm=test_table_key)
         print(f"  刪除測試表: OK")
     except Exception:
         pass

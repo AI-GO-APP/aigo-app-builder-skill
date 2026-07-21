@@ -7,10 +7,11 @@
 - VFS（Virtual File System）：以 JSON `{"路徑": "內容"}` 儲存原始碼
 - esbuild 編譯器：React TSX → JS bundle
 - Runtime 沙箱：在 Shadow DOM 隔離環境中執行
-- 兩種模式（access_mode）：Internal（組織內部）/ External（對外客戶）
-- 匿名存取：任何 App 皆可啟用，透過 /pub/* 端點 + allow_anonymous_access 旗標（見 §15）
+- 三種模式（access_mode）：`internal`（組織內部）/ `external`（對外客戶）/ `self_built`（第三方自建應用，走 API Key 存取 Proxy）
+- 匿名存取：功能旗標（`allow_anonymous_access` + `is_public_readable`），走 /pub/* 端點（見 §15）。**`internal` app 不可啟用**（400），僅 `external` / `self_built` 可以
 - 語言選擇：TypeScript（前端）+ Python（後端），為 AI Coding 最佳化的精選組合（詳見 §21）
 - 資料架構：統一走 API 存取，不直連資料庫——避免結構混亂（詳見 §21）
+- 事件觸發：Webhook（外部系統打進來）與 App 排程（平台時鐘）——見 `event-triggers.md`
 
 ## 2. 認證與連線
 
@@ -29,10 +30,10 @@ package.json
 src/main.tsx          ★ 入口點
 src/App.tsx           路由 + Layout
 src/App.css           全域樣式
-src/api.ts            [SDK] Custom Data CRUD
+src/api.ts            [SDK] 自建表 CRUD（+ legacy CustomObject 方法）
 src/db.ts             [SDK] DB Proxy
 src/action.ts         [SDK] Server Action
-src/data.json         [INJ] Custom Table 定義
+src/data.json         [INJ] legacy CustomObject 定義（已退場，見 CONTEXT.md）
 src/db.json           [INJ] Data Reference
 src/actions.json      [INJ] Action 清單
 src/pages/            頁面元件
@@ -65,11 +66,16 @@ External 模組（不需安裝）：react, react-dom, lucide-react, react-router
 
 ## 6. 內建 SDK
 
-### Custom Data (api.ts)
+### 自建表 (api.ts)
 
 ```typescript
-import { listRecords, submitRecord, updateRecord, deleteRecord } from "../api";
+import { listTables, queryTable, insertRow, updateRow, deleteRow } from "../api";
 ```
+
+完整用法見 `data-center.md` §7。
+
+> 同一支 `api.ts` 還有 `listRecords` / `submitRecord` / `updateRecord` / `deleteRecord`——
+> 那是 **legacy CustomObject** 的雙軌保留，存量 app 可繼續用，**新開發不要用**。
 
 ### DB Proxy (db.ts)
 
@@ -77,7 +83,9 @@ import { listRecords, submitRecord, updateRecord, deleteRecord } from "../api";
 import { query, queryAdvanced, insert, update, remove } from "../db";
 ```
 
-⚠️ `update()` 和 `insert()` 需用 `{"data": {...}}` 包裝（SDK bug）。
+⚠️ **前端 `db.ts` 的** `update()` / `insert()` 需用 `{"data": {...}}` 包裝（SDK bug）。
+> 這只適用前端。**Server Action 的 `ctx.db.insert(table, data)` 收扁平 dict**，
+> 包成 `{"data": ...}` 會被欄位過濾濾光並回 400。兩者同名不同軌，別搞混。
 
 ### Server Action (action.ts)
 
@@ -90,14 +98,19 @@ const { data, file } = await runAction("name", params);
 
 ```python
 def execute(ctx):
-    ctx.params          # 前端參數
-    ctx.db.query(t)     # 查詢
-    ctx.db.insert(t, d) # 新增
-    ctx.http.call(s, e) # 外部 API
-    ctx.secrets.get(k)  # 金鑰
-    ctx.response.json(d)# 回應
-    ctx.csv.export(r)   # CSV
+    ctx.params              # 前端參數（webhook / cron 事件也走這裡）
+    ctx.db.query(t)         # Data Reference 查詢
+    ctx.db.insert(t, d)     # Data Reference 新增
+    ctx.db.list_tables()    # 自建表清單
+    ctx.db.query_table(t,o) # 自建表查詢（回傳分頁信封）
+    ctx.db.insert_row(t, d) # 自建表新增
+    ctx.http.call(s, e)     # 外部 API
+    ctx.secrets.get(k)      # 金鑰
+    ctx.response.json(d)    # 回應
+    ctx.csv.export(r)       # CSV
 ```
+
+Action 也可由 Webhook 或 App 排程觸發——**兩者都要求 action 冪等**，見 `event-triggers.md`。
 
 
 ## 8. 發布
@@ -127,16 +140,15 @@ JS API 限制：confirm()→false, alert()→不顯示, prompt()→null。
 - 禁止字串拼接或模板佔位符
 - 禁止 `// ... 省略` 之類的佔位
 
-## 11. Custom Table API
+## 11. 自建表 API
 
-```http
-POST /api/v1/data/objects/batch
-{"app_id": "...", "name": "...", "api_slug": "...", "fields": [...]}
-```
+自建表是**租戶級**的真實 Postgres 表，端點前綴 `/api/v1/data-center/`。
+建表需 `system.admin`，記錄 CRUD 需 `builder.access`。
 
-欄位類型：text, number, date, relation。
-api_slug：`^[a-z0-9]([a-z0-9_]*[a-z0-9])?$`。
-限制：20 表/App、50 欄/表。
+**完整規格見 `data-center.md`**——型別、配額、兩段式刪除、SDK 用法都在那裡。
+
+> `POST /api/v1/data/objects/batch` 是**已退場的 CustomObject**，不是自建表。
+> 見 `CONTEXT.md` 的術語區分。
 
 ## 12. Storage API
 
@@ -249,23 +261,42 @@ const myRecords = allRecords.filter(
 }
 ```
 
-## 19. Data Reference vs Custom Table 選擇指引
+## 19. Data Reference vs 自建表 選擇指引
+
+兩者是**並列的雙軌**，依資料性質分流，沒有絕對優先序。
 
 ### 決策流程
 
-1. 用 Refs API 查詢所有可用 SaaS 表（見 §20），確認是否有結構相似的表
-2. 用 Refs API 查詢該表欄位，確認是否有 `custom_data`（JSONB）欄位可擴充
-3. 確認權限（read/create/update/delete）是否滿足需求
-4. 在 AI GO Builder 後台將選定的表加入 Data Reference，使其出現在 `db.json`
+1. **先盤點兩邊**：
+   - `GET /api/v1/data-center/tables` — 租戶既有自建表（★ 不可跳過）
+   - `GET /api/v1/refs/available-tables` — 可引用的 SaaS 表（見 §20）
+2. 既有自建表語意相同 → **直接重用**，不要新建
+3. 對候選 SaaS 表查欄位（§20.2），確認有無 `custom_data` JSONB 可擴充、權限是否足夠
+4. 依下表判定走哪一軌
+5. 走 Data Reference → 把表加入引用，使其出現在 `db.json`。
+   可用 API `POST /api/v1/refs/apps/{app_id}`（`builder.access`，
+   body `{table_name, columns[], permissions[]}`），或引導用戶到 Builder 後台操作
+   走自建表 → 產出建表規格交用戶確認，再 `POST /api/v1/data-center/tables`
 
 ### 選擇矩陣
 
 | 條件 | 選擇 | 說明 |
 |------|------|------|
-| SaaS 表有適合的主表結構 + JSONB 欄位 | **Data Reference** | 用 `custom_data` 存放 App 特有資料 |
-| SaaS 表結構部分適用 | **Data Reference + Custom Table** | 主資料用 SaaS 表，輔助資料用 Custom Table |
-| 需要完全自訂的獨立資料結構 | **Custom Table** | 最後手段 |
-| 需要與其他 SaaS 功能整合 | **Data Reference**（優先） | 與看板、專案等功能共用資料 |
+| 要與 ERP／SaaS 功能連動（看板、專案、發票、客戶） | **Data Reference** | 與平台功能共用同一份資料 |
+| 租戶已有語意相同的自建表 | **重用該自建表** | 自建表跨 app 共用，重複建 = 資料分裂 |
+| 租戶自有的新業務實體（外部系統遷入的主力） | **自建表** | 真實資料表、真外鍵、200 張配額 |
+| 需要真正的關聯完整性（刪除被引用列要被擋） | **自建表** | relation → 自建表會建真 FK |
+| 臨時、單 app 私有、不值得建表 | **SaaS 表 `custom_data`** | 免建表成本 |
+
+### 兩軌的關鍵差異
+
+| | Data Reference | 自建表 |
+|---|---|---|
+| 歸屬 | 引用平台既有表 | 租戶自有的新表 |
+| 跨 app | 共用，靠 `app_domain` 區分來源 | 共用，**不需要也不該用** `app_domain` |
+| 外鍵 | 無原生 FK | relation → 自建表**有真 FK** |
+| 建立方式 | Builder 後台加入引用 | `POST /data-center/tables`（需 `system.admin`） |
+| 出現在 VFS | `src/db.json` | **不出現**（租戶級，靠 API 盤點） |
 
 ### SaaS 表常見結構
 
@@ -358,7 +389,7 @@ Phase 1.5 實作計畫時：
 2. 對每個候選表 GET /api/v1/refs/tables/{name}/columns
    → 確認欄位結構、是否有 custom_data (JSONB)
 
-3. 決定資料架構：哪些需求用 SaaS 表、哪些用 Custom Table
+3. 決定資料架構：哪些需求用 SaaS 表、哪些用自建表（見 §19）
 
 4. 在 AI GO Builder 後台將選定的 SaaS 表加入 Data Reference
    → 表即出現在 VFS 的 db.json 中
@@ -385,7 +416,7 @@ TypeScript（前端）和 Python（後端 Server Action）是 AI GO 精選的開
 
 - **避免結構混亂**：直接連線資料庫且 schema 可疊加時，非技術的 AI Coder 容易重複建立類似的表或欄位，造成資料結構混亂
 - **通用結構先行**：AI GO 預先定義了中小企業通用的資料庫結構（SaaS 表），涵蓋專案、客戶、銷售、會計等常見業務場景
-- **擴充彈性**：同時保有 Custom Table 的自訂擴充能力，以及 SaaS 表的 `custom_data`（JSONB）欄位
+- **擴充彈性**：同時保有自建表的自訂擴充能力（租戶級真實資料表），以及 SaaS 表的 `custom_data`（JSONB）欄位
 - **安全與一致性**：中間統一走 API 與反向代理，確保多租戶隔離、權限控制、資料驗證等安全機制
 
 ### 現有系統遷移
@@ -395,7 +426,7 @@ TypeScript（前端）和 Python（後端 Server Action）是 AI GO 精選的開
 1. **解釋語言選擇理由**：說明上述 TypeScript + Python 的精選特性
 2. **建議建立新專案重構**：在 AI GO 上建立全新 Custom App 專案，以 AI GO 架構重新設計
 3. **原專案不更動**：用戶的本地原始專案保持不變，AI GO 專案獨立開發
-4. **業務邏輯遷移**：引導用戶將現有系統的業務邏輯和資料結構，對應到 AI GO 的 SaaS 表 + Custom Table 架構
+4. **業務邏輯遷移**：引導用戶將現有系統的業務邏輯和資料結構，對應到 AI GO 的 SaaS 表 + 自建表雙軌架構
 
 ## 22. 外部 Schema 映射指引
 
@@ -405,11 +436,11 @@ TypeScript（前端）和 Python（後端 Server Action）是 AI GO 精選的開
 
 ```
 1. 列出外部系統的所有資料表與欄位
-2. 用 Refs API 查詢 AI GO 可用 SaaS 表（見 §20）
+2. 盤點兩邊：GET /data-center/tables（既有自建表）＋ Refs API（可用 SaaS 表，見 §20）
 3. 逐表比對：
-   外部欄位 → SaaS 表原生欄位？ → 直接對應
-   外部欄位 → 無原生對應？       → custom_data JSONB 擴充
-   整張表都不適用 SaaS 表？      → Custom Table
+   租戶已有語意相同的自建表？    → 重用
+   要與 ERP/SaaS 功能連動？      → SaaS 表原生欄位；無原生對應 → custom_data JSONB
+   租戶自有的新業務實體？        → 自建表（遷入案例主力）
 4. 處理外鍵 / 關聯
 5. 產出映射表（模板見 resources/migration_mapping_template.md）
 ```
@@ -422,7 +453,7 @@ TypeScript（前端）和 Python（後端 Server Action）是 AI GO 精選的開
 |---------|------|------|
 | 指向同一群實體 + 未來需統一檢視 | **合併** | 進同一張 SaaS 表，各 App 用 `app_domain` 標籤區分來源 |
 | 指向同一群實體 + 各自獨立運作 | **合併** | 但各 App 只過濾自己 `app_domain` 的資料 |
-| 指向不同群實體（如不同市場的客戶） | **分離** | 各自建 Custom Table 或用不同 `app_domain` 隔離 |
+| 指向不同群實體（如不同市場的客戶） | **分離** | 各自建自建表，或（走 SaaS 表時）用不同 `app_domain` 隔離 |
 | 欄位結構差異過大（>50% 不同） | **分離** | 硬塞進同一張表會造成 custom_data 過於複雜 |
 
 決策樹：
@@ -430,7 +461,7 @@ TypeScript（前端）和 Python（後端 Server Action）是 AI GO 精選的開
 ```
 多個外部系統都有語意相同的表
   ├─ 是同一群實體？
-  │   ├─ 是 → 合併進同一張 SaaS / Custom Table
+  │   ├─ 是 → 合併進同一張 SaaS 表 / 自建表
   │   │       ├─ 欄位聯集 → 共有欄位用原生欄位，各自特有欄位放 custom_data
   │   │       └─ 去重策略 → 以 email / 名稱為 key，衝突時由用戶決定保留哪邊
   │   └─ 否 → 分離
@@ -441,17 +472,23 @@ TypeScript（前端）和 Python（後端 Server Action）是 AI GO 精選的開
 
 ### 22.3 外鍵 / 關聯處理
 
-AI GO 的 SaaS 表和 Custom Table 沒有原生外鍵約束。外部 DB 的 FK 關係需要轉換：
+外部 DB 的 FK 關係要依「兩端各落在哪一軌」決定轉換方式：
 
 | 外部 FK 類型 | AI GO 處理方式 |
 |-------------|---------------|
-| `tasks.project_id → projects.id` | Custom Table 中建立 `project_id`（relation 型別）欄位；或 SaaS 表中存入 `custom_data.project_id` |
-| `orders.customer_id → customers.id` | 若兩表都用 SaaS 表，可直接用 SaaS 表的 `customer_id` 欄位 |
-| 多對多（junction table） | 轉為 Custom Table 存放關聯，或在 `custom_data` 中存 ID 陣列 |
+| `tasks.project_id → projects.id`（兩表都遷自建表） | 自建表的 `relation` 欄位指向自建表 → **建真正的資料庫外鍵**，刪除被引用列會被 DB 擋下（409） |
+| 自建表 → ERP／SaaS 表 | `relation` 指向 ERP 表 = **軟關聯不建 FK**（跨 schema），只在寫入時驗證目標存在 |
+| `orders.customer_id → customers.id`（兩表都用 SaaS 表） | 直接用 SaaS 表的 `customer_id` 欄位；無原生 FK 約束 |
+| 多對多（junction table） | 建一張自建表存放關聯（兩個 relation 欄位），或在 `custom_data` 存 ID 陣列 |
 
-> **重要**：參照完整性需由前端 / Server Action 程式碼維護，AI GO 不會自動做 cascading delete 等操作。
+> **重要**：只有「自建表 → 自建表」的 relation 有真 FK。其餘情況（SaaS 表之間、
+> 自建表 → ERP 表）的參照完整性需由 Server Action / 前端程式碼維護，
+> AI GO 不會自動做 cascading delete。
 
 ### 22.4 多系統遷入時的 custom_data 命名空間
+
+> **僅適用 Data Reference 那一軌。** 自建表有自己的實體欄位，不需要命名空間前綴，
+> 也不該帶 `app_domain`（見 `CONTEXT.md`）。
 
 當多個 App 共用同一張 SaaS 表時，建議在 `custom_data` 中使用 `app_domain` 作為命名空間前綴：
 
@@ -494,24 +531,31 @@ AI GO 的 SaaS 表和 Custom Table 沒有原生外鍵約束。外部 DB 的 FK �
 
 ```python
 def execute(ctx):
-    """批次匯入外部資料到 SaaS 表或 Custom Table"""
+    """批次匯入外部資料到 SaaS 表（Data Reference）或自建表"""
     records = ctx.params.get("records", [])
     table = ctx.params.get("table", "")
+    target = ctx.params.get("target", "saas")      # "saas" | "custom_table"
     app_domain = ctx.params.get("app_domain", "")
-    
+
     results = {"success": 0, "failed": 0, "errors": [], "id_mapping": {}}
-    
+
     for record in records:
         try:
-            # 注入 app_domain 標籤（SaaS 表適用）
-            if app_domain:
+            # app_domain 只標在 SaaS 表；自建表不需要也不該帶
+            if target == "saas" and app_domain:
                 record.setdefault("custom_data", {})
                 record["custom_data"]["app_domain"] = app_domain
-            
+
             # 記住外部 ID 用於後續關聯映射
             old_id = record.pop("_external_id", None)
-            
-            result = ctx.db.insert(table, {"data": record})
+
+            if target == "custom_table":
+                result = ctx.db.insert_row(table, record)
+            else:
+                # ctx.db.insert 收**扁平 dict**——不要包成 {"data": ...}，
+                # 那會被欄位過濾濾光並回 400「無有效欄位資料」。
+                # 需要 {"data": ...} 包裝的是**前端 db.ts**，不是 ctx.db。
+                result = ctx.db.insert(table, record)
             results["success"] += 1
             
             if old_id and result.get("id"):
@@ -529,7 +573,7 @@ def execute(ctx):
 
 1. **匯入主表**，記錄 `{外部 old_id → AI GO new_uuid}` 映射
 2. **匯入子表**時，用映射表替換 FK 欄位的值
-3. 映射表可存在 Server Action 的回傳結果中，或暫存為 Custom Table
+3. 映射表可存在 Server Action 的回傳結果中，或暫存為一張自建表
 
 ```
 遷移順序（有 FK 時）：
@@ -554,7 +598,7 @@ def execute(ctx):
 ✓ 總筆數比對：外部系統 N 筆 → AI GO N 筆
 ✓ 關鍵欄位抽驗：隨機抽 5~10 筆，比對名稱/金額/日期等關鍵欄位
 ✓ 關聯完整性：子表的 FK 欄位都能對應到主表的有效記錄
-✓ app_domain 標籤：所有 SaaS 表記錄都帶有正確的 app_domain
+✓ app_domain 標籤：所有 SaaS 表記錄都帶有正確的 app_domain（自建表不檢查此項）
 ✓ custom_data 結構：JSONB 欄位的 key 符合映射表定義
 ✓ 無殘留測試資料：遷移過程中的測試記錄已清除
 ```

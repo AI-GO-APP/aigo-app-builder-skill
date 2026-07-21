@@ -43,33 +43,35 @@ def _test_compile(base_url: str, token: str, slug: str) -> dict:
 
 
 def _test_custom_data(base_url: str, token: str, app_id: str) -> dict:
-    """測試 Custom Data CRUD"""
-    import httpx
-    start = time.time()
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    obj_id = None
+    """測試資料中心自建表：建表 → 兩段式刪除清理。
+
+    結構操作需 system.admin；非管理員帳號回 403，記為 SKIP 而非 FAIL
+    ——那是平台刻意的授權界線，不是這個 app 的問題。
+    """
+    import time as _t
+    from aigo_data_center import create_table, delete_table, PermissionDenied
+    start = _t.time()
+    key = None
     try:
-        # 建表
-        resp = httpx.post(f"{base_url}/api/v1/data/objects/batch", headers=headers, json={
-            "app_id": app_id, "name": "E2E 測試表", "api_slug": "e2e_test",
-            "fields": [{"name": "名稱", "field_key": "name", "field_type": "text",
-                        "is_required": True, "sequence": 1}]
-        }, timeout=30)
-        resp.raise_for_status()
-        obj_id = resp.json()["id"]
-        # 清理
-        httpx.delete(f"{base_url}/api/v1/data/objects/{obj_id}", headers=headers, timeout=30)
-        return {"name": "Custom Data CRUD", "status": "PASS",
-                "duration": round(time.time() - start, 2), "detail": ""}
+        result = create_table(base_url, token, f"E2E 測試表 {int(_t.time())}", fields=[
+            {"display_name": "名稱", "field_type": "text", "is_required": True},
+        ])
+        key = result.get("physical_name")
+        delete_table(base_url, token, key, confirm=key)
+        return {"name": "自建表 CRUD", "status": "PASS",
+                "duration": round(_t.time() - start, 2), "detail": ""}
+    except PermissionDenied:
+        return {"name": "自建表 CRUD", "status": "SKIP",
+                "duration": round(_t.time() - start, 2),
+                "detail": "帳號非 system.admin（結構操作受限，屬預期）"}
     except Exception as e:
-        if obj_id:
+        if key:
             try:
-                httpx.delete(f"{base_url}/api/v1/data/objects/{obj_id}",
-                             headers=headers, timeout=10)
+                delete_table(base_url, token, key, confirm=key)
             except Exception:
                 pass
-        return {"name": "Custom Data CRUD", "status": "FAIL",
-                "duration": round(time.time() - start, 2), "detail": str(e)[:100]}
+        return {"name": "自建表 CRUD", "status": "FAIL",
+                "duration": round(_t.time() - start, 2), "detail": str(e)[:100]}
 
 
 def _test_publish(base_url: str, token: str, app_id: str) -> dict:

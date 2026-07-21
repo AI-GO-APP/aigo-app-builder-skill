@@ -17,9 +17,11 @@ AI GO Custom App 採用 **TypeScript（前端）+ Python（後端）** 的精選
 開發可靠的公司內部系統。
 
 資料存取統一走 API，不直連資料庫——避免非技術 AI Coder 重複建立類似的表或欄位。
-AI GO 預先定義了中小企業通用的資料庫結構（SaaS 表），同時保有 Custom Table 擴充彈性。
+AI GO 預先定義了中小企業通用的資料庫結構（SaaS 表），同時保有**自建表**的擴充彈性。
 
 > 詳見 `references/custom-app-dev-guide.md` §21 架構設計理念。
+> **術語先讀 `CONTEXT.md`**——「自建表 / CustomObject / Data Reference / app_domain」
+> 四個詞容易混用，混了就會寫錯 code。
 
 ## Phase 0：Review 現有 Code（★ 強制步驟）
 
@@ -37,17 +39,33 @@ AI GO 預先定義了中小企業通用的資料庫結構（SaaS 表），同時
    - 標記 Runtime 注入檔 `[INJ]`（不可修改：data.json, db.json, actions.json）
    - 解析 App.tsx 路由結構
    - 解析 _manifest.json 頁面清單
-   - 解析 data.json Custom Table 定義
+   - **Legacy 偵測**：`data.json` 有內容、或 code 用 `listRecords`／`submitRecord`／
+     `ctx.db.query_object` → 標記為 legacy CustomObject（見 `CONTEXT.md`）。
+     存量功能維持原樣即可運作，**但不要往上加東西**，新資料需求一律開自建表
+   - **解析 actions/manifest.json 的 webhook 宣告**：列出所有 `"webhook": true` 的 action
+     與 `receive_webhook`，這些是對外端點
    - **解析 db.json Data Reference 定義**（★ 重要）：
      - 列出所有 SaaS 表名稱和欄位結構
      - 標記哪些表有 `custom_data`（JSONB）欄位
      - 列出每張表的權限（read/create/update/delete）
      - 統計現有資料筆數和 `app_domain` 分布
-   - 解析 actions/manifest.json
    - 檢查 App.css Shadow DOM 相容性
-6. **確認已完全理解現有結構後，才可進入開發**
+6. **盤點租戶既有自建表**（★ 強制，不可跳過）
+   - `GET /api/v1/data-center/tables`（`aigo_data_center.py` 的 `list_tables()`）
+   - 自建表是**租戶級**資源、**不在 VFS 裡**——同租戶的其他 app 建的表，這個 app 也看得到、用得到
+   - 列出每張表的實體名、顯示名、欄位結構
+   - 這一步的目的是**避免重複建表**：兩個 app 各建一張「客戶」表 = 資料分裂成兩份
+7. **盤點既有排程**（若 app 已上線）
+   - `GET /api/v1/app-crons`（`aigo_review.py` 的 `fetch_app_crons()`），
+     確認有哪些排程綁在本 app 的 action 上
+   - republish 或改動 action 名稱前必須知道這些，否則會把排程觸發到自動暫停
+8. **確認已完全理解現有結構後，才可進入開發**
 
-可使用 `scripts/aigo_review.py` 的 `review_app()` 和 `format_review_report()` 輔助。
+`scripts/aigo_review.py` 的 `review_app()` 一次做完 VFS 分析 + 步驟 6／7 的租戶級盤點，
+`format_review_report(app_info, analysis, custom_tables, crons)` 輸出完整報告。
+
+> ⚠️ `fetch_custom_tables()` 取不到時回**空清單**（權限不足／端點異常）。
+> 空清單不等於「租戶沒有表、可以放心建新的」——要先確認是真的沒有。
 
 ## Phase 1：環境設定
 
@@ -79,33 +97,12 @@ AI GO 預先定義了中小企業通用的資料庫結構（SaaS 表），同時
 
 ## Phase 1.25：多系統遷入盤點（條件觸發）
 
-> **觸發條件**：用戶明確表示有 **2 個以上外部系統**（各自帶 Supabase / Google Sheet / MySQL 等 DB）要遷入 AI GO。
-> 若僅遷入 1 個系統或純新建 App，跳過此步驟直接進入 Phase 1.5。
+> **觸發條件**：用戶有 **2 個以上外部系統**（各自帶 Supabase / Google Sheet / MySQL
+> 等 DB）要遷入 AI GO。僅遷入 1 個系統或純新建 App → 跳過，直接進 Phase 1.5。
 
-### 目的
-
-在任何單一 App 開始 Phase 1.5 之前，先建立**全局視圖**，避免各 App 各自為政導致資料架構混亂。
-
-### 盤點流程
-
-1. **外部系統清單**
-   - 列出所有要遷入的系統名稱、用途、技術棧、DB 類型
-   - 每個系統的核心資料表 / Sheet 清單與主要欄位
-
-2. **跨系統資料表交叉比對**
-   - 找出語意相同的表（如都有「客戶」「專案」「訂單」）
-   - 判斷是否指向同一群實體（同一批客戶？不同市場的客戶？）
-   - 決定合併（進同一張 AI GO 表）或分離（各自獨立表）
-   - 詳細的決策框架見 `references/custom-app-dev-guide.md` §22
-
-3. **AI GO App 規劃**
-   - 決定做成幾個 AI GO App
-   - 每個 App 的 `app_domain` 初步命名（避免碰撞）
-   - 確定遷入順序：主資料（客戶、產品）先於交易資料（訂單、案件），無依賴者先行
-
-4. **產出：遷入全景表**
-   - 格式：`| 外部系統 | 對應 AI GO App | app_domain | 遷入順序 | 語意重疊的表 |`
-   - 此表在後續各 App 的 Phase 1.5 中持續參照
+> 觸發時 → 讀 `references/migration-workflow.md` §1。目的是在任何單一 App 開始
+> Phase 1.5 之前建立**全局視圖**，避免各 App 各自為政導致資料架構混亂；
+> 產出的「遷入全景表」會在後續各 App 的 Phase 1.5 持續參照。
 
 ## Phase 1.5：實作計畫（★ 強制步驟）
 
@@ -124,13 +121,16 @@ AI GO 預先定義了中小企業通用的資料庫結構（SaaS 表），同時
    - 例如：「客戶管理」和「財務報表」應為 2 個獨立 App
    - 每個 App 的 `app_domain` 標籤建議值
 
-3. **資料架構設計**（★ 必須遵循 Data Reference 優先策略，見 Phase 3 規則 18）
-   - 先呼叫 `GET /api/v1/refs/available-tables` 取得所有可用 SaaS 表清單
-   - 對候選表呼叫 `GET /api/v1/refs/tables/{name}/columns` 查看欄位結構
-   - 列出所有需要的資料表
-   - 逐表說明：使用現有 SaaS 表（db.json）還是建立 Custom Table（data.json）
-   - 每個使用 SaaS 表的場景，說明如何利用 `custom_data`（JSONB）欄位擴充
-   - 若全部使用 Custom Table，需明確說明為何 SaaS 表不適用
+3. **資料架構設計**（★ 必須遵循雙軌分流策略，見 Phase 3 規則 18）
+   - **盤點兩邊**（順序不可省）：
+     - `GET /api/v1/data-center/tables` — 租戶既有自建表（Phase 0 已做，此處覆核）
+     - `GET /api/v1/refs/available-tables` — 可引用的 SaaS 表清單
+     - 對候選 SaaS 表呼叫 `GET /api/v1/refs/tables/{name}/columns` 查欄位結構
+   - 列出所有需要的資料表，逐表判定走哪一軌（判定標準見規則 18）
+   - **重用優先於新建**：既有自建表語意相同就重用，不要新建
+   - 走 Data Reference 的表：說明如何用 `custom_data` JSONB 擴充、`app_domain` 標籤值
+   - 走自建表且需要新建的：產出**建表規格表**
+     `| 表顯示名 | 欄位顯示名 | 型別 | 必填 | 唯一 | relation 目標 |`
    - 若決定使用的 SaaS 表尚未在 db.json 中，引導用戶到 Builder 後台加入 Data Reference
 
 4. **頁面架構**
@@ -138,36 +138,25 @@ AI GO 預先定義了中小企業通用的資料庫結構（SaaS 表），同時
    - 主要頁面和功能
    - Server Action 需求
 
+4.5. **事件觸發需求**（若適用）
+   - **Webhook**：列出要對外開放的端點
+     `| hook 名稱（= action 名） | 事件來源 | 冪等 key 來源 | 驗簽方式 |`
+   - **App 排程**：列出排程需求
+     `| 排程名稱 | 觸發哪個 action | 頻率 | 時區 | 固定 params |`
+     - **同時確認 tier 放不放得下**——最小間隔與條數上限依付費檔分層，
+       超限是 400 不是靜默截斷。數值見 `references/event-triggers.md` §2.4
+   - 兩者都要在計畫中明寫「此 action 的冪等策略」——見規則 20
+   - 詳見 `references/event-triggers.md`
+
 5. **app_domain 標籤設計**
    - 確定此 App 的 `app_domain` 值（snake_case，如 `patent_os`、`crm_leads`）
    - 說明標籤用途：所有寫入 SaaS 表的資料都會帶上此標籤
 
 6. **現有系統遷移評估**（若適用）
 
-   **a. 語言與架構評估**
-   - 若現有系統不是 TypeScript + Python：
-     - **務必解釋**為什麼 AI GO 選擇 TypeScript + Python（見設計理念 / §21）
-     - **建議用戶建立新的 AI GO 專案來重構**，而非嘗試直接移植原始碼
-     - **原自身本地專案不更動**，AI GO 專案獨立開發
-   - 若已是 TypeScript + Python，可評估程式碼遷移可行性
-
-   **b. 外部 Schema → AI GO 架構映射**（★ 必要）
-   - 列出外部系統所有資料表 / Sheet 與其欄位結構
-   - 逐表對照 AI GO SaaS 表（先跑 Phase 1.5 第 3 點的 Refs API）：
-     - 可直接對應的欄位 → SaaS 表原生欄位
-     - 無原生對應的欄位 → `custom_data` JSONB 擴充
-     - 完全不適用 SaaS 表的資料 → Custom Table
-   - 處理外部表之間的外鍵 / 關聯（AI GO 需用 ID 欄位 + 程式邏輯維護參照完整性）
-   - 產出「外部 Schema ↔ AI GO 映射表」（模板見 `resources/migration_mapping_template.md`）
-   - 若有 Phase 1.25 的全景表，映射須與全景表的合併 / 分離決策一致
-   - 詳見 `references/custom-app-dev-guide.md` §22
-
-   **c. 資料遷移計畫**（★ 若需遷入歷史資料）
-   - 遷移範圍：全量 / 部分 / 僅結構不帶資料
-   - 遷移方式：Server Action 批次匯入 / API 逐筆寫入
-   - ID 體系轉換：外部自增 ID / Sheet 行號 → AI GO UUID 的對應方案
-   - 遷移後驗證：筆數比對、關鍵欄位抽驗
-   - 詳見 `references/custom-app-dev-guide.md` §23
+   > 用戶有現存系統（Supabase / Google Sheet / MySQL / 既有程式碼）要遷入
+   > → 先讀 `references/migration-workflow.md` §2，那裡有語言架構評估、
+   > Schema 映射與資料遷移計畫的完整流程。純新建 App 跳過本項。
 
 ### 計畫閘門
 
@@ -205,22 +194,42 @@ AI GO 預先定義了中小企業通用的資料庫結構（SaaS 表），同時
 9. **SDK 不可修改**：api.ts, db.ts, action.ts, data.json, db.json, actions.json
 10. **Server-Side Actions**：Python，放在 `actions/` 目錄，定義 `execute(ctx)` 函式
 11. **Shadow DOM 限制**：`confirm()` / `alert()` / `prompt()` 不可用 → 改用 React state 或 react-hot-toast
-12. **db.update() Bug**：需用 `{"data": {...}}` 包裝 payload（直接 fetch，不走 SDK）
-13. **db.insert() Bug**：同上，需用 `{"data": {...}}` 包裝
+12. **前端 `db.ts` 的 db.update() Bug**：需用 `{"data": {...}}` 包裝 payload（直接 fetch，不走 SDK）
+13. **前端 `db.ts` 的 db.insert() Bug**：同上，需用 `{"data": {...}}` 包裝
+    - ⚠️ **只適用前端**。Server Action 的 `ctx.db.insert(table, data)` 收**扁平 dict**，
+      包裝反而會被濾光並回 400。自建表的 `insert_row` / `update_row` 同樣收扁平 dict
 14. **VFS 限制**：最多 200 檔案、單檔 ≤ 1MB、編譯超時 30 秒
 15. **完整程式碼原則**：每次更新 VFS 檔案必須提供 100% 完整內容，禁止 `// ...省略` 佔位符
 16. **不支援動態 import**：`import()` 語法不支援（lazy loading 除外，esbuild 支援 code splitting）
 17. **不支援 Node.js 原生模組**：fs, path, crypto 等無法使用
-18. **Data Reference 優先策略**（★ 強制）
-    - 所有資料需求必須**優先查看 db.json 中的 SaaS 表**是否已有合適的表
-    - SaaS 表通常包含 `custom_data`（JSONB）欄位，可存放任意結構化擴充資料
-    - **只有確認所有 SaaS 表都無法滿足需求時**，才可使用 Custom Table（data.json）
-    - 決策優先順序：
-      1. 使用現有 SaaS 表 + `custom_data` JSONB 欄位
-      2. 使用現有 SaaS 表 + 新增 Custom Table 補充
-      3. 僅使用 Custom Table（最後手段）
-19. **app_domain 標籤規範**（★ 強制）
-    - 所有寫入 SaaS 表（Data Reference）的資料，都必須在 `custom_data` JSONB 中包含 `app_domain` 欄位
+18. **資料承載體：雙軌分流**（★ 強制）
+
+    資料存在哪裡，依**資料的性質**決定，不是依「哪個比較方便」：
+
+    | 資料性質 | 走哪一軌 | 理由 |
+    |---------|---------|------|
+    | 要與 ERP／SaaS 既有功能連動（看板、專案、發票、客戶…） | **Data Reference** + `custom_data` + `app_domain` | 與平台功能共用同一份資料 |
+    | 租戶自有的新業務實體（外部系統遷入的表最常見） | **自建表** | 租戶級真實資料表，跨 app 共用 |
+    | 臨時、單一 app 私有、不值得建表 | SaaS 表的 `custom_data` JSONB | 免建表成本 |
+
+    - **自建表不是「最後手段」**——它是租戶級的真實 Postgres 表，200 張配額（付費檔），
+      是遷入案例的主力承載體。
+    - **建表前必須先 `GET /api/v1/data-center/tables` 盤點**（Phase 0 步驟 6）。
+      語意相同的表已存在就重用，不要新建——自建表跨 app 共用，重複建表 = 資料分裂。
+    - 建表需 `system.admin`。收到 **403 不重試、不繞路**：輸出可照抄的建表規格，
+      引導用戶到資料中心 UI 自建，建完 `GET` 驗收再繼續。
+      （`aigo_data_center.py` 會把 403 拋成 `PermissionDenied`；`needs == "system.admin"`
+      才走建表降級，用 `format_create_spec()` 產出規格表。`needs == "builder.access"`
+      是帳號沒有資料中心存取權，該請用戶開權限，不是叫他去建表）
+    - `data.json` / `POST /api/v1/data/objects/batch` 是**已退場的 CustomObject**，
+      不是自建表。存量 app 可留，新需求一律不用。
+    - 詳見 `references/data-center.md`
+
+19. **app_domain 標籤規範**（★ 強制，但**只限 Data Reference 那一軌**）
+    - **適用範圍**：只有寫入 SaaS 表（Data Reference）的資料需要 `app_domain`。
+      **自建表不需要也不應該帶 `app_domain`**——自建表沒有 `custom_data` 欄位，
+      而且「跨 app 共用」正是它的設計目的，用標籤隔離是反模式。
+    - 所有寫入 SaaS 表的資料，都必須在 `custom_data` JSONB 中包含 `app_domain` 欄位
     - `app_domain` 值記錄在 `.aigo/config.json` 中，在 Phase 1.5 決定
     - 格式：snake_case，如 `patent_os`、`crm_leads`、`inventory_mgr`
     - 寫入範例：
@@ -240,14 +249,39 @@ AI GO 預先定義了中小企業通用的資料庫結構（SaaS 表），同時
         r => r.custom_data?.app_domain === "patent_os"
       );
       ```
+20. **Webhook / 排程 action 必須冪等**（★ 強制）
+    - 平台保證 **at-least-once**：事件至少執行一次，**可能重複執行**
+      （dispatcher 硬死、invoke 超時、DLQ redrive、滾動更新窗口都會產生重複）
+    - 有寫入副作用的 action（建單、扣款、發信）**沒有去重就是重複扣款等級的 bug**
+    - 去重 key 優先用事件本身的業務 id，其次用 `ctx.params["delivery_id"]`
+    - 詳見 `references/event-triggers.md` §0
+21. **Webhook 宣告只在發布後生效**
+    - `actions/manifest.json` 加 `"webhook": true` 後**必須 republish**，草稿不影響線上端點
+    - `ctx.params["body"]` 是**原始字串**要自己 `json.loads`；驗簽必須用這個原字串，
+      不可用重新序列化的結果
+    - **`headers` 不可信**——webhook 是無認證公開入口，授權只能靠簽章驗證
+    - 同一事件源**不可同時登記新舊兩條 URL**（會執行兩次）
+22. **排程的四個硬限制**
+    - **有執行時間上限**，超過必逾時 → 長任務要自己切批次。
+      ⚠️ **webhook 與 cron 的上限不同**，別互相套用（`event-triggers.md` §1.6／§2.6）
+    - **最小間隔與條數依付費檔分層**，超限回 400（`event-triggers.md` §2.4）
+    - **重疊會被跳過**（`skipped` 是預期常態不是錯誤）
+    - **自動暫停後不會自動恢復**——⚠️ republish 之後要提醒用戶檢查
+      `/dashboard/settings/app-crons` 的排程狀態（`event-triggers.md` §2.8）
 
 ### Server-Side Action 撰寫
 
 ```python
 def execute(ctx):
-    # ctx.params — 前端傳入的參數
-    # ctx.db.query(table, limit=N) — 查詢
-    # ctx.db.insert(table, data) — 新增
+    # ctx.params — 前端傳入的參數（webhook / cron 事件也走這裡）
+    # ── Data Reference（SaaS 表）
+    # ctx.db.query(table, limit=N) / ctx.db.insert(table, data)
+    # ctx.db.update(table, row_id, data) / ctx.db.remove(table, row_id)
+    # ── 自建表
+    # ctx.db.list_tables() / ctx.db.query_table(table, options)
+    # ctx.db.insert_row(table, data) / ctx.db.update_row(table, row_id, data)
+    # ctx.db.delete_row(table, row_id)
+    # ── 其他
     # ctx.http.call(service, endpoint) — 外部 API
     # ctx.secrets.get(key) — 金鑰
     # ctx.response.json(data) — 回應
@@ -255,6 +289,8 @@ def execute(ctx):
     data = ctx.params.get("key", "default")
     ctx.response.json({"result": data})
 ```
+
+> `ctx.db` **不提供結構操作**——action 執行期無法建表或改欄，這是刻意的能力邊界。
 
 
 ### 前端呼叫 Action
@@ -297,47 +333,8 @@ if (file) downloadFile(file);
 | **多個範圍同時變動** | 大 | ✅ 全部 4 項驗證 |
 | **首次部署或架構變更** | 大 | ✅ 全部 4 項驗證 |
 
-#### 驗證項目詳細定義
-
-使用 `scripts/aigo_runtime_verify.py` 執行。
-
-**① Compile 產物驗證**（★ 每次必跑）
-```
-verify_compile_output(compile_result)
-  ✓ compile_success == true
-  ✓ html 含 <!DOCTYPE> 和 id="root"
-  ✓ bundle_js 含 React（> 500 bytes）
-  ✓ css 非空（> 50 bytes）
-```
-
-**② Publish 一致性驗證**（元件新增 / 路由變更 / 發布後必跑）
-```
-verify_publish_consistency(base_url, token, app_id)
-  ✓ status == "published"
-  ✓ published_at 已更新
-  ✓ published_vfs 與 vfs_state 檔案路徑一致
-  ✓ published_vfs 與 vfs_state 內容一致
-```
-
-**③ Custom Data CRUD 驗證**（使用了 api.ts / db.ts 時必跑）
-```
-verify_custom_data_crud(base_url, token, table_id)
-  ✓ CREATE → 201 + 回傳 id
-  ✓ GET 確認寫入（二次驗證）
-  ✓ DELETE → 204
-  ✓ GET 確認刪除（二次驗證）
-```
-
-**④ Server Action 呼叫驗證**（actions/*.py 變更時必跑）
-```
-verify_server_action(base_url, token, app_id, action_name, params)
-  ✓ HTTP 200
-  ✓ execution_id 非空
-  ✓ status == "success"
-  ✓ result 非 null
-  ✓ 無 error
-  ✓ 執行時間 < 30 秒
-```
+> 要**實際執行**這四項驗證 → `references/verification-details.md` §1
+> 有每一項的完整檢查條目與函式簽名。
 
 ### 4.3 驗證後決策
 
@@ -347,6 +344,8 @@ verify_server_action(base_url, token, app_id, action_name, params)
 | ❌ Compile 失敗 | 回到 Phase 3 修復程式碼 |
 | ❌ CRUD/Action 失敗 | 檢查 API 使用方式、表結構、Action 邏輯 |
 | ❌ Publish 一致性失敗 | 重新 sync → compile → publish |
+
+> 任何一項失敗 → 先查 `references/troubleshooting.md` 對症狀，再動手改。
 
 ### 4.4 發布
 
@@ -376,25 +375,10 @@ verify_server_action(base_url, token, app_id, action_name, params)
 
 ## Phase 5：完整 E2E 驗證（里程碑驗證）
 
-> Phase 4 的驗證閘門在每次迭代中自動執行。
-> Phase 5 是在**開發里程碑完成**（例如功能全部完成、準備交付）時執行的完整驗證。
+> Phase 4 的驗證閘門每次迭代自動執行；Phase 5 是**開發里程碑完成**
+> （功能全部完成、準備交付）時的完整驗證。
 
-### 完整驗證 = Phase 4 所有項目 + 以下補充
-
-5. **全功能 Runtime 驗證**
-   ```python
-   from aigo_runtime_verify import run_full_runtime_verification, format_verification_report
-   results = run_full_runtime_verification(
-       base_url, token, app_id, slug,
-       table_id="...",          # Custom Data 表 UUID
-       action_name="..."        # 任一 Server Action 名稱
-   )
-   print(format_verification_report(results))
-   ```
-6. **External Auth**（可選）— 註冊 → 登入 → 取得用戶 → 登出
-7. **匿名存取驗證**（可選）— 確認 allow_anonymous_access 已啟用 → /pub/ API 讀取 → 確認寫入被拒
-
-可使用 `scripts/aigo_e2e.py` 和 `scripts/aigo_runtime_verify.py`。
+> 要執行時 → `references/verification-details.md` §2 有完整清單與呼叫範例。
 
 ## 驗證流程快速參照
 
@@ -409,27 +393,22 @@ verify_server_action(base_url, token, app_id, action_name, params)
   上述全部 + External Auth + 匿名存取（如適用）
 ```
 
-## 錯誤處理速查
+## 錯誤處理
 
-| 錯誤 | 解法 |
-|------|------|
-| 白屏 | 確認 `src/main.tsx` 正確掛載 React |
-| 路由不動 | 使用 `HashRouter`，不可用 `BrowserRouter` |
-| 頁面無法捲動 | Layout 需 `height: 100vh; overflow-y: auto` |
-| CSS 不生效 | 確認 `main.tsx` 中 `import "./App.css"` |
-| CSS 變數遺失 | `:root` 改為 `:host, :root` |
-| `db.update()` 400 | 用 `{"data": {...}}` 包裝 payload |
-| `db.ts` 500 | 確認 Data Reference 已建立並發布 |
-| 401 | Token 過期，重新登入 |
-| 409 Conflict | VFS 版本衝突，重新 GET 後重試 |
-| 423 Locked | 有待審核的發布，等待或取消 |
-| Action 超時 | 控制在 30 秒內 |
-| pub/ API 403 | 確認 `allow_anonymous_access=true` |
-| Compile 產物驗證失敗 | 檢查 main.tsx 入口和 App.css import |
-| CRUD 驗證失敗 | 確認 Custom Table 已建立且欄位正確 |
-| Action 驗證失敗 | 檢查 execute(ctx) 函式、依賴模組是否可用 |
-| Publish 一致性失敗 | 重新 sync → compile → publish 完整循環 |
+> 任何一步失敗、或收到非預期狀態碼 → 先查 `references/troubleshooting.md`，
+> **不要自行推測修法**。多數症狀有明確成因，猜測通常會改錯地方。
+
+常見狀態碼的語義分野：**403** 權限（分 `system.admin` / `builder.access` 兩種，
+降級動作不同）｜**409** 配額或衝突｜**422** 輸入不合法｜**400** 業務規則拒絕。
 
 ## 參考文件
 
-詳細 API 規格和進階功能請查閱 `references/custom-app-dev-guide.md`。
+| 檔案 | 內容 |
+|------|------|
+| `CONTEXT.md` | ★ 術語表——自建表／CustomObject／Data Reference／app_domain |
+| `references/custom-app-dev-guide.md` | 核心 API 規格與架構理念 |
+| `references/data-center.md` | 自建表完整規格（型別、配額、權限、SDK） |
+| `references/event-triggers.md` | Webhook 與 App 排程（冪等要求、宣告、限制） |
+| `references/migration-workflow.md` | **有現存系統要遷入時**：盤點、Schema 映射、資料遷移 |
+| `references/verification-details.md` | **要執行驗證時**：四項驗證的完整定義、Phase 5 里程碑 |
+| `references/troubleshooting.md` | **出錯時**：錯誤速查表 |
