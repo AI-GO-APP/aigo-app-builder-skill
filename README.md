@@ -27,13 +27,13 @@
 Antigravity / Cursor / Codex 等 70+ 種 agent，會自動偵測並裝到正確位置）：
 
 ```bash
-npx skills add AI-GO-APP/skill-AIGO-Builder
+npx skills add AI-GO-APP/aigo-app-builder-skill
 ```
 
 指定 agent 或安裝範圍：
 
 ```bash
-npx skills add AI-GO-APP/skill-AIGO-Builder --agent claude-code --scope project
+npx skills add AI-GO-APP/aigo-app-builder-skill --agent claude-code --scope project
 ```
 
 其他常用指令：`npx skills list`（看已安裝）、`npx skills update`（更新）。
@@ -45,10 +45,10 @@ npx skills add AI-GO-APP/skill-AIGO-Builder --agent claude-code --scope project
 
 ```bash
 # 專案內
-git clone https://github.com/AI-GO-APP/skill-AIGO-Builder.git .agents/skills/aigo-builder/
+git clone https://github.com/AI-GO-APP/aigo-app-builder-skill.git .agents/skills/aigo-builder/
 
 # Claude Code 專案內
-git clone https://github.com/AI-GO-APP/skill-AIGO-Builder.git .claude/skills/aigo-builder/
+git clone https://github.com/AI-GO-APP/aigo-app-builder-skill.git .claude/skills/aigo-builder/
 ```
 
 ⚠️ 手動安裝務必保留完整目錄結構——`SKILL.md` 會指向 `references/` 與 `CONTEXT.md`，
