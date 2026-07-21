@@ -1,9 +1,10 @@
 ---
 name: aigo-builder
 description: >
-  AI GO Custom App 開發者工具。引導用戶完成帳號設定、現有 Code Review、專案建立、
-  前端 (React 18 + TypeScript) 與後端 (Python Server-Side Actions) 開發、
-  雲端部署及 E2E 驗證的完整流程。全域安裝，可跨多專案使用。
+  Use when working on an AI GO Custom App (ai-go.app)：開發前端（React + TypeScript）
+  或 Server-Side Action（Python）、部署與驗證、規劃資料架構（資料中心自建表 /
+  Data Reference）、接 Webhook 或設定 App 排程、將現有系統（Supabase / Google Sheet
+  / MySQL）遷入 AI GO。
 ---
 
 # AI GO Custom App Builder
