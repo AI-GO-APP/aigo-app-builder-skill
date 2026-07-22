@@ -603,3 +603,72 @@ def execute(ctx):
 ✓ 無殘留測試資料：遷移過程中的測試記錄已清除
 ```
 
+## 24. 簽核工作流攔截（Approval）
+
+租戶管理者可對 SaaS 表設定簽核流程。**流程一旦命中，你的寫入不會照你以為的方式發生**——
+這不是錯誤、不能重試，是平台的前置守衛（pre-guard）。**只影響 Data Reference（SaaS 表）那一軌；
+自建表與 CustomObject 不在簽核範圍。**
+
+### 24.1 誰會被攔
+
+| 呼叫端 | 受管制操作 | 攔截行為 |
+|--------|-----------|---------|
+| 前端 `db.ts` | `insert` / `update` / `remove`（SaaS 表） | insert = insert-then-flag；update/delete = pre-guard |
+| Server Action `ctx.db` | 同上 | 同上；pre-guard 以例外呈現 |
+| Server Action `ctx.erp` | `confirm_sale_order`、`confirm_purchase_order`、`post_move`、`confirm_payment`、`validate_picking`、`confirm_payroll_run` | pre-guard，拋例外 |
+
+常見設流程的表：`sale_orders`、`purchase_orders`、`account_moves`、`account_payments`、
+`stock_pickings`、`mrp_productions`、`hr_leaves`。
+
+### 24.2 兩種攔截語意（★ 必須分清）
+
+- **insert －insert-then-flag**：記錄**照樣寫入**（為了拿到 id），但不觸發後續業務邏輯，
+  回傳的 dict 多出 `approval_status: "pending"`、`approval_request_id`、`approval_message`。
+  ⚠️ **不要因為 pending 重試 insert**——會重複建記錄＋重複開簽核單。
+- **update / remove、`ctx.erp.*` －pre-guard**：**完全不執行**；payload 暫存在簽核單裡，
+  全部層級核准後由平台自動執行。Server Action 收到的是例外（訊息含「需要簽核審批」與 `request_id`）。
+  ⚠️ **不要重試、不要改走另一條路徑寫入**——`db.ts` / `ctx.db` / `ctx.erp` 同一套守衛，沒有旁路。
+
+```typescript
+// 前端：pending 既不是成功也不是失敗
+const res = await insert("sale_orders", { data: { amount_total: 5000 } });
+if (res.approval_status === "pending") {
+  toast(res.approval_message || "已送出簽核，待核准後生效");
+} else {
+  toast.success("建立成功");
+}
+```
+
+```python
+# Server Action：pre-guard 以例外呈現，捕捉後回報，不重試
+def execute(ctx):
+    try:
+        ctx.erp.confirm_sale_order(ctx.params["order_id"])
+    except Exception as e:
+        if "簽核" in str(e):
+            ctx.response.json({"pending_approval": True, "message": str(e)})
+            return
+        raise
+    ctx.response.json({"ok": True})
+```
+
+### 24.3 讓核准自動改狀態（免寫後端）
+
+請用戶在建立簽核流程時填 `approved_state_field` / `approved_state_value` /
+`rejected_state_value`，引擎會在核准／退回時自動更新該欄位。App 只要查
+`state === 'approved'` 即可，**不需要為簽核寫任何 Python**。
+
+### 24.4 要做簽核介面時
+
+- 前端：`src/approval.ts`（**僅 Internal App**，External 呼叫直接拋錯）
+  `myPending()`、`recordStatus(resModel, resId)`、`approve(lineId, comment?)`、
+  `reject(lineId, comment?)`、`cancel(requestId, reason?)`。
+  `myPending()` 已由後端過濾成「本人有資格簽」的項目，**前端不要自己判斷誰能簽**。
+- Server Action：`ctx.approval.list_pending / get_record_status / approve / reject / cancel`，
+  身分是**觸發 action 的使用者**——app 不能代簽；無使用者身分的 invocation（排程）一律拒絕；
+  `cancel` 僅申請人本人。需授權 scope：`approval.read`（低風險）、
+  `approval.decide` / `approval.cancel`（高風險，授權擴大需擁有者密碼二次驗證）。
+
+> 完整規格（多層／會簽、非必要層、一表多流程、API 旁路、REST 端點）見公開文件
+> [Custom App 開發者指南 §23](https://www.ai-go.app/zh-TW/docs/custom-app-dev)。
+

@@ -269,6 +269,14 @@ AI GO 預先定義了中小企業通用的資料庫結構（SaaS 表），同時
     - **重疊會被跳過**（`skipped` 是預期常態不是錯誤）
     - **自動暫停後不會自動恢復**——⚠️ republish 之後要提醒用戶檢查
       `/dashboard/settings/app-crons` 的排程狀態（`event-triggers.md` §2.8）
+23. **SaaS 表寫入可能被簽核攔截**（★ 強制，只限 Data Reference 那一軌）
+    - 租戶對該表設了簽核流程時：**insert 照樣寫入但回傳帶 `approval_status: "pending"`**；
+      **update / remove 與 `ctx.erp.*` 完全不執行**，payload 暫存、Server Action 收到例外
+    - `pending` **既不是成功也不是失敗**：UI 要顯示「已送簽核」，
+      ⚠️ **不可重試**（重試 insert = 重複建單 + 重複開簽核單）
+    - **沒有旁路**——`db.ts` / `ctx.db` / `ctx.erp` 同一套守衛，不要換路徑硬寫
+    - 要免寫後端就讓核准自動改狀態欄位；要做簽核 UI 用 `src/approval.ts` / `ctx.approval`
+    - 詳見 `references/custom-app-dev-guide.md` §24
 
 ### Server-Side Action 撰寫
 
@@ -347,6 +355,8 @@ if (file) downloadFile(file);
 | ❌ Publish 一致性失敗 | 重新 sync → compile → publish |
 
 > 任何一項失敗 → 先查 `references/troubleshooting.md` 對症狀，再動手改。
+> ⚠️ CRUD 驗證打 SaaS 表時，回傳 `approval_status: "pending"` 或「需要簽核審批」例外
+> **不算驗證失敗**——那是租戶簽核流程攔截（核心規則 23），不要當成 bug 去改程式。
 
 ### 4.4 發布
 
