@@ -16,6 +16,8 @@
 | CSS 變數遺失 | `:root` 改為 `:host, :root` |
 | `db.update()` 400 | 用 `{"data": {...}}` 包裝 payload |
 | `db.ts` 500 | 確認 Data Reference 已建立並發布 |
+| `hasPermission()` 全 false／`getRoles()` 空陣列 | 快照**只注入 Internal App**，External／匿名恆為空——不是 bug，UI 要有降級路徑；也別改用 `/api/v1/auth/me` 硬撈 → `custom-app-dev-guide.md` §6 |
+| 角色改名後條件顯示失效 | 判斷寫死了角色名稱；改用 permission 標籤（`模組.動作`），`system.admin` 自動通過 |
 | 回傳帶 `approval_status: "pending"` | 命中租戶簽核流程，**既非成功也非失敗**。記錄已寫入但未生效，**不可重試 insert**（會重複建單）→ `custom-app-dev-guide.md` §24 |
 | Action 拋「需要簽核審批」 | `ctx.db.update/remove` 或 `ctx.erp.*` 的 pre-guard，操作**未執行**、payload 已暫存，核准後平台自動執行 → **不重試、不換路徑繞過**（§24） |
 | 寫入「成功」但 SaaS 表資料沒變 | 十之八九是簽核攔截：先看回傳有無 `approval_status` / 例外訊息，不要往 Data Reference 權限或 500 方向誤診 |

@@ -269,7 +269,17 @@ AI GO 預先定義了中小企業通用的資料庫結構（SaaS 表），同時
     - **重疊會被跳過**（`skipped` 是預期常態不是錯誤）
     - **自動暫停後不會自動恢復**——⚠️ republish 之後要提醒用戶檢查
       `/dashboard/settings/app-crons` 的排程狀態（`event-triggers.md` §2.8）
-23. **SaaS 表寫入可能被簽核攔截**（★ 強制，只限 Data Reference 那一軌）
+23. **角色／權限沿用平台，不要自建一套**（★ 強制）
+    - Internal app 前端用 `src/user.ts`（`hasPermission` / `hasAnyPermission` /
+      `isAdmin` / `getRoles`），資料是 Runtime 注入的登入者快照，
+      **禁止自己打 `/api/v1/auth/me`**，也不要在 app 內另建角色表
+    - **判斷授權用 permission 標籤（`模組.動作`）不要用角色名稱**——角色可被租戶改名；
+      `system.admin` 自動通過所有檢查
+    - **前端隱藏只是 UX**：機敏資料差異必須在 action 用 `ctx.user_permissions` 分流
+    - External App / 匿名渲染下 roles 與 permissions **恆為空陣列**，
+      UI 要有合理的降級路徑（不要因為空陣列就整頁空白）
+    - 詳見 `references/custom-app-dev-guide.md` §6「User Context」與 §7
+24. **SaaS 表寫入可能被簽核攔截**（★ 強制，只限 Data Reference 那一軌）
     - 租戶對該表設了簽核流程時：**insert 照樣寫入但回傳帶 `approval_status: "pending"`**；
       **update / remove 與 `ctx.erp.*` 完全不執行**，payload 暫存、Server Action 收到例外
     - `pending` **既不是成功也不是失敗**：UI 要顯示「已送簽核」，
@@ -356,7 +366,7 @@ if (file) downloadFile(file);
 
 > 任何一項失敗 → 先查 `references/troubleshooting.md` 對症狀，再動手改。
 > ⚠️ CRUD 驗證打 SaaS 表時，回傳 `approval_status: "pending"` 或「需要簽核審批」例外
-> **不算驗證失敗**——那是租戶簽核流程攔截（核心規則 23），不要當成 bug 去改程式。
+> **不算驗證失敗**——那是租戶簽核流程攔截（核心規則 24），不要當成 bug 去改程式。
 
 ### 4.4 發布
 
