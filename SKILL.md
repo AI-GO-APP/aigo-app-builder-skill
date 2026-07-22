@@ -24,6 +24,24 @@ AI GO 預先定義了中小企業通用的資料庫結構（SaaS 表），同時
 > **術語先讀 `CONTEXT.md`**——「自建表 / CustomObject / Data Reference / app_domain」
 > 四個詞容易混用，混了就會寫錯 code。
 
+## Phase -1：Skill 自我更新檢查（每次觸發時執行）
+
+> 若已裝 SessionStart hook（見 README「自動更新檢查」），本階段會自動被跳過（節流），
+> 不必重複執行。
+
+```bash
+python scripts/check_update.py     # macOS / Linux 用 python3
+```
+
+- **零相依、不走 uv**——標準函式庫實作，任何專案下都能直接跑。
+- **無輸出 = 沒事**：已是最新版、離線、或 24 小時內已檢查過都會靜默結束，直接進 Phase 0。
+- **有輸出 = 有新版**：把版本落差與變更摘要告知使用者，**詢問是否更新**。
+  - 使用者同意 → 執行腳本印出的更新指令（git 安裝為 `git pull --ff-only`，
+    skills CLI 安裝為 `npx skills update`），完成後**重新讀取 `SKILL.md` 與相關
+    `references/`**，讓新版指令在本回合就生效。
+  - 使用者拒絕或無回應 → 照舊繼續，不阻斷開發流程。
+- **絕不自動覆寫**：使用者可能改過本地檔案；未取得同意前不要執行更新指令。
+
 ## Phase 0：Review 現有 Code（★ 強制步驟）
 
 > **每次開始任何開發工作前，必須先執行此步驟。**

@@ -1,0 +1,17 @@
+# Codex CLI SessionStart hook（需 Codex >= v0.124.0，hooks 預設啟用）
+#
+# 把 <SKILL_DIR> 換成本機 skill 實際路徑，再把以下區塊併入
+# ~/.codex/config.toml（全域）或 <repo>/.codex/config.toml（專案，需該專案已被信任）。
+# Windows 請用 python，macOS / Linux 用 python3。
+#
+# 腳本只在有新版時才輸出；SessionStart hook 的 stdout 會被當作 developer context
+# 注入對話，所以無更新時保持靜默很重要。
+
+[[hooks.SessionStart]]
+matcher = "startup|resume"
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = 'python "<SKILL_DIR>/scripts/check_update.py"'
+timeout = 10
+statusMessage = "檢查 aigo-builder Skill 更新"

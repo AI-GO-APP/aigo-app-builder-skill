@@ -6,6 +6,7 @@
 
 | 階段 | 說明 |
 |------|------|
+| **Phase -1** | Skill 自我更新檢查 — 比對遠端 `VERSION`，有新版時提示並徵詢是否更新（見「保持更新」） |
 | **Phase 0** | Review 現有 Code（強制） — 分析雲端 VFS 狀態、檔案分類、路由結構、CSS 合規性與 Server Actions |
 | **Phase 1** | 環境設定 — 帳號登入、取得 Token、初始化 `.aigo/config.json` |
 | **Phase 2** | 專案腳手架（單頁/多頁） — 從雲端 VFS 下載到本地，自動排除 SDK 保護檔 |
@@ -56,6 +57,40 @@ git clone https://github.com/AI-GO-APP/aigo-app-builder-skill.git .claude/skills
 
 </details>
 
+## 保持更新
+
+Skill 內含版本標記（`VERSION`）與更新檢查腳本（`scripts/check_update.py`），
+比對本地與 GitHub 上的 `VERSION`，有新版才提示。腳本零相依（只用 Python 標準函式庫、
+不經 uv），離線或逾時一律靜默略過，預設 24 小時內只檢查一次
+（狀態存在 `~/.aigo/update_check.json`）。
+
+**任何 agent 都適用（預設）**：`SKILL.md` 的 Phase -1 會在每次 Skill 觸發時執行檢查，
+有新版時由 AI 告知你並詢問是否更新。缺點是 `SKILL.md` 已載入 context，更新後需重新讀取
+才會在當回合生效。
+
+**Claude Code / Codex（推薦加裝）**：改用 SessionStart hook，在 Skill 載入**之前**完成檢查，
+沒有上述時序問題。範本在 `resources/hooks/`，把 `<SKILL_DIR>` 換成本機 skill 路徑後合併進設定：
+
+| Agent | 設定檔 | 範本 |
+|-------|--------|------|
+| Claude Code | `~/.claude/settings.json` 或 `<專案>/.claude/settings.json` | `resources/hooks/claude-code.settings.example.json` |
+| Codex CLI（>= v0.124.0） | `~/.codex/config.toml` 或 `<repo>/.codex/config.toml` | `resources/hooks/codex.config.example.toml` |
+
+手動檢查與更新：
+
+```bash
+python scripts/check_update.py --force   # 忽略節流立即檢查（macOS/Linux 用 python3）
+python scripts/check_update.py --json    # 機器可讀輸出
+python scripts/check_update.py --apply   # git 安裝：就地 pull --ff-only
+```
+
+`--apply` 只在 skill 目錄是 git repo 時才會實際更新；用 `npx skills add` 安裝的複製式安裝
+會印出 `npx skills update` 讓你自己執行。任一情況都**不會**覆寫你的本地修改
+（`--ff-only` 遇到分岔會直接失敗）。
+
+> 維護者注意：改動 Skill 內容後要同步 bump `VERSION` 並在 `CHANGELOG.md` 補一節，
+> 否則使用者端不會收到更新提示。
+
 ## 目錄結構
 
 ```
@@ -63,6 +98,8 @@ aigo-builder/
 ├── SKILL.md                          # Skill 主文件（工作流骨架 + 核心規則）
 ├── CONTEXT.md                        # 術語表（自建表／CustomObject／Data Reference／app_domain）
 ├── README.md                         # 本文件
+├── VERSION                           # 版本標記（更新檢查的比對基準）
+├── CHANGELOG.md                      # 版本變更紀錄
 ├── LICENSE                           # MIT 授權
 ├── references/                       # 依需要載入的參考文件
 │   ├── custom-app-dev-guide.md       # 核心 API 規格與架構理念
@@ -73,9 +110,13 @@ aigo-builder/
 │   └── troubleshooting.md            # 出錯時
 ├── resources/
 │   ├── vfs_template.json             # VFS 範本（單頁/多頁）
-│   └── migration_mapping_template.md # 外部 Schema ↔ AI GO 映射表模板
+│   ├── migration_mapping_template.md # 外部 Schema ↔ AI GO 映射表模板
+│   └── hooks/                        # SessionStart 更新檢查 hook 範本
+│       ├── claude-code.settings.example.json
+│       └── codex.config.example.toml
 └── scripts/
     ├── pyproject.toml                # uv 專案設定
+    ├── check_update.py               # Skill 自我更新檢查（零相依，不走 uv）
     ├── uv.lock                       # 鎖定依賴版本
     ├── aigo_auth.py                  # 認證（登入、Token 管理、App 資訊）
     ├── aigo_review.py                # Review（VFS 分析、CSS 檢查、租戶級資源盤點）
