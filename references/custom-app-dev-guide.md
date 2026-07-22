@@ -94,11 +94,32 @@ import { runAction, downloadFile } from "../action";
 const { data, file } = await runAction("name", params);
 ```
 
+### User Context (user.ts)
+
+沿用**主站的角色／權限**做條件顯示，**不要自己打 `/api/v1/auth/me`**。
+資料是 Runtime 載入時注入的唯讀快照；**僅 Internal App 有值**，External／匿名一律空陣列。
+
+```typescript
+import { getCurrentUser, getRoles, getPermissions,
+         hasPermission, hasAnyPermission, hasAllPermissions, isAdmin } from "../user";
+
+if (hasPermission("sale.write")) { /* 顯示新增訂單按鈕 */ }
+if (isAdmin()) { /* system.admin 全開 */ }
+```
+
+⚠️ **用 permission 標籤（`模組.動作`）判斷，不要用角色名稱**——角色可被租戶改名，
+標籤才穩定；`system.admin` 自動通過所有 `hasPermission`。
+⚠️ **前端隱藏只是 UX 不是安全邊界**：機敏資料差異必須在 action 用
+`ctx.user_permissions` 分流（§7），或靠 Data Reference 授權把關。
+
 ## 7. Server-Side Actions
 
 ```python
 def execute(ctx):
     ctx.params              # 前端參數（webhook / cron 事件也走這裡）
+    ctx.user_id             # 觸發者 UUID（排程等無使用者上下文為 None）
+    ctx.user_permissions    # 觸發者權限標籤 list[str]（★ 角色分流的後端強制點）
+    ctx.user_roles          # 觸發者角色名稱 list[str]（顯示用，勿用於判斷授權）
     ctx.db.query(t)         # Data Reference 查詢
     ctx.db.insert(t, d)     # Data Reference 新增
     ctx.db.list_tables()    # 自建表清單
@@ -111,6 +132,18 @@ def execute(ctx):
 ```
 
 Action 也可由 Webhook 或 App 排程觸發——**兩者都要求 action 冪等**，見 `event-triggers.md`。
+
+依權限分流（前端隱藏不算數，這裡才是強制點）：
+
+```python
+def execute(ctx):
+    perms = ctx.user_permissions or []
+    if "system.admin" in perms or "hr.read" in perms:
+        rows = ctx.db.query("sale_orders", limit=100)
+    else:
+        rows = [strip_sensitive(r) for r in ctx.db.query("sale_orders", limit=100)]
+    ctx.response.json({"rows": rows})
+```
 
 
 ## 8. 發布
