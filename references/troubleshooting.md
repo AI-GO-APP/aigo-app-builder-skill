@@ -24,7 +24,8 @@
 | 401 | Token 過期，重新登入 |
 | 409 Conflict | VFS 版本衝突，重新 GET 後重試 |
 | 423 Locked | 有待審核的發布，等待或取消 |
-| Action 超時 | 控制在 30 秒內 |
+| Action 超時 | 控制在 30 秒內；對外呼叫務必設 `timeout=`，外部服務掛住會拖垮整個 action |
+| **Action 打第三方 API 連不出去** | **先完整讀 API 回傳的 error message**——被 Egress 擋下時原因就寫在裡面（權限不足／網域未列入白名單）。訊息指向 Egress 或權限就**停止改 code**（設定問題，改幾次都一樣），引導用戶到 <https://ai-go.app/dashboard/settings/integrations> 加入目標網域；用戶看不到該頁 = 權限不足，請租戶管理員代設 → `custom-app-dev-guide.md` §25 |
 | pub/ API 403 | 確認 `allow_anonymous_access=true`；且**只有 `external` / `self_built` 能啟用匿名**，`internal` app 開不了 |
 | **呼叫 action 回 403** | 依序查：① **有 publish 嗎**——sync 與 compile 都不會讓 action 上線，觸發看的是**發布快照**（最常見成因）② action 在 `actions/manifest.json` 裡嗎、`is_enabled` 是不是 false、名字與 `runAction()` 傳的字串是否完全一致 ③ 帳號缺 `builder.access`（403 是權限，401 才是 token 過期）④ 403 是否其實來自 action **內部**——看執行紀錄的 `error`，不要只看外層狀態碼 |
 | Compile 產物驗證失敗 | 檢查 main.tsx 入口和 App.css import |

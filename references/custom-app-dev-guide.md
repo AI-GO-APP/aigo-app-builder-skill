@@ -125,7 +125,6 @@ def execute(ctx):
     ctx.db.list_tables()    # 自建表清單
     ctx.db.query_table(t,o) # 自建表查詢（回傳分頁信封）
     ctx.db.insert_row(t, d) # 自建表新增
-    ctx.http.call(s, e)     # 外部 API
     ctx.secrets.get(k)      # 金鑰
     ctx.response.json(d)    # 回應
     ctx.csv.export(r)       # CSV
@@ -242,6 +241,7 @@ Runtime 內建：react ^18.x, react-dom ^18.x, react-router-dom ^6.x, lucide-rea
 | 401 | Token 過期，重新登入 |
 | 409 | VFS 版本衝突，重新 GET |
 | 423 | 有待審核發布，等待/取消 |
+| Action 連不到第三方 API | 讀 API 回傳的 error message；多為 Egress 白名單未設 → §25 |
 
 ## 18. 核心策略：app_domain 標籤
 
@@ -704,4 +704,59 @@ def execute(ctx):
 
 > 完整規格（多層／會簽、非必要層、一表多流程、API 旁路、REST 端點）見公開文件
 > [Custom App 開發者指南 §23](https://www.ai-go.app/zh-TW/docs/custom-app-dev)。
+
+## 25. 對外 API 呼叫與 Egress 白名單
+
+### 25.1 怎麼呼叫
+
+Server-Side Action 要打第三方 API，**直接 `import httpx`**，就是一般 Python 寫法：
+
+```python
+import httpx
+
+def execute(ctx):
+    resp = httpx.get(
+        "https://api.example.com/v1/orders",
+        headers={"Authorization": f"Bearer {ctx.secrets.get('EXAMPLE_API_KEY')}"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    ctx.response.json({"orders": resp.json()})
+```
+
+- 金鑰一律 `ctx.secrets.get()`——**不可**寫死在 code、也不可從前端傳進來
+  （前端傳的等於公開）。
+- 一定要設 `timeout`：外部服務掛住會把 action 拖到逾時，webhook／排程場景尤其致命。
+- Webhook 或排程觸發的 action 要**冪等**（見 `event-triggers.md`），
+  對外呼叫失敗重試時才不會重複送出。
+
+### 25.2 Egress 白名單（★ 呼叫前的必要設定）
+
+外部網域**必須先加入 Egress 白名單**才連得出去。這是平台的出口管制，
+沒設定的網域一律被擋。
+
+設定位置：**後台 → Settings → Integrations**
+（<https://ai-go.app/dashboard/settings/integrations>）
+
+> **看不到這個頁面 = 你的帳號權限不足**，不是頁面不存在。
+> 這種情況要**請租戶管理員代為設定**，開發者自己繞不過去。
+
+### 25.3 被擋掉時長什麼樣
+
+呼叫被 Egress 擋下時，**API 回傳的 error message 會說明原因**（權限不足／網域未列入白名單）。
+
+給 AI Agent 的處理準則：
+
+1. Action 對外呼叫失敗時，**先把 API 回傳的 error message 完整讀出來**，
+   不要立刻假設是程式碼寫錯。
+2. 若訊息指向 Egress／權限，**停止改 code**——這是設定問題，改幾次都一樣。
+3. 把原始 error message 轉給用戶，並引導：
+   - 前往 <https://ai-go.app/dashboard/settings/integrations> 把目標網域加入白名單
+   - 看不到該頁 → 權限不足，請管理員代設
+4. 確認白名單設好後才重試。
+
+### 25.4 規劃階段就要處理
+
+Phase 1.5 實作計畫裡就該**列出所有要打出去的網域**，讓用戶在寫 code 前
+先去申請白名單——等到部署後才發現被擋，等於整段開發白做。
 

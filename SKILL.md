@@ -84,7 +84,11 @@ python scripts/check_update.py     # macOS / Linux 用 python3
    - `GET /api/v1/app-crons`（`aigo_review.py` 的 `fetch_app_crons()`），
      確認有哪些排程綁在本 app 的 action 上
    - republish 或改動 action 名稱前必須知道這些，否則會把排程觸發到自動暫停
-8. **確認已完全理解現有結構後，才可進入開發**
+8. **盤點對外呼叫與 Egress**（若 code 內有 `import httpx` 等對外請求）
+   - 從既有 action 原始碼撈出所有對外網域，列成清單
+   - 提醒用戶到 <https://ai-go.app/dashboard/settings/integrations> 確認這些網域
+     都已在 Egress 白名單內——舊 code 能跑不代表新加的網域也通
+9. **確認已完全理解現有結構後，才可進入開發**
 
 `scripts/aigo_review.py` 的 `review_app()` 一次做完 VFS 分析 + 步驟 6／7 的租戶級盤點，
 `format_review_report(app_info, analysis, custom_tables, crons)` 輸出完整報告。
@@ -184,6 +188,15 @@ python scripts/check_update.py     # macOS / Linux 用 python3
        超限是 400 不是靜默截斷。數值見 `references/event-triggers.md` §2.4
    - 兩者都要在計畫中明寫「此 action 的冪等策略」——見規則 20
    - 詳見 `references/event-triggers.md`
+
+4.6. **對外 API 呼叫盤點**（★ 若有打第三方 API 就不可省）
+   - 列出**所有要連出去的網域**
+     `| 網域 | 用途 | 哪個 action 會用 | 金鑰放哪個 secret key |`
+   - **在計畫階段就提醒用戶去設 Egress 白名單**：
+     <https://ai-go.app/dashboard/settings/integrations>
+     - 看不到該頁 → 帳號權限不足，要請租戶管理員代設
+   - 白名單沒設好，寫完的 code 一律連不出去——**等部署才發現等於整段白做**
+   - 詳見 `references/custom-app-dev-guide.md` §25
 
 5. **app_domain 標籤設計**
    - 確定此 App 的 `app_domain` 值（snake_case，如 `patent_os`、`crm_leads`）
@@ -337,7 +350,6 @@ def execute(ctx):
     # ctx.db.insert_row(table, data) / ctx.db.update_row(table, row_id, data)
     # ctx.db.delete_row(table, row_id)
     # ── 其他
-    # ctx.http.call(service, endpoint) — 外部 API
     # ctx.secrets.get(key) — 金鑰
     # ctx.response.json(data) — 回應
     # ctx.csv.export(rows) — CSV 匯出
@@ -346,6 +358,26 @@ def execute(ctx):
 ```
 
 > `ctx.db` **不提供結構操作**——action 執行期無法建表或改欄，這是刻意的能力邊界。
+
+**呼叫外部 API：直接 `import httpx`**，金鑰一律走 `ctx.secrets.get()`，不要寫死在 code 裡。
+
+```python
+import httpx
+
+def execute(ctx):
+    resp = httpx.post(
+        "https://api.example.com/v1/send",
+        headers={"Authorization": f"Bearer {ctx.secrets.get('EXAMPLE_API_KEY')}"},
+        json={"text": ctx.params.get("text")},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    ctx.response.json(resp.json())
+```
+
+> ⚠️ **對外網域必須先在後台加入 Egress 白名單，否則呼叫會被擋下**——
+> 見 `references/custom-app-dev-guide.md` §25。這是設定問題，不是程式問題，
+> 改 code 改不掉。
 
 
 ### 前端呼叫 Action
@@ -457,6 +489,19 @@ if (file) downloadFile(file);
 
 常見狀態碼的語義分野：**403** 權限（分 `system.admin` / `builder.access` 兩種，
 降級動作不同）｜**409** 配額或衝突｜**422** 輸入不合法｜**400** 業務規則拒絕。
+
+### Action 對外呼叫失敗（★ 別急著改 code）
+
+**先完整讀出 API 回傳的 error message**——被 Egress 擋下時原因就寫在裡面
+（權限不足／網域未列入白名單）。訊息指向 Egress 或權限時：
+
+1. **立刻停止修改程式碼**——這是設定問題，改幾次結果都一樣
+2. 把原始 error message 轉給用戶，引導到
+   <https://ai-go.app/dashboard/settings/integrations> 加入目標網域
+3. 用戶看不到該頁 → 權限不足，請租戶管理員代設
+4. 白名單確認生效後才重試
+
+詳見 `references/custom-app-dev-guide.md` §25.3。
 
 ## 參考文件
 
