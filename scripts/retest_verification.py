@@ -3,24 +3,27 @@ import sys, os, time, json
 sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, os.path.dirname(__file__))
 
-from aigo_auth import login, get_app_info
+from aigo_auth import get_token, get_app_info, load_env_file
 from aigo_sync import get_remote_vfs
 from aigo_compile import compile_app
 from aigo_publish import publish_app
 import httpx
 
+load_env_file(os.environ.get("AIGO_PROJECT_ROOT", "."))
+
 BASE_URL = os.environ.get("AIGO_BASE_URL", "https://ai-go.app")
-EMAIL = os.environ.get("AIGO_EMAIL", "")
-PASSWORD = os.environ.get("AIGO_PASSWORD", "")
 APP_ID = os.environ.get("AIGO_APP_ID", "")
 SLUG = os.environ.get("AIGO_SLUG", "")
 
-if not EMAIL or not PASSWORD or not APP_ID:
-    print("❌ 請設定環境變數: AIGO_EMAIL, AIGO_PASSWORD, AIGO_APP_ID, AIGO_SLUG")
+if not APP_ID:
+    print("❌ 缺少 AIGO_APP_ID（可寫進 .aigo/.env）")
     sys.exit(1)
 
-r = login(BASE_URL, EMAIL, PASSWORD)
-token = r['access_token']
+try:
+    token = get_token(os.environ.get("AIGO_PROJECT_ROOT", "."))
+except RuntimeError as e:
+    print(e)
+    sys.exit(1)
 print("Login OK\n")
 
 results = []

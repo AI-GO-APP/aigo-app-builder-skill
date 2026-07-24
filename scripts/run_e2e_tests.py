@@ -9,7 +9,7 @@ import shutil
 sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, os.path.dirname(__file__))
 
-from aigo_auth import login, get_app_info, init_config, load_config, validate_config
+from aigo_auth import login, get_app_info, init_config, load_config, validate_config, load_env_file
 from aigo_review import analyze_vfs, check_css_compliance, format_review_report, PROTECTED_FILES
 from aigo_scaffold import download_vfs_to_local
 from aigo_sync import read_local_files, diff_vfs, sync_to_cloud, get_remote_vfs
@@ -21,7 +21,9 @@ from aigo_data_center import (
 )
 import httpx
 
-# === 設定（從環境變數讀取） ===
+# === 設定（優先讀 .aigo/.env，其次環境變數） ===
+load_env_file(os.environ.get("AIGO_PROJECT_ROOT", "."))
+
 BASE_URL = os.environ.get("AIGO_BASE_URL", "https://ai-go.app")
 EMAIL = os.environ.get("AIGO_EMAIL", "")
 PASSWORD = os.environ.get("AIGO_PASSWORD", "")
@@ -29,8 +31,10 @@ APP_ID = os.environ.get("AIGO_APP_ID", "")
 SLUG = os.environ.get("AIGO_SLUG", "")
 
 if not EMAIL or not PASSWORD or not APP_ID:
-    print("❌ 請設定環境變數: AIGO_EMAIL, AIGO_PASSWORD, AIGO_APP_ID")
-    print("範例: $env:AIGO_EMAIL='xxx'; $env:AIGO_PASSWORD='xxx'; $env:AIGO_APP_ID='xxx'; $env:AIGO_SLUG='xxx'")
+    print("❌ 缺少憑證：AIGO_EMAIL, AIGO_PASSWORD, AIGO_APP_ID")
+    print("   建議做法（設定一次即可）：")
+    print("     uv run python scripts/aigo_auth.py setup   # 建立 .aigo/.env 後填入帳密")
+    print("   或臨時用環境變數：$env:AIGO_EMAIL='xxx'; $env:AIGO_PASSWORD='xxx'; $env:AIGO_APP_ID='xxx'")
     sys.exit(1)
 
 # === 測試框架 ===

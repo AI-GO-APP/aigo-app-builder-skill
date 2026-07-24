@@ -151,6 +151,40 @@ cd scripts
 uv sync
 ```
 
+## 憑證設定（每台機器只需一次）
+
+```bash
+uv run python scripts/aigo_auth.py setup
+```
+
+會產生 `.aigo/.env`（已被 `.gitignore` 忽略）。用編輯器打開，填入你自己的帳密：
+
+```ini
+AIGO_EMAIL=your-email@example.com
+AIGO_PASSWORD=your-password
+AIGO_APP_ID=your-app-id
+AIGO_SLUG=your-slug
+```
+
+驗證：
+
+```bash
+uv run python scripts/aigo_auth.py login
+```
+
+之後 Skill 內所有 API 呼叫都走 `aigo_auth.get_token()`——Token 快取在
+`.aigo/token.json`，過期自動換新，**不會再問你密碼**。
+
+| 指令 | 作用 |
+|---|---|
+| `aigo_auth.py setup` | 建立 `.aigo/.env` 範本 |
+| `aigo_auth.py login` | 驗證憑證並快取 Token |
+| `aigo_auth.py status` | 檢查憑證與 Token 狀態（不顯示秘密值） |
+| `aigo_auth.py logout` | 清除 Token 快取 |
+
+> 密碼請直接填進 `.aigo/.env`，**不要**放在指令列（會留在 shell 歷史紀錄），
+> 也不要貼進 AI 對話框（會留在對話紀錄）。
+
 ## 使用方式
 
 1. 在 AI IDE 中開啟任意專案
@@ -159,21 +193,16 @@ uv sync
 
 ### 執行 E2E 測試
 
-```powershell
-# 設定環境變數
-$env:AIGO_EMAIL='your-email@example.com'
-$env:AIGO_PASSWORD='your-password'
-$env:AIGO_APP_ID='your-app-id'
-$env:AIGO_SLUG='your-slug'
+憑證設定好之後直接跑，不必再設環境變數：
 
-# 執行測試
+```bash
 cd scripts
 uv run run_e2e_tests.py
 ```
 
 ## 注意事項
 
-- ⚠️ **密碼不儲存**：所有帳密透過環境變數提供，不會寫入任何設定檔
+- ⚠️ **密碼只存在 `.aigo/.env`**：不寫入 `config.json`、原始碼或 commit，也不放在指令列
 - ⚠️ **`.aigo/` 已在 `.gitignore`**：本地產生的 `.aigo/config.json` 含有 Token，不會被提交
 - ⚠️ **SDK 保護檔**：`src/api.ts`、`src/db.ts`、`src/action.ts` 等由平台注入，不可修改
 - ⚠️ **Shadow DOM 限制**：Custom App 運行在 Shadow DOM 中，不可使用 `document.querySelector`、全域 CSS 變數等
