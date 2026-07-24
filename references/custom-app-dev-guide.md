@@ -735,8 +735,10 @@ def execute(ctx):
 外部網域**必須先加入 Egress 白名單**才連得出去。這是平台的出口管制，
 沒設定的網域一律被擋。
 
-設定位置：**後台 → Settings → Integrations**
-（<https://ai-go.app/dashboard/settings/integrations>）
+設定位置：**後台 → Settings → Integrations**，路徑 `/dashboard/settings/integrations`
+
+> 一律用**相對路徑**指引用戶，不要寫死主機名稱——子網域日後可能變動。
+> 用戶自己登入的後台網域是什麼就接在前面。
 
 > **看不到這個頁面 = 你的帳號權限不足**，不是頁面不存在。
 > 這種情況要**請租戶管理員代為設定**，開發者自己繞不過去。
@@ -751,7 +753,7 @@ def execute(ctx):
    不要立刻假設是程式碼寫錯。
 2. 若訊息指向 Egress／權限，**停止改 code**——這是設定問題，改幾次都一樣。
 3. 把原始 error message 轉給用戶，並引導：
-   - 前往 <https://ai-go.app/dashboard/settings/integrations> 把目標網域加入白名單
+   - 前往後台 `/dashboard/settings/integrations` 把目標網域加入白名單
    - 看不到該頁 → 權限不足，請管理員代設
 4. 確認白名單設好後才重試。
 

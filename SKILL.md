@@ -86,7 +86,7 @@ python scripts/check_update.py     # macOS / Linux 用 python3
    - republish 或改動 action 名稱前必須知道這些，否則會把排程觸發到自動暫停
 8. **盤點對外呼叫與 Egress**（若 code 內有 `import httpx` 等對外請求）
    - 從既有 action 原始碼撈出所有對外網域，列成清單
-   - 提醒用戶到 <https://ai-go.app/dashboard/settings/integrations> 確認這些網域
+   - 提醒用戶到後台 `/dashboard/settings/integrations` 確認這些網域
      都已在 Egress 白名單內——舊 code 能跑不代表新加的網域也通
 9. **確認已完全理解現有結構後，才可進入開發**
 
@@ -117,7 +117,7 @@ python scripts/check_update.py     # macOS / Linux 用 python3
 1. 檢查專案目錄下 `.aigo/config.json` 是否存在
 2. 不存在 → 建立骨架（可用 `scripts/aigo_auth.py` 的 `init_config()`）
 3. 引導用戶：
-   - 前往 AI GO 後台 (https://ai-go.app/dashboard)
+   - 前往 AI GO 後台 `/dashboard`
    - 確認帳號具備 `builder.access` 權限
    - 進入 Builder → Custom Apps → 記下 App 的 UUID (`app_id`)
    - 填入 `.aigo/config.json` 的 `email` 和 `app_id`
@@ -192,8 +192,7 @@ python scripts/check_update.py     # macOS / Linux 用 python3
 4.6. **對外 API 呼叫盤點**（★ 若有打第三方 API 就不可省）
    - 列出**所有要連出去的網域**
      `| 網域 | 用途 | 哪個 action 會用 | 金鑰放哪個 secret key |`
-   - **在計畫階段就提醒用戶去設 Egress 白名單**：
-     <https://ai-go.app/dashboard/settings/integrations>
+   - **在計畫階段就提醒用戶去設 Egress 白名單**：後台 `/dashboard/settings/integrations`
      - 看不到該頁 → 帳號權限不足，要請租戶管理員代設
    - 白名單沒設好，寫完的 code 一律連不出去——**等部署才發現等於整段白做**
    - 詳見 `references/custom-app-dev-guide.md` §25
@@ -496,8 +495,8 @@ if (file) downloadFile(file);
 （權限不足／網域未列入白名單）。訊息指向 Egress 或權限時：
 
 1. **立刻停止修改程式碼**——這是設定問題，改幾次結果都一樣
-2. 把原始 error message 轉給用戶，引導到
-   <https://ai-go.app/dashboard/settings/integrations> 加入目標網域
+2. 把原始 error message 轉給用戶，引導到後台
+   `/dashboard/settings/integrations` 加入目標網域
 3. 用戶看不到該頁 → 權限不足，請租戶管理員代設
 4. 白名單確認生效後才重試
 

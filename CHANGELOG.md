@@ -4,6 +4,13 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.1.1
+
+- 後台頁面一律改用**相對路徑**指引（`/dashboard/settings/integrations`、`/dashboard`），
+  不再寫死主機名稱——子網域日後可能變動。
+  與 `event-triggers.md` 既有的 `/dashboard/settings/app-crons` 寫法一致。
+- §25.2 補上這條慣例，避免後續文件又寫回完整 URL。
+
 ## 1.1.0
 
 ### 對外 API 呼叫與 Egress 白名單
