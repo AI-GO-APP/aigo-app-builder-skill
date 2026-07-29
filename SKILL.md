@@ -84,10 +84,12 @@ python scripts/check_update.py     # macOS / Linux 用 python3
    - `GET /api/v1/app-crons`（`aigo_review.py` 的 `fetch_app_crons()`），
      確認有哪些排程綁在本 app 的 action 上
    - republish 或改動 action 名稱前必須知道這些，否則會把排程觸發到自動暫停
-8. **盤點對外呼叫與 Egress**（若 code 內有 `import httpx` 等對外請求）
-   - 從既有 action 原始碼撈出所有對外網域，列成清單
-   - 提醒用戶到後台 `/dashboard/settings/integrations` 確認這些網域
-     都已在 Egress 白名單內——舊 code 能跑不代表新加的網域也通
+8. **盤點對外呼叫與 Egress**（若 code 內有 `ctx.http.call` 或 `import httpx` 等對外請求）
+   - 從既有 action 原始碼撈出所有 `ctx.http.call` 的 egress slug 與殘留的對外網域，列成清單
+   - 提醒用戶到後台 `/dashboard/settings/integrations` 確認每個 slug 都已註冊
+     **同名 EgressService**（base_url + 憑證）——舊 code 能跑不代表新加的服務也通
+   - 發現 raw `import httpx / requests / urllib.request` 直連外部的 action → **標記為必改**：
+     runner 是 default-deny egress，raw 連線一律 timeout（見 Phase 3「呼叫外部 API」）
 9. **確認已完全理解現有結構後，才可進入開發**
 
 `scripts/aigo_review.py` 的 `review_app()` 一次做完 VFS 分析 + 步驟 6／7 的租戶級盤點，
@@ -190,11 +192,13 @@ python scripts/check_update.py     # macOS / Linux 用 python3
    - 詳見 `references/event-triggers.md`
 
 4.6. **對外 API 呼叫盤點**（★ 若有打第三方 API 就不可省）
-   - 列出**所有要連出去的網域**
-     `| 網域 | 用途 | 哪個 action 會用 | 金鑰放哪個 secret key |`
-   - **在計畫階段就提醒用戶去設 Egress 白名單**：後台 `/dashboard/settings/integrations`
+   - 列出**所有要連出去的外部服務**
+     `| egress slug | base_url（網域） | 用途 | 哪個 action 會用 |`
+   - **在計畫階段就提醒用戶去註冊 EgressService**：後台 `/dashboard/settings/integrations`
+     以**同名 slug** 註冊，填 base_url 與該租戶自己的金鑰
      - 看不到該頁 → 帳號權限不足，要請租戶管理員代設
-   - 白名單沒設好，寫完的 code 一律連不出去——**等部署才發現等於整段白做**
+   - EgressService 沒註冊，寫完的 code 一律連不出去——**等部署才發現等於整段白做**
+   - 金鑰歸 EgressService 管，action 程式碼不碰——**不需要**為 API 金鑰開 secret key
    - 詳見 `references/custom-app-dev-guide.md` §25
 
 5. **app_domain 標籤設計**
@@ -349,7 +353,8 @@ def execute(ctx):
     # ctx.db.insert_row(table, data) / ctx.db.update_row(table, row_id, data)
     # ctx.db.delete_row(table, row_id)
     # ── 其他
-    # ctx.secrets.get(key) — 金鑰
+    # ctx.http.call(slug, path, method=..., body=...) — 對外 HTTP（經 egress 閘道）
+    # ctx.secrets.get(key) — 金鑰（webhook 驗簽等非對外憑證用）
     # ctx.response.json(data) — 回應
     # ctx.csv.export(rows) — CSV 匯出
     data = ctx.params.get("key", "default")
@@ -358,25 +363,31 @@ def execute(ctx):
 
 > `ctx.db` **不提供結構操作**——action 執行期無法建表或改欄，這是刻意的能力邊界。
 
-**呼叫外部 API：直接 `import httpx`**，金鑰一律走 `ctx.secrets.get()`，不要寫死在 code 裡。
+**呼叫外部 API：一律走 `ctx.http.call(<egress-slug>, <path>)` 閘道**，
+**不要**直接 `import httpx / requests / urllib.request`——runner pod 是
+default-deny egress，raw 連線出不去（實測 20 秒 timeout），且這些套件在沙箱 denylist 上。
 
 ```python
-import httpx
-
 def execute(ctx):
-    resp = httpx.post(
-        "https://api.example.com/v1/send",
-        headers={"Authorization": f"Bearer {ctx.secrets.get('EXAMPLE_API_KEY')}"},
-        json={"text": ctx.params.get("text")},
-        timeout=30,
+    # slug 對應租戶在後台註冊的 EgressService（base_url + 憑證都在那裡）；
+    # 這裡只寫 slug 與 path，不碰金鑰、不自帶 Authorization header（閘道會剝掉）。
+    resp = ctx.http.call(
+        "example-api",
+        "/v1/send",
+        method="POST",
+        body={"text": ctx.params.get("text")},
     )
-    resp.raise_for_status()
-    ctx.response.json(resp.json())
+    if int(resp.get("status") or 500) >= 400:
+        ctx.response.json({"error": "外部服務暫時無法使用", "status": resp.get("status")})
+        return
+    ctx.response.json(resp.get("data") or {})
 ```
 
-> ⚠️ **對外網域必須先在後台加入 Egress 白名單，否則呼叫會被擋下**——
-> 見 `references/custom-app-dev-guide.md` §25。這是設定問題，不是程式問題，
-> 改 code 改不掉。
+> ⚠️ **slug 必須先在後台註冊同名 EgressService（base_url + 該租戶自己的金鑰），
+> 否則連不出去**——見 `references/custom-app-dev-guide.md` §25。這是設定問題，
+> 不是程式問題，改 code 改不掉。
+> 憑證由閘道注入：**不要自組 `Authorization` header**（會被剝掉、實測回 401），
+> 也不需要為 API 金鑰開 `ctx.secrets` 欄位。
 
 
 ### 前端呼叫 Action
@@ -491,14 +502,22 @@ if (file) downloadFile(file);
 
 ### Action 對外呼叫失敗（★ 別急著改 code）
 
-**先完整讀出 API 回傳的 error message**——被 Egress 擋下時原因就寫在裡面
-（權限不足／網域未列入白名單）。訊息指向 Egress 或權限時：
+**先完整讀出回傳的 status 與 error message**，再對症：
+
+- **timeout／連不出去**：① action 是不是 raw `import httpx / requests` 直連？
+  runner 是 default-deny egress，raw 連線必 timeout——改寫成 `ctx.http.call`
+  ② 已是 `ctx.http.call` → 多半是 slug 沒有註冊同名 EgressService
+- **401**：action 自帶了 `Authorization` header（閘道會剝掉、以 EgressService
+  憑證取代）——刪掉它；或 EgressService 裡填的金鑰不對
+
+訊息指向 Egress／權限時：
 
 1. **立刻停止修改程式碼**——這是設定問題，改幾次結果都一樣
 2. 把原始 error message 轉給用戶，引導到後台
-   `/dashboard/settings/integrations` 加入目標網域
+   `/dashboard/settings/integrations` 以同名 slug 註冊 EgressService
+   （base_url + 該租戶自己的金鑰）
 3. 用戶看不到該頁 → 權限不足，請租戶管理員代設
-4. 白名單確認生效後才重試
+4. EgressService 確認生效後才重試
 
 詳見 `references/custom-app-dev-guide.md` §25.3。
 

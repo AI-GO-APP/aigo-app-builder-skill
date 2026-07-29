@@ -125,7 +125,8 @@ def execute(ctx):
     ctx.db.list_tables()    # 自建表清單
     ctx.db.query_table(t,o) # 自建表查詢（回傳分頁信封）
     ctx.db.insert_row(t, d) # 自建表新增
-    ctx.secrets.get(k)      # 金鑰
+    ctx.http.call(slug, path, method=..., body=...)  # 對外 HTTP（經 egress 閘道，見 §25）
+    ctx.secrets.get(k)      # 金鑰（webhook 驗簽等非對外憑證用）
     ctx.response.json(d)    # 回應
     ctx.csv.export(r)       # CSV
 ```
@@ -241,7 +242,7 @@ Runtime 內建：react ^18.x, react-dom ^18.x, react-router-dom ^6.x, lucide-rea
 | 401 | Token 過期，重新登入 |
 | 409 | VFS 版本衝突，重新 GET |
 | 423 | 有待審核發布，等待/取消 |
-| Action 連不到第三方 API | 讀 API 回傳的 error message；多為 Egress 白名單未設 → §25 |
+| Action 連不到第三方 API | 讀回傳 status/error：raw httpx 直連必 timeout → 改 `ctx.http.call`；多為 slug 未註冊 EgressService → §25 |
 
 ## 18. 核心策略：app_domain 標籤
 
@@ -705,35 +706,44 @@ def execute(ctx):
 > 完整規格（多層／會簽、非必要層、一表多流程、API 旁路、REST 端點）見公開文件
 > [Custom App 開發者指南 §23](https://www.ai-go.app/zh-TW/docs/custom-app-dev)。
 
-## 25. 對外 API 呼叫與 Egress 白名單
+## 25. 對外 API 呼叫與 Egress 閘道
 
 ### 25.1 怎麼呼叫
 
-Server-Side Action 要打第三方 API，**直接 `import httpx`**，就是一般 Python 寫法：
+Server-Side Action 要打第三方 API，**一律走 `ctx.http.call(<egress-slug>, <path>)` 閘道**：
 
 ```python
-import httpx
-
 def execute(ctx):
-    resp = httpx.get(
-        "https://api.example.com/v1/orders",
-        headers={"Authorization": f"Bearer {ctx.secrets.get('EXAMPLE_API_KEY')}"},
-        timeout=30,
+    # slug 對應租戶在後台註冊的 EgressService（base_url + 憑證都在那裡）；
+    # 這裡只寫 slug 與 path，不碰金鑰、不自帶 Authorization（閘道會剝掉）。
+    resp = ctx.http.call(
+        "example-api",
+        "/v1/orders",
+        method="GET",
     )
-    resp.raise_for_status()
-    ctx.response.json({"orders": resp.json()})
+    if int(resp.get("status") or 500) >= 400:
+        ctx.response.json({"error": "外部服務暫時無法使用", "status": resp.get("status")})
+        return
+    ctx.response.json({"orders": resp.get("data")})
 ```
 
-- 金鑰一律 `ctx.secrets.get()`——**不可**寫死在 code、也不可從前端傳進來
-  （前端傳的等於公開）。
-- 一定要設 `timeout`：外部服務掛住會把 action 拖到逾時，webhook／排程場景尤其致命。
+- **不要直接 `import httpx / requests / urllib.request`**：runner pod 是
+  **default-deny egress**（出口網路只放行平台閘道），raw 連線**必定 timeout**
+  （實測約 20 秒後才失敗，還會把 action 拖到逾時）；這些套件也在沙箱 denylist 上。
+- **憑證不進 action**：金鑰在租戶註冊 EgressService 時填入，由閘道對外注入。
+  自組 `headers={"Authorization": ...}` 沒有用——閘道會把自帶的授權標頭剝掉
+  （實測回 401）。也因此**不需要**為第三方 API 金鑰開 `ctx.secrets` key；
+  `ctx.secrets.get()` 留給非對外憑證用途（例如 webhook 驗簽的 channel secret）。
+- 回傳是 dict：`resp["status"]`（HTTP 狀態碼）與 `resp["data"]`（回應 body）——
+  **自己檢查 status**，閘道不會替你 raise。
 - Webhook 或排程觸發的 action 要**冪等**（見 `event-triggers.md`），
   對外呼叫失敗重試時才不會重複送出。
 
-### 25.2 Egress 白名單（★ 呼叫前的必要設定）
+### 25.2 EgressService 註冊（★ 呼叫前的必要設定）
 
-外部網域**必須先加入 Egress 白名單**才連得出去。這是平台的出口管制，
-沒設定的網域一律被擋。
+`ctx.http.call` 的第一參數 slug 必須對應租戶註冊的 **EgressService**——
+以**同名 slug** 登記，填 base_url 與**該租戶自己的金鑰**。沒註冊的 slug 一律連不出去，
+這是平台的出口管制。
 
 設定位置：**後台 → Settings → Integrations**，路徑 `/dashboard/settings/integrations`
 
@@ -745,20 +755,26 @@ def execute(ctx):
 
 ### 25.3 被擋掉時長什麼樣
 
-呼叫被 Egress 擋下時，**API 回傳的 error message 會說明原因**（權限不足／網域未列入白名單）。
+對外呼叫失敗時，**先完整讀出回傳的 status 與 error message**，再對症：
+
+| 症狀 | 成因 | 處置 |
+|------|------|------|
+| timeout（約 20 秒） | raw `httpx`/`requests` 直連——default-deny egress，連線被黑洞 | 改寫成 `ctx.http.call` |
+| `ctx.http.call` 連不出去／錯誤指向 egress | slug 沒有註冊同名 EgressService | 引導用戶到 `/dashboard/settings/integrations` 註冊（base_url + 金鑰） |
+| 401 | action 自帶 `Authorization` header 被閘道剝掉；或 EgressService 憑證填錯 | 刪掉自帶 header；請租戶檢查 EgressService 金鑰 |
 
 給 AI Agent 的處理準則：
 
-1. Action 對外呼叫失敗時，**先把 API 回傳的 error message 完整讀出來**，
+1. Action 對外呼叫失敗時，**先把回傳的 error message 完整讀出來**，
    不要立刻假設是程式碼寫錯。
 2. 若訊息指向 Egress／權限，**停止改 code**——這是設定問題，改幾次都一樣。
-3. 把原始 error message 轉給用戶，並引導：
-   - 前往後台 `/dashboard/settings/integrations` 把目標網域加入白名單
-   - 看不到該頁 → 權限不足，請管理員代設
-4. 確認白名單設好後才重試。
+3. 把原始 error message 轉給用戶，並引導到後台 `/dashboard/settings/integrations`
+   以同名 slug 註冊／修正 EgressService；看不到該頁 → 權限不足，請管理員代設。
+4. 確認 EgressService 設好後才重試。
 
 ### 25.4 規劃階段就要處理
 
-Phase 1.5 實作計畫裡就該**列出所有要打出去的網域**，讓用戶在寫 code 前
-先去申請白名單——等到部署後才發現被擋，等於整段開發白做。
+Phase 1.5 實作計畫裡就該**列出所有要打出去的外部服務（egress slug + base_url）**，
+讓用戶在寫 code 前先去註冊 EgressService——等到部署後才發現連不出去，
+等於整段開發白做。
 
