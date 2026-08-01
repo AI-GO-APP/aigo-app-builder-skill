@@ -243,6 +243,7 @@ Runtime 內建：react ^18.x, react-dom ^18.x, react-router-dom ^6.x, lucide-rea
 | 409 | VFS 版本衝突，重新 GET |
 | 423 | 有待審核發布，等待/取消 |
 | Action 連不到第三方 API | 讀回傳 status/error：raw httpx 直連必 timeout → 改 `ctx.http.call`；多為 slug 未註冊 EgressService → §25 |
+| 某張表沒有 `tenant_id`，是 bug 嗎？ | **不是**，租戶隔離也沒失效。邊界有四種形態（別名 / 父表歸屬 / 全域表）→ §20.3。不要自己補 `WHERE tenant_id` |
 
 ## 18. 核心策略：app_domain 標籤
 
@@ -412,7 +413,36 @@ Authorization: Bearer {access_token}
 | `nullable` | 是否可為 NULL |
 | `is_system` | 是否為系統欄位（id, tenant_id, created_at, updated_at 等，不可手動寫入） |
 
-### 20.3 典型使用流程
+> 上面的回應範例是 `customers` 這類「自帶 `tenant_id`」的表。**不是每張表都有 `tenant_id`**，
+> 缺了也不代表沒保護——見 §20.3。
+
+### 20.3 租戶邊界：不要用「有沒有 `tenant_id`」判斷
+
+這是最容易誤判的一點。你會看到某些表的欄位清單裡**沒有** `tenant_id`，例如
+`msg_messages`、`announcement_reads`、`import_mappings`、`ir_sequences`、`account_accounts`。
+
+**這些都不是 bug，租戶隔離也沒有失效。** DB Proxy 的租戶邊界依表而定，有四種形態：
+
+| 形態 | 邊界怎麼來 | 例子 |
+|---|---|---|
+| 自帶 `tenant_id` | 直接過濾（多數表） | `customers`、`sale_orders` |
+| **欄位別名** | 租戶欄位存在，但沿用 Odoo 血統叫 `company_id` | `ir_sequences`、`partner_banks` |
+| **父表歸屬** | 子表本身無租戶欄位，靠 `EXISTS` 子查詢繞父表驗證 | `msg_messages`→`msg_threads`、`announcement_reads`→`announcements`、`import_mappings`→`import_jobs` |
+| **全域表** | 平台 seed 的參考資料，全租戶共用，**刻意不過濾**；讀放行、寫 403 | `countries`、`currencies`、`account_accounts` |
+
+（自建表不在此列——它們走 per-tenant schema 隔離，見 §19 兩軌差異。）
+
+**兩條實作守則：**
+
+1. **不要自己補 `WHERE tenant_id = ...`。** 邊界由 Proxy 注入，你手動補在後三種形態的表上，
+   只會因為欄位不存在而直接失敗。
+2. **不要因為「這張表沒有 `tenant_id`」就改用別的資料表、或自己加一層過濾。**
+   平台的判定依據是後端的顯式登記表，不是欄位偵測。
+
+> **反過來也成立**：若你查詢某張表時拿到「欄位不存在」類的 500，代表這張表未被登記為
+> 上述任一形態——它不是給 App 引用的表，換一張，不要試圖繞過。
+
+### 20.4 典型使用流程
 
 ```
 Phase 1.5 實作計畫時：

@@ -4,6 +4,26 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.3.0
+
+### 租戶邊界：補上「表沒有 `tenant_id` 不等於沒保護」
+
+- **起因**：開發者實測回報「`announcement_reads` / `import_mappings` / `ir_sequences` /
+  `msg_messages` / `account_accounts` 沒有 `tenant_id`，是 bug 嗎？」——查證結論是
+  **五張全部刻意設計、租戶隔離正常**，但本 Skill 先前完全沒有描述租戶邊界形態，
+  §20.2 的回應範例又剛好拿了自帶 `tenant_id` 的 `customers` 當例子，等於默認
+  「每張表都有 `tenant_id`」。Agent 依此推論會走上兩條錯路：誤判該表不安全而改用別的表，
+  或自己補 `WHERE tenant_id = ...`（那些表根本沒這欄位，直接失敗）。
+- **新增 `custom-app-dev-guide.md` §20.3「租戶邊界：不要用『有沒有 `tenant_id`』判斷」**：
+  列出 DB Proxy 的四種邊界形態（自帶 `tenant_id` ／ 欄位別名 `company_id` ／ 父表歸屬
+  `EXISTS` 子查詢 ／ 全域表刻意不過濾）與各自的代表表，並給兩條實作守則
+  （不自補 `WHERE tenant_id`、不因缺欄位就改用別的表）。原 §20.3 典型使用流程順延為 §20.4。
+- **§20.2 補註**：明示回應範例是「自帶 `tenant_id`」形態，不是每張表都有。
+- **§17 常見問題速查**：新增一列，讓 agent 不必讀完 §20 就能命中答案。
+- 平台側同步：AI GO repo `docs/integrations/custom-app-agent.md` §7.2 補上第四種形態
+  （全域表）與同一條警語；Introspection API 擬回傳 `tenancy` 欄位讓此判斷不必靠文件，
+  追蹤於 [AI-GO#874](https://github.com/urfit-tech/AI-GO/issues/874)。
+
 ## 1.2.0
 
 ### 對外 API 呼叫改回 `ctx.http.call` 閘道（反轉 1.1.0 的指引）
