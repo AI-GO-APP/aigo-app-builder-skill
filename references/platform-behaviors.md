@@ -47,7 +47,9 @@ await queryAdvanced(table, {
 | `custom_data`（op=is_not_null） | 200（整欄操作可用） |
 
 **推論出的設計規則**：任何需要被**篩選、排序、分頁**的維度，一律放 SaaS 表**原生欄位**；
-`custom_data` 只適合存「取回之後才用」的資料。`app_domain` 過濾只能在前端或 action 內做。
+`custom_data` 只適合存「取回之後才用」的資料。`app_domain` 過濾只能在前端或 action 內做
+（見 `custom-app-dev-guide.md` §18）——**且必須先照 §1.2 取完整資料再過濾**，
+否則配上 §1.1 的 500 筆上限就會變成「只過濾了前 500 筆」。
 
 ### 1.4 `queryAdvanced` 的完整簽名
 
@@ -212,7 +214,7 @@ HTTP 409
 目前**未找到可在 API 層帶的確認參數**（已試 `confirm`／`force`／
 `confirm_action_removal`／`allow_action_removal` 等 body 與 query 形式皆無效）。
 
-暫時的解法是把該 action 檔案放回去再發布。若平台有對應的 API 參數，歡迎補上本節。
+暫時的解法是把該 action 檔案放回去再發布；要真的移除 action 請引導用戶到 Builder 後台操作。
 
 ---
 

@@ -69,7 +69,9 @@ python scripts/check_update.py     # macOS / Linux 用 python3
      存量功能維持原樣即可運作，**但不要往上加東西**，新資料需求一律開自建表
    - **解析 actions/manifest.json 的 webhook 宣告**：列出所有 `"webhook": true` 的 action
      與 `receive_webhook`，這些是對外端點
-   - **解析 db.json Data Reference 定義**（★ 重要）：
+   - **盤點 Data Reference**（★ 重要）：用 `GET /api/v1/refs/apps/{app_id}`，
+     **不要讀 `src/db.json`**——它是執行期注入檔，VFS 裡實測恆為 `{}`，
+     即使引用全部註冊成功也一樣（見 `references/platform-behaviors.md` §6）
      - 列出所有 SaaS 表名稱和欄位結構
      - 標記哪些表有 `custom_data`（JSONB）欄位
      - 列出每張表的權限（read/create/update/delete）
@@ -175,7 +177,8 @@ python scripts/check_update.py     # macOS / Linux 用 python3
    - 走 Data Reference 的表：說明如何用 `custom_data` JSONB 擴充、`app_domain` 標籤值
    - 走自建表且需要新建的：產出**建表規格表**
      `| 表顯示名 | 欄位顯示名 | 型別 | 必填 | 唯一 | relation 目標 |`
-   - 若決定使用的 SaaS 表尚未在 db.json 中，引導用戶到 Builder 後台加入 Data Reference
+   - 若決定使用的 SaaS 表尚未被引用（以 `GET /api/v1/refs/apps/{app_id}` 為準，不是 db.json），
+     引導用戶到 Builder 後台加入 Data Reference
 
 4. **頁面架構**
    - 路由結構（單頁 / 多頁）
@@ -348,6 +351,20 @@ python scripts/check_update.py     # macOS / Linux 用 python3
       手動補在沒有該欄位的表上只會直接失敗
     - **不要因為缺欄位就改用別的表或自己加一層過濾**——判定依據是後端的顯式登記表，不是欄位偵測
     - 詳見 `references/custom-app-dev-guide.md` §20.3
+26. **`offset` 分頁一律帶唯一鍵排序**（★ 強制，**不加會靜默漏資料**）
+    - DB Proxy 單次最多回 **500 筆**、回傳是裸陣列（無 `total` 信封），要取完整資料
+      必須自己 `offset` 迴圈，以「回傳數 < 500」作結束條件
+    - 伺服器預設 `ORDER BY created_at DESC NULLS LAST`，時間戳重複時排序不穩定，
+      分頁會**跨頁重複又漏抓**——實測某表 1866 筆只取回 1860 筆，
+      **不拋例外、不報警告**，只有統計數字會悄悄少一截
+    - 每次分頁查詢都要帶 `order_by: [{ column: "id", direction: "asc" }]`
+    - 詳見 `references/platform-behaviors.md` §1
+27. **`ctx.erp.validate_picking` 的冪等要看明細，不能看單據 state**（★ 強制）
+    - 實測成功扣帳後 `stock_pickings.state` **不會**轉成 `done`（只寫 `date_done`），
+      真正反映完成的是 `stock_moves.state`
+    - 拿 `picking["state"] == "done"` 當冪等守門，條件永遠是 False、守門永遠不生效；
+      要改判 `all(m["state"] in {"done","cancel"} for m in moves)`
+    - 詳見 `references/platform-behaviors.md` §4.3
 
 ### Server-Side Action 撰寫
 
