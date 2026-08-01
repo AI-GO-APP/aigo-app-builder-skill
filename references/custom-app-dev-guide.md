@@ -31,8 +31,10 @@ src/main.tsx          ★ 入口點
 src/App.tsx           路由 + Layout
 src/App.css           全域樣式
 src/api.ts            [SDK] 自建表 CRUD（+ legacy CustomObject 方法）
-src/db.ts             [SDK] DB Proxy
+src/db.ts             [SDK★] DB Proxy
 src/action.ts         [SDK] Server Action
+src/approval.ts       [SDK★] 簽核操作（見 §24.4）
+src/user.ts           [SDK★] 登入者角色／權限快照（見 §6）
 src/data.json         [INJ] legacy CustomObject 定義（已退場，見 CONTEXT.md）
 src/db.json           [INJ] Data Reference
 src/actions.json      [INJ] Action 清單
@@ -41,6 +43,11 @@ src/components/       共用元件
 actions/manifest.json Action 註冊
 actions/*.py          Action 實作
 ```
+
+> **★ 標記的 SDK 檔案不是建立 App 時就有的**——只有 `api.ts` / `action.ts` 隨 App 建立產生，
+> `db.ts` / `approval.ts` / `user.ts` 要**到 Builder 後台開一次「開發」分頁**才會補進 VFS。
+> 純走 API 的開發流程 `import "../user"` 會編譯失敗，補救見 `platform-behaviors.md` §10.2。
+> SDK 檔案開頭都有 `/* @ai-go-sdk */` 標記，平台以此判斷可否覆寫——**不要動它們**。
 
 ## 4. 程式碼注入 API
 
@@ -97,7 +104,8 @@ const { data, file } = await runAction("name", params);
 ### User Context (user.ts)
 
 沿用**主站的角色／權限**做條件顯示，**不要自己打 `/api/v1/auth/me`**。
-資料是 Runtime 載入時注入的唯讀快照；**僅 Internal App 有值**，External／匿名一律空陣列。
+資料是 Runtime 載入時注入的唯讀快照（`window.__USER_ROLES__` / `__USER_PERMISSIONS__`）；
+**只有 Internal App 且非匿名渲染才注入**，External／匿名一律空陣列。
 
 ```typescript
 import { getCurrentUser, getRoles, getPermissions,
@@ -107,10 +115,21 @@ if (hasPermission("sale.write")) { /* 顯示新增訂單按鈕 */ }
 if (isAdmin()) { /* system.admin 全開 */ }
 ```
 
+⚠️ **`src/user.ts` 不是每個 App 的 VFS 都有**——它是**在 Builder 後台開「開發」分頁時**
+才注入的 SDK 檔（`api.ts` / `action.ts` 建立 App 就有，`db.ts` / `approval.ts` / `user.ts` 沒有）。
+純走 API 建立的 App 直接 `import "../user"` 會編譯失敗；
+快照全域本身仍有注入，可自行讀取——兩條補救路徑見 `platform-behaviors.md` §10.2。
+
+⚠️ **這裡只解決「能做什麼」，不解決「是誰」。** 快照裡沒有 user id／email；
+要取登入者身分請解 `__APP_TOKEN__` 的 JWT payload（`platform-behaviors.md` §10.3）。
+`window.__CURRENT_USER__` **在任何模式都不存在**，不要找它。
+
 ⚠️ **用 permission 標籤（`模組.動作`）判斷，不要用角色名稱**——角色可被租戶改名，
 標籤才穩定；`system.admin` 自動通過所有 `hasPermission`。
 ⚠️ **前端隱藏只是 UX 不是安全邊界**：機敏資料差異必須在 action 用
 `ctx.user_permissions` 分流（§7），或靠 Data Reference 授權把關。
+同理，**寫入身分欄位的值要在 action 用 `ctx.user_id` 覆蓋**，
+不要相信前端從 token 解出來後送上來的 id（`platform-behaviors.md` §10.3）。
 
 ## 7. Server-Side Actions
 
@@ -199,14 +218,24 @@ JS API 限制：confirm()→false, alert()→不顯示, prompt()→null。
 
 ## 13. Runtime 全域變數
 
-| 變數 | 說明 |
-|------|------|
-| `window.__APP_TOKEN__` | JWT Token |
-| `window.__APP_SLUG__` | App slug |
-| `window.__APP_ID__` | App UUID |
-| `window.__API_BASE__` | API 基底 URL |
-| `window.__IS_AUTHENTICATED__` | 是否已認證 |
-| `window.__IS_EXTERNAL__` | 是否為 External 模式 |
+**注入條件依模式而異**，不是每個變數在每種模式都有值：
+
+| 變數 | 說明 | internal | external | 匿名 |
+|------|------|:-:|:-:|:-:|
+| `window.__APP_TOKEN__` | JWT Token | ✅ | ✅ | ✅ |
+| `window.__APP_SLUG__` | App slug | ✅ | ✅ | ✅ |
+| `window.__APP_ID__` | App UUID | ✅ | ✅ | ✅ |
+| `window.__API_BASE__` | API 基底 URL | ✅ | ✅ | ✅ |
+| `window.__CUSTOM_APP_ROOT__` | Shadow DOM 掛載點（`main.tsx` 用） | ✅ | ✅ | ✅ |
+| `window.__USER_ROLES__` / `__USER_PERMISSIONS__` | 權限快照 JSON 字串（`user.ts` 用，見 §6） | ✅ | ✗ | ✗ |
+| `window.__IS_EXTERNAL__` / `__AUTH_TYPE__` | 是否為 External 模式 | ✗ | ✅ | — |
+| `window.__IS_AUTHENTICATED__` / `__PUB_API_BASE__` | 匿名渲染標記（恆為 `false`）與 /pub 基底 | ✗ | ✗ | ✅ |
+
+> ✗ 代表**該變數根本沒被注入**（讀到 `undefined`），不是 `false`。所以判斷一律寫
+> `!!(window as any).__IS_EXTERNAL__`；也**不能**拿 `__IS_AUTHENTICATED__` 當「是否已登入」，
+> 它只在匿名渲染出現且恆為 `false`。
+> `window.__CURRENT_USER__` **不存在於任何模式**——取登入者身分請解 `__APP_TOKEN__`
+> 的 JWT payload。逐項實測與程式碼核對見 `platform-behaviors.md` §10.1。
 
 ## 14. External Auth API
 

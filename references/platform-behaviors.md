@@ -3,7 +3,10 @@
 > 本檔記錄**實際打過 API 才知道**的行為，用來補上規格文件沒寫、但一踩就卡住的地方。
 > 每一條都標了驗證環境與日期；平台行為可能隨版本變動，發現不符請更新本檔。
 >
-> 驗證環境：`ai-go.app` 正式站、單一租戶、`ctx.env == "online"`｜日期 2026-07-31 ～ 08-01
+> 驗證環境：`ai-go.app` 正式站、單一租戶、`ctx.env == "online"`、時區 **UTC+8**
+> ｜日期 2026-07-31 ～ 08-01
+>
+> §10 的全域變數注入條件與 SDK 檔案來源另經平台原始碼交叉核對（2026-08-01）。
 
 ---
 
@@ -186,6 +189,18 @@ if all_done:
 平台本身對已完成的明細不會重複扣帳（重複呼叫後 `stock_quants` 未再變動），
 但守門仍必要——避免無謂呼叫，也避免回報「已扣帳」這種誤導性訊息。
 
+**沒有 `stock_moves` 明細的單據，呼叫 validate 不會產生任何庫存異動**——不報錯、
+也不回 `False`，就是什麼都沒發生。而 `stock_moves` 是 seed 表、App 寫不了（§3），
+所以由 Custom App 自行建立的 `stock_pickings` 必須先在平台 ERP 補上明細才可扣帳。
+**UI 應該在明細為空時就把按鈕停用**，不要讓使用者按一個必定無效的按鈕：
+
+```typescript
+const moves = await query("stock_moves", { picking_id: picking.id });
+const canValidate = moves.length > 0 &&
+  !moves.every((m) => ["done", "cancel"].includes((m.state || "").toLowerCase()));
+// moves.length === 0 → 提示「請先於 ERP 補上明細」，而不是讓他按下去
+```
+
 ---
 
 ## 5. Builder API 的兩個必填／衝突
@@ -282,6 +297,13 @@ export function toTime(d: unknown): number | null {
 推導日期也不可用 `new Date().toISOString().slice(0,10)`，那是 UTC 日期，
 在 UTC+8 的凌晨 0–8 點會退回前一天，拿去比對 DATE 欄位會整批對不上。
 
+> ⚠️ **`toTime()` 對 DATE-only 值補的是 `T00:00:00Z`，只在非負偏移時區（UTC+0 以東）安全。**
+> 本檔驗證環境是 UTC+8：`2026-08-01` → UTC 午夜 → 本地 08:00，仍落在 8/1。
+> 但在負偏移時區（如 UTC−5）同一個值會被顯示成 7/31，**日期整批退一天**。
+> **DATE-only 欄位（`work_date`、`date_from` 這類純日期）建議一律以字串比對與顯示**
+> （`row.work_date === "2026-08-01"`），不要轉成時間戳；需要排序時字串排序即可。
+> `toTime()` 留給真正帶時間的 TIMESTAMP 欄位用。
+
 ---
 
 ## 9. NOT NULL 欄位只有在真的送出時才會浮現
@@ -307,15 +329,74 @@ export function toTime(d: unknown): number | null {
 
 ---
 
-## 10. 取得登入者：internal runtime 不注入 `__CURRENT_USER__`
+## 10. 取得登入者：身分與權限是兩條管道，`user.ts` 不一定在 VFS 裡
 
-實測 internal App 的執行期只有這些全域：
-`__API_BASE__`、`__APP_ID__`、`__APP_TOKEN__`、`__APP_SLUG__`、`__CUSTOM_APP_ROOT__`。
-**沒有** `__CURRENT_USER__`，範本也沒有附 `src/user.ts`。
-（external App 的執行期**有**注入 `__CURRENT_USER__`——兩者行為不同。）
+「登入者是誰」與「登入者能做什麼」由**兩套獨立機制**提供，容易混為一談：
 
-`__APP_TOKEN__` 是 JWT，payload 內含 `sub`（平台 user id）、`email`、`tenant_id`，
-在前端解自己的 token 即可，不需呼叫本 skill 禁止的 `/api/v1/auth/me`：
+| 要什麼 | 管道 | 來源 |
+|---|---|---|
+| **身分**（user id / email / tenant） | 解 `__APP_TOKEN__` 的 JWT payload | 一律可用 |
+| **權限**（roles / permissions） | `__USER_ROLES__`／`__USER_PERMISSIONS__` 全域，由 `src/user.ts` SDK 封裝 | **僅 internal 且非匿名渲染**才注入 |
+
+`custom-app-dev-guide.md` §6 講的是**權限**那一條，本節講的是**身分**那一條，兩者不衝突。
+
+### 10.1 執行期全域變數的實際注入條件
+
+| 全域 | internal | external | 匿名渲染 |
+|---|:-:|:-:|:-:|
+| `__API_BASE__`、`__APP_ID__`、`__APP_TOKEN__`、`__APP_SLUG__` | ✅ | ✅ | ✅ |
+| `__CUSTOM_APP_ROOT__`（Shadow DOM 掛載點） | ✅ | ✅ | ✅ |
+| `__USER_ROLES__`、`__USER_PERMISSIONS__` | ✅ | ✗ | ✗ |
+| `__IS_EXTERNAL__`、`__AUTH_TYPE__` | ✗ | ✅ | — |
+| `__IS_AUTHENTICATED__`、`__PUB_API_BASE__` | ✗ | ✗ | ✅ |
+
+三點要注意：
+
+- **`__CURRENT_USER__` 在任何模式都不存在**，不是「internal 沒有、external 有」。
+  （1.6.0 的本節誤記為 external 有注入，已更正。）
+- **`__IS_EXTERNAL__` 在 internal 是 `undefined`**，不是 `false`——平台 SDK 一律寫
+  `!!(window as any).__IS_EXTERNAL__`，你自己判斷時也要這樣寫。
+- **`__IS_AUTHENTICATED__` 只在匿名渲染注入，而且恆為 `false`**。
+  拿它當「是否已登入」判斷，在 internal／external 都會讀到 `undefined`——
+  這個變數只能用來偵測「是不是匿名模式」。
+
+### 10.2 `src/user.ts` 不是每個 App 都有（★ 直接 import 會編譯失敗）
+
+SDK 檔案有兩個來源，涵蓋範圍不同：
+
+| 檔案 | 建立 App 時就有 | 到 Builder 後台開「開發」分頁才補上 |
+|---|:-:|:-:|
+| `src/api.ts`、`src/action.ts` | ✅ | 沿用 |
+| `src/db.ts`（有引用表時）、`src/approval.ts`、`src/user.ts` | ✗ | ✅ |
+
+也就是說**純走 API 建立、從未在 Builder 後台開過的 App，VFS 裡不會有 `src/user.ts`**——
+本 skill 的開發流程正是這一種。`import { hasPermission } from "../user"` 會直接編譯失敗。
+
+補救有兩條，擇一：
+
+1. 請用戶到 Builder 後台把該 App 開一次「開發」分頁，平台會自動補齊 SDK 檔案；
+2. 不依賴 SDK 檔，直接讀注入的全域（行為與 `user.ts` 等價）：
+
+```ts
+function injected(key: string): string[] {
+  try {
+    const raw = (window as any)[key];
+    const arr = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : [];
+  } catch { return []; }
+}
+
+const PERMS = injected("__USER_PERMISSIONS__");   // external／匿名恆為 []
+export const isAdmin = () => PERMS.includes("system.admin");
+export const hasPermission = (p: string) => isAdmin() || PERMS.includes(p);
+```
+
+> 不論走哪一條，**都不要自己打 `/api/v1/auth/me`**（本 skill 禁止），
+> 也不要在 App 內另建角色表——見 `SKILL.md` 核心規則 23。
+
+### 10.3 從 `__APP_TOKEN__` 取身分
+
+`__APP_TOKEN__` 是 JWT，payload 內含 `sub`（平台 user id）、`email`、`tenant_id`：
 
 ```ts
 export function currentIdentity(): { userId: string; email: string; tenantId: string } | null {
@@ -323,29 +404,26 @@ export function currentIdentity(): { userId: string; email: string; tenantId: st
     const seg = ((window as any).__APP_TOKEN__ || "").split(".")[1];
     if (!seg) return null;
     const b = seg.replace(/-/g, "+").replace(/_/g, "/");
-    const p = JSON.parse(decodeURIComponent(escape(atob(b + "===".slice((b.length + 3) % 4)))));
+    const bin = atob(b + "===".slice((b.length + 3) % 4));
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    const p = JSON.parse(new TextDecoder("utf-8").decode(bytes));
     return p?.sub ? { userId: p.sub, email: p.email || "", tenantId: p.tenant_id || "" } : null;
   } catch { return null; }
 }
 ```
 
-這不只是顯示用途——`import_jobs.user_id` 是 NOT NULL，取不到就無法新增。
+這不只是顯示用途——`import_jobs.user_id` 是 NOT NULL，取不到就無法新增（見 §9）。
 
----
-
-## 11. `validate_picking` 之後 `state` 不會變，只有 `date_done` 會寫
-
-實測 `ctx.erp.validate_picking` 成功後：
-
-- `stock_moves.state`：`assigned` → `done`，`quantity` 由 0 變為實際數量
-- `stock_quants`：產生實際加減（來源 −N、目的 +N）
-- `stock_pickings.date_done`：寫入完成時間
-- `stock_pickings.state`：**維持 `assigned` 不變**
-
-因此判斷「這張單是否已扣帳」只能看 `date_done` 或明細的 move 狀態，不能看 picking 的 state。
-冪等保護也要建立在 move 狀態上。
-
-另外，**沒有 `stock_moves` 的單據呼叫 validate 一定不會產生任何庫存異動**，
-而 `stock_moves` 是 seed 表、App 無法寫入——也就是說由 Custom App 自行建立的
-`stock_pickings` 需要在平台 ERP 補上明細後才可扣帳。UI 應該直接擋掉，
-不要讓使用者按一個必定失敗的按鈕。
+> ⚠️ **解出來的 `sub` 只能當 UX 預設值，不能當授權依據。**
+> token 存在 `window` 上，前端可以竄改後再送出。凡是要寫進**身分欄位**的值
+> （`import_jobs.user_id`、建立者、簽核申請人…），一律在 Server Action 內
+> 用 `ctx.user_id` 覆蓋前端傳來的值，不要相信 params。
+> 這與「前端隱藏只是 UX 不是安全邊界」（`custom-app-dev-guide.md` §6、
+> `SKILL.md` 核心規則 23）是同一條原則。
+>
+> ```python
+> def execute(ctx):
+>     payload = dict(ctx.params.get("job") or {})
+>     payload["user_id"] = ctx.user_id          # ★ 一律覆蓋，不用前端送的
+>     ctx.response.json(ctx.db.insert("import_jobs", payload))
+> ```
