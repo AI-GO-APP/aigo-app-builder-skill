@@ -21,7 +21,8 @@ from aigo_data_center import (
 )
 import httpx
 
-# === 設定（優先讀 .aigo/.env，其次環境變數） ===
+# === 設定（依序讀 <專案>/.aigo/.env → ~/.aigo/.env，環境變數優先） ===
+# 專案根用 AIGO_PROJECT_ROOT 指定；沒指定就是 CWD——別在 skill 目錄下跑。
 load_env_file(os.environ.get("AIGO_PROJECT_ROOT", "."))
 
 BASE_URL = os.environ.get("AIGO_BASE_URL", "https://ai-go.app")
@@ -33,7 +34,8 @@ SLUG = os.environ.get("AIGO_SLUG", "")
 if not EMAIL or not PASSWORD or not APP_ID:
     print("❌ 缺少憑證：AIGO_EMAIL, AIGO_PASSWORD, AIGO_APP_ID")
     print("   建議做法（設定一次即可）：")
-    print("     uv run python scripts/aigo_auth.py setup   # 建立 .aigo/.env 後填入帳密")
+    print("     uv run python scripts/aigo_auth.py setup   # 建立 ~/.aigo/.env 後填入帳密")
+    print("     AIGO_APP_ID / AIGO_SLUG 放該 app 專案的 .aigo/.env，並用 AIGO_PROJECT_ROOT 指過去")
     print("   或臨時用環境變數：$env:AIGO_EMAIL='xxx'; $env:AIGO_PASSWORD='xxx'; $env:AIGO_APP_ID='xxx'")
     sys.exit(1)
 

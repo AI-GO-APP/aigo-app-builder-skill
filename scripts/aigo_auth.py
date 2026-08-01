@@ -21,6 +21,10 @@ CONFIG_DIR = ".aigo"
 CONFIG_FILE = "config.json"
 
 # 憑證檔與 Token 快取（皆位於 .aigo/，已被 .gitignore 忽略）
+#
+# 憑證檔預設放**機器級**的 `~/.aigo/.env`：它與 Skill 安裝目錄無關，
+# 因此 `npx skills update`（會 rm -rf 整個 skill 目錄再複製）或重裝都不會洗掉。
+# 專案級的 `<專案>/.aigo/.env` 仍然有效且優先，供「不同專案用不同帳號」的情境。
 CREDENTIALS_FILE = ".env"
 TOKEN_CACHE_FILE = "token.json"
 
@@ -197,65 +201,97 @@ def _secure_write(path: Path, content: str) -> None:
         pass
 
 
-def load_env_file(project_path: str = ".") -> dict:
+def credentials_path(project_path: str | None = None) -> Path:
     """
-    讀取 `.aigo/.env` 並注入 os.environ（不覆寫已存在的環境變數）。
+    憑證檔位置。
 
-    格式為每行 `KEY=VALUE`，`#` 開頭為註解，值可用單/雙引號包住。
-    檔案不存在時回空字典——環境變數本來就是合法的替代來源。
+    - 給定 `project_path` → `<專案>/.aigo/.env`（該專案專用）
+    - 不給 → `~/.aigo/.env`（機器級，預設；符合「每台機器設定一次」的設計，
+      且不會因為 Skill 更新／重裝而消失）
 
     Args:
-        project_path: 專案根目錄路徑
+        project_path: 專案根目錄路徑；None 表示機器級
 
     Returns:
-        從檔案讀到的鍵值字典
+        憑證檔路徑
     """
-    env_file = Path(project_path) / CONFIG_DIR / CREDENTIALS_FILE
-    if not env_file.exists():
-        return {}
+    base = Path(project_path) if project_path is not None else Path.home()
+    return base / CONFIG_DIR / CREDENTIALS_FILE
 
-    values: dict[str, str] = {}
+
+def _read_env_into(env_file: Path, values: dict[str, str]) -> None:
+    """把單一 .env 的鍵值讀進 values 並注入 os.environ，兩者都不覆寫既有值。"""
     for line in env_file.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, raw = line.partition("=")
         key = key.strip()
-        value = raw.strip().strip("'\"")
         if not key:
             continue
-        values[key] = value
-        os.environ.setdefault(key, value)
-
-    return values
+        values.setdefault(key, raw.strip().strip("'\""))
+        os.environ.setdefault(key, values[key])
 
 
-def write_credentials_template(project_path: str = ".") -> Path:
+def load_env_file(project_path: str = ".") -> dict:
     """
-    建立 `.aigo/.env` 憑證檔範本（已存在則不覆寫）。
+    讀取憑證檔並注入 os.environ（不覆寫已存在的環境變數）。
 
-    範本刻意留空 AIGO_PASSWORD——密碼由使用者自己填入，
-    任何工具或 agent 都不應該代為寫入。
+    依序讀 `<專案>/.aigo/.env` → `~/.aigo/.env`，**先讀到的優先**，
+    因此專案級設定會蓋過機器級。格式為每行 `KEY=VALUE`，`#` 開頭為註解，
+    值可用單/雙引號包住。兩個檔案都不存在時回空字典——環境變數本來就是
+    合法的替代來源。
 
     Args:
         project_path: 專案根目錄路徑
 
     Returns:
+        從檔案讀到的鍵值字典（專案級優先）
+    """
+    values: dict[str, str] = {}
+    seen: set[str] = set()
+
+    for env_file in (credentials_path(project_path), credentials_path()):
+        key = str(env_file.expanduser().absolute()).lower()
+        if key in seen or not env_file.exists():
+            continue
+        seen.add(key)
+        _read_env_into(env_file, values)
+
+    return values
+
+
+def write_credentials_template(project_path: str | None = None) -> Path:
+    """
+    建立 `.aigo/.env` 憑證檔範本（已存在則不覆寫）。
+
+    預設寫**機器級**的 `~/.aigo/.env`——填一次全機器通用，且 Skill 更新／重裝
+    （`npx skills update` 會刪除整個 skill 目錄）不會波及。只有明確給了
+    `project_path` 才會寫進該專案。
+
+    範本刻意留空 AIGO_PASSWORD——密碼由使用者自己填入，
+    任何工具或 agent 都不應該代為寫入。
+
+    Args:
+        project_path: 專案根目錄路徑；None（預設）表示機器級
+
+    Returns:
         憑證檔路徑
     """
-    env_file = Path(project_path) / CONFIG_DIR / CREDENTIALS_FILE
+    env_file = credentials_path(project_path)
+    scope = "專案級" if project_path is not None else "機器級"
     if env_file.exists():
         print(f"ℹ️  憑證檔已存在，未覆寫：{env_file}")
         return env_file
 
     template = (
-        "# AI GO Builder 憑證（本檔在 .gitignore 內，不會被提交）\n"
+        "# AI GO Builder 憑證（機器級；不要放進任何 repo，也不要放進 Skill 安裝目錄）\n"
         "# 填好之後這台機器就不必再輸入密碼；Token 會自動快取與換新。\n"
         "AIGO_EMAIL=\n"
         "AIGO_PASSWORD=\n"
     )
     _secure_write(env_file, template)
-    print(f"✅ 已建立憑證檔範本：{env_file}")
+    print(f"✅ 已建立憑證檔範本（{scope}）：{env_file}")
     print("   請自行填入 AIGO_EMAIL 與 AIGO_PASSWORD 後重新執行。")
     return env_file
 
@@ -326,13 +362,12 @@ def get_token(project_path: str = ".", force: bool = False) -> str:
     email = os.environ.get("AIGO_EMAIL", "").strip()
     password = os.environ.get("AIGO_PASSWORD", "")
     if not email or not password:
-        env_file = Path(project_path) / CONFIG_DIR / CREDENTIALS_FILE
         raise RuntimeError(
             f"❌ 找不到 AI GO 憑證。\n"
-            f"   請在 {env_file} 填入：\n"
+            f"   請在 {credentials_path()} 填入：\n"
             f"     AIGO_EMAIL=your-email@example.com\n"
             f"     AIGO_PASSWORD=your-password\n"
-            f"   （該檔在 .gitignore 內，不會被提交；填一次即可，之後不再詢問）\n"
+            f"   （機器級憑證檔，填一次即可，之後不再詢問；不會被任何 repo 提交）\n"
             f"   或改用環境變數 AIGO_EMAIL / AIGO_PASSWORD。\n"
             f"   建立範本：uv run python scripts/aigo_auth.py setup"
         )
@@ -383,8 +418,8 @@ def print_setup_guide() -> None:
 ║     - app_name:    App 顯示名稱（選填）                       ║
 ║     - access_mode: internal / external（選填）                ║
 ║                                                              ║
-║  3. 執行 `aigo_auth.py setup` 建立 .aigo/.env，填入帳密      ║
-║     （只需一次；該檔已被 .gitignore 忽略）                     ║
+║  3. 執行 `aigo_auth.py setup` 建立 ~/.aigo/.env，填入帳密    ║
+║     （每台機器只需一次；不在任何 repo 或 Skill 目錄內）        ║
 ║                                                              ║
 ║  4. 之後一律用 get_token() 取 Token——會自動快取與換新        ║
 ║                                                              ║
@@ -398,12 +433,16 @@ def print_setup_guide() -> None:
 def _cmd_status(project_path: str = ".") -> int:
     """印出憑證與 Token 快取的現況，不外洩任何秘密值。"""
     load_env_file(project_path)
-    env_file = Path(project_path) / CONFIG_DIR / CREDENTIALS_FILE
+    home_env = credentials_path()
+    project_env = credentials_path(project_path)
     email = os.environ.get("AIGO_EMAIL", "").strip()
     has_password = bool(os.environ.get("AIGO_PASSWORD"))
     cache = _load_token_cache(project_path)
 
-    print(f"憑證檔      : {env_file}{'' if env_file.exists() else ' （不存在）'}")
+    print(f"憑證檔(機器): {home_env}{'' if home_env.exists() else ' （不存在）'}")
+    if project_env.expanduser().absolute() != home_env.expanduser().absolute():
+        exists = project_env.exists()
+        print(f"憑證檔(專案): {project_env}{' （優先）' if exists else ' （不存在）'}")
     print(f"AIGO_EMAIL  : {email or '（未設定）'}")
     print(f"AIGO_PASSWORD: {'已設定' if has_password else '（未設定）'}")
 
@@ -430,10 +469,12 @@ if __name__ == "__main__":
         pass
 
     command = sys.argv[1] if len(sys.argv) > 1 else "guide"
-    root = sys.argv[2] if len(sys.argv) > 2 else "."
+    explicit_root = sys.argv[2] if len(sys.argv) > 2 else None
+    root = explicit_root if explicit_root is not None else "."
 
     if command == "setup":
-        write_credentials_template(root)
+        # 不給路徑 → 機器級 ~/.aigo/.env（預設且建議）；給了才寫進該專案
+        write_credentials_template(explicit_root)
     elif command == "status":
         sys.exit(_cmd_status(root))
     elif command == "logout":
