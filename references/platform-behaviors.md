@@ -248,6 +248,7 @@ https://{tenant}.ai-go.app/runtime/{slug}
 ```
 
 開發循環是 **sync → compile → publish → 才能 run action**，不能只 sync 就測。
+
 ---
 
 ## 8. 原生 TIMESTAMP／DATE 是 offset-naive 的 UTC（★ 前端解析會差 8 小時）
