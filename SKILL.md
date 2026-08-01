@@ -332,8 +332,14 @@ python scripts/check_update.py     # macOS / Linux 用 python3
       `/dashboard/settings/app-crons` 的排程狀態（`event-triggers.md` §2.8）
 23. **角色／權限沿用平台，不要自建一套**（★ 強制）
     - Internal app 前端用 `src/user.ts`（`hasPermission` / `hasAnyPermission` /
-      `isAdmin` / `getRoles`），資料是 Runtime 注入的登入者快照，
+      `isAdmin` / `getRoles`），資料是 Runtime 注入的登入者權限快照，
       **禁止自己打 `/api/v1/auth/me`**，也不要在 app 內另建角色表
+    - ⚠️ **`src/user.ts` 要在 Builder 後台開過「開發」分頁才會進 VFS**，
+      純走 API 建立的 app 直接 import 會編譯失敗——改直接讀 `__USER_PERMISSIONS__` 全域
+      （`platform-behaviors.md` §10.2）。快照只給「能做什麼」，
+      「是誰」要解 `__APP_TOKEN__` 的 JWT（§10.3）；`__CURRENT_USER__` 不存在
+    - **前端解出的身分不可信**：寫入 `user_id` 這類身分欄位時，
+      一律在 action 內用 `ctx.user_id` 覆蓋前端送來的值
     - **判斷授權用 permission 標籤（`模組.動作`）不要用角色名稱**——角色可被租戶改名；
       `system.admin` 自動通過所有檢查
     - **前端隱藏只是 UX**：機敏資料差異必須在 action 用 `ctx.user_permissions` 分流
@@ -370,6 +376,16 @@ python scripts/check_update.py     # macOS / Linux 用 python3
     - 拿 `picking["state"] == "done"` 當冪等守門，條件永遠是 False、守門永遠不生效；
       要改判 `all(m["state"] in {"done","cancel"} for m in moves)`
     - 詳見 `references/platform-behaviors.md` §4.3
+28. **原生 TIMESTAMP／DATE 是 offset-naive 的 UTC，解析前必須補 `Z`**（★ 強制，**不補會靜默算錯**）
+    - 平台混用兩種時間欄位：`created_at`／`updated_at` 是 timestamptz（帶 `+00:00`，可直接用）；
+      `check_in`／`date_from`／`date_done`／`work_date` 是原生 TIMESTAMP／DATE，
+      回傳長這樣 `2026-08-01T04:37:03`——**存的是 UTC，但 JS 會當成本地時間**
+    - **不拋例外、不報警告**：實測相隔 6 分鐘的上下班打卡被算成 **8.1 小時**工時，
+      直接寫進 `hr_attendances.worked_hours`（影響薪資）
+    - 解析前補 `Z`；顯示不可切字串（`slice(0,16)` 顯示的是 UTC）；
+      推導日期不可用 `toISOString().slice(0,10)`（那是 UTC 日期，UTC+8 凌晨會退回前一天）
+    - DATE-only 欄位建議直接以**字串比對／顯示**，不要轉時間戳
+    - 可直接沿用的 `toTime()` 與適用範圍見 `references/platform-behaviors.md` §8
 
 ### Server-Side Action 撰寫
 

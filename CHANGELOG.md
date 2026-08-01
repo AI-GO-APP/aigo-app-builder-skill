@@ -4,6 +4,58 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.7.0
+
+### 登入身分／權限的口徑統一（★ 修正 1.6.0 的一項錯誤記載）
+
+1.6.0 的 §10 與 `custom-app-dev-guide.md` §6 看起來互相矛盾（一邊說沒有 `user.ts`、
+一邊示範 `import "../user"`）。這次比對平台前後端原始碼確認，**兩邊講的是不同管道，
+都對，但各缺一半**；同時發現 1.6.0 有一句是錯的。
+
+- **兩條管道分清楚**：「**是誰**」走 `__APP_TOKEN__` 的 JWT payload（一律可用）；
+  「**能做什麼**」走 `__USER_ROLES__`／`__USER_PERMISSIONS__` 權限快照
+  （**僅 internal 且非匿名渲染**才注入，`src/user.ts` 是它的封裝）。
+- **修正**：1.6.0 寫「external App 的執行期**有**注入 `__CURRENT_USER__`」是錯的——
+  `__CURRENT_USER__` **在任何模式都不存在**。
+- **新發現：`src/user.ts` 不是每個 App 都有。** `api.ts`／`action.ts` 隨 App 建立產生，
+  但 `db.ts`／`approval.ts`／`user.ts` 要**到 Builder 後台開一次「開發」分頁**才會注入 VFS。
+  純走 API 的開發流程（本 skill 正是）`import "../user"` 會直接編譯失敗。
+  §10.2 補上兩條補救路徑（請用戶開一次分頁／直接讀全域，附等價實作）。
+- **`custom-app-dev-guide.md` §13 全域變數表改為附注入條件的三欄式**：
+  補 `__CUSTOM_APP_ROOT__`、`__USER_ROLES__`／`__USER_PERMISSIONS__`、`__AUTH_TYPE__`、
+  `__PUB_API_BASE__`；並註明 `__IS_EXTERNAL__` 在 internal 是 `undefined` 不是 `false`，
+  `__IS_AUTHENTICATED__` 只在匿名渲染出現且**恆為 `false`**，不能拿來判斷是否已登入。
+- §3 檔案樹標出哪些 SDK 檔要 Builder 後台才會生出來；§6、`SKILL.md` 核心規則 23、
+  `troubleshooting.md` 同步改口徑。
+
+### `SKILL.md` 新增核心規則 28：時區解析
+
+依 1.4.0 立下的判準（不拋例外、不報警告的靜默出錯要放進常駐的 `SKILL.md`，
+因為 references 是按需讀取），`platform-behaviors.md` §8 符合條件——原生 TIMESTAMP／DATE
+是 offset-naive 的 UTC，JS 當成本地時間解析後在 UTC+8 直接差 8 小時，
+實測讓相隔 6 分鐘的打卡算成 **8.1 小時**工時並寫進 `hr_attendances.worked_hours`（影響薪資）。
+比照規則 26／27 的寫法新增，內文精簡並指向 §8。
+
+### `platform-behaviors.md` §11 併入 §4.3
+
+§11 與 §4.3「`validate_picking` 的實測行為（含冪等陷阱）」內容重複。真正新增的一項
+（沒有 `stock_moves` 明細的單呼叫 validate 不會產生任何庫存異動、也不報錯，
+而明細是 seed 表 App 寫不了，UI 應直接停用按鈕）併入 §4.3 並補上判斷範例，§11 刪除。
+`troubleshooting.md` 原指向 §11 的兩列改指 §4.3。
+
+### 其他
+
+- §8 補上 `toTime()` 的**適用範圍**：對 DATE-only 值補 `T00:00:00Z` 只在非負偏移時區安全，
+  負偏移時區會整批退一天；DATE-only 欄位建議一律以字串比對／顯示。
+  本檔開頭的驗證環境補記時區為 UTC+8。
+- §10.3 的 `currentIdentity()` 補**安全警語**：解出的 `sub` 由前端可竄改，
+  寫入身分欄位（如 `import_jobs.user_id`）時必須在 Server Action 用 `ctx.user_id` 覆蓋
+  （與「前端隱藏只是 UX 不是安全邊界」、核心規則 23 同一脈絡），附 Python 範例。
+  同時把 Annex B 廢棄函式 `escape()` 改成 `TextDecoder` 寫法。
+- `troubleshooting.md` 新增 4 條徵狀速查（`import "../user"` 編譯失敗、
+  `__IS_AUTHENTICATED__` 誤用、身分欄位被竄改、負偏移時區的 DATE 欄位），
+  並改寫 `__CURRENT_USER__` 那一列。
+
 ## 1.6.0
 
 ### `platform-behaviors.md` 新增四節：時區、NOT NULL、登入身分、扣帳判定
@@ -23,12 +75,11 @@
   這不只是顯示用途——`import_jobs.user_id` 是 NOT NULL，取不到就無法新增。
 - **§11 `validate_picking` 之後 `state` 不會變**：補上 §4.3 未涵蓋的一項——沒有 `stock_moves`
   明細的單據呼叫 validate 不會產生任何庫存異動，而明細是 seed 表、App 寫不了，UI 應直接擋掉。
+  （1.7.0 已併入 §4.3，§11 移除。）
 
 `troubleshooting.md` 同步補 8 條徵狀速查。
 
-> 待辦（下一版處理）：§10 與 `custom-app-dev-guide.md` §6（User Context / `user.ts`）、
-> §13（Runtime 全域變數）口徑需對齊；§11 與 §4.3 內容重疊應合併；§8 屬「不拋例外的靜默出錯」，
-> 依 1.4.0 的判準應升為 `SKILL.md` 核心規則。
+> §10 關於 `__CURRENT_USER__` 與 `user.ts` 的記載在 1.7.0 有更正與補充，以 1.7.0 為準。
 
 ## 1.5.0
 

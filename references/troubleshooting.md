@@ -16,7 +16,8 @@
 | CSS 變數遺失 | `:root` 改為 `:host, :root` |
 | `db.update()` 400 | 用 `{"data": {...}}` 包裝 payload |
 | `db.ts` 500 | 確認 Data Reference 已建立並發布 |
-| `hasPermission()` 全 false／`getRoles()` 空陣列 | 快照**只注入 Internal App**，External／匿名恆為空——不是 bug，UI 要有降級路徑；也別改用 `/api/v1/auth/me` 硬撈 → `custom-app-dev-guide.md` §6 |
+| `hasPermission()` 全 false／`getRoles()` 空陣列 | 權限快照（`__USER_ROLES__`／`__USER_PERMISSIONS__`）**只注入 Internal App 且非匿名渲染**，External／匿名恆為空——不是 bug，UI 要有降級路徑；也別改用 `/api/v1/auth/me` 硬撈 → `custom-app-dev-guide.md` §6 |
+| `import ... from "../user"` 編譯失敗／找不到模組 | `src/user.ts`（連同 `db.ts`／`approval.ts`）**要在 Builder 後台開過「開發」分頁才會進 VFS**，純 API 建立的 App 沒有。請用戶開一次分頁，或改直接讀注入的全域 → `platform-behaviors.md` §10.2 |
 | 角色改名後條件顯示失效 | 判斷寫死了角色名稱；改用 permission 標籤（`模組.動作`），`system.admin` 自動通過 |
 | 回傳帶 `approval_status: "pending"` | 命中租戶簽核流程，**既非成功也非失敗**。記錄已寫入但未生效，**不可重試 insert**（會重複建單）→ `custom-app-dev-guide.md` §24 |
 | Action 拋「需要簽核審批」 | `ctx.db.update/remove` 或 `ctx.erp.*` 的 pre-guard，操作**未執行**、payload 已暫存，核准後平台自動執行 → **不重試、不換路徑繞過**（§24） |
@@ -52,11 +53,14 @@
 | 工時／天數算出來多 8 小時 | 原生 TIMESTAMP 是 offset-naive 的 UTC，JS 會當成本地時間 → 解析前補 `Z`，見 `platform-behaviors.md` §8 |
 | 顯示的時間比牆上時間早 8 小時 | 直接切字串顯示了 UTC 值 → 一律走本地時區的格式化函式 |
 | 日期比對整批對不上／少一天 | 用了 `toISOString().slice(0,10)`（UTC 日期）→ 改用本地日期 |
+| 負偏移時區下 DATE 欄位顯示早一天 | `toTime()` 對 DATE-only 值補 `T00:00:00Z`，只在 UTC+0 以東安全。DATE-only 欄位改用字串比對／顯示，別轉時間戳 → `platform-behaviors.md` §8 |
 | 新增回 500 `NotNullViolationError` | columns API 不回 nullable，必填欄位清單見 `platform-behaviors.md` §9 |
 | `'str' object has no attribute 'hour'` | TIME 欄位不收純時間字串，要送完整 ISO datetime |
-| `window.__CURRENT_USER__` 是 undefined | internal runtime 不注入；改解 `__APP_TOKEN__` 的 JWT payload，見 §10 |
-| 扣帳成功但單據還是「未扣帳」 | `stock_pickings.state` 不會變，只有 `date_done` 會寫，見 §11 |
-| validate 後庫存沒動 | 該單沒有 `stock_moves` 明細；明細是 seed 表，App 寫不了 |
+| `window.__CURRENT_USER__` 是 undefined | 這個全域**任何模式都不存在**（不是 internal 才沒有）。要身分改解 `__APP_TOKEN__` 的 JWT payload；要權限用 `__USER_PERMISSIONS__` → `platform-behaviors.md` §10 |
+| `__IS_AUTHENTICATED__` 讀到 undefined／恆為 false | 它只在**匿名渲染**注入且恆為 `false`，不能拿來判斷「是否已登入」→ `platform-behaviors.md` §10.1 |
+| 扣帳成功但單據還是「未扣帳」 | `stock_pickings.state` 不會變，只有 `date_done` 會寫；冪等要看 `stock_moves.state` → `platform-behaviors.md` §4.3 |
+| validate 後庫存沒動、也不報錯 | 該單沒有 `stock_moves` 明細；明細是 seed 表 App 寫不了，要先在 ERP 補。UI 應在明細為空時停用按鈕 → `platform-behaviors.md` §4.3 |
+| 身分欄位被填成別人的 id | 前端從 token 解出的 `sub` 可被竄改。Server Action 一律用 `ctx.user_id` 覆蓋前端送來的值 → `platform-behaviors.md` §10.3 |
 
 ---
 
