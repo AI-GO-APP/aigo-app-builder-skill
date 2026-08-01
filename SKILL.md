@@ -541,3 +541,4 @@ if (file) downloadFile(file);
 | `references/migration-workflow.md` | **有現存系統要遷入時**：盤點、Schema 映射、資料遷移 |
 | `references/verification-details.md` | **要執行驗證時**：四項驗證的完整定義、Phase 5 里程碑 |
 | `references/troubleshooting.md` | **出錯時**：錯誤速查表 |
+| `references/platform-behaviors.md` | **實測行為補遺**：DB Proxy 分頁與筆數上限、`custom_data` 不可伺服器端過濾、TIMESTAMP 格式、seed 表唯讀、`ctx.erp` 白名單 |

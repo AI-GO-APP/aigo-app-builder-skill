@@ -23,7 +23,14 @@
 | 寫入「成功」但 SaaS 表資料沒變 | 十之八九是簽核攔截：先看回傳有無 `approval_status` / 例外訊息，不要往 Data Reference 權限或 500 方向誤診 |
 | 401 | Token 過期，重新登入 |
 | 409 Conflict | VFS 版本衝突，重新 GET 後重試 |
+| 409 `ACTION_REMOVAL` | 本次發布會移除既有 action（回應的 `removed_actions` 列出是哪些）。目前未找到 API 層的確認參數，暫以「把該 action 檔放回再發布」處理 → `platform-behaviors.md` §5.2 |
 | 423 Locked | 有待審核的發布，等待或取消 |
+| 寫入日期時間欄位回 500 `offset-naive and offset-aware` | 送了帶 `Z` 的 `toISOString()`。TIMESTAMP 欄位吃 offset-naive，改用 `toISOString().slice(0, 19)` → `platform-behaviors.md` §2 |
+| 宣告 create/update 權限回 403 `seed_table_readonly` | 該表是平台衍生表（`stock_moves`／`stock_quants`／`mrp_workorders` 等），只能 read。改寫來源單據再用 `ctx.erp.*` 觸發 → `platform-behaviors.md` §3 |
+| `filters` 指到 `custom_data` 回 400 `不合法的欄位名稱` | JSONB 不支援伺服器端過濾。要篩選的維度請放原生欄位 → `platform-behaviors.md` §1.3 |
+| 分頁取回的筆數比實際少 | `offset` 分頁沒指定唯一鍵排序，預設 `created_at` 有重複值時會跨頁重複又漏抓。加 `order_by: [{column:"id",direction:"asc"}]` → `platform-behaviors.md` §1.2 |
+| 刪除 VFS 檔案回 400 缺 `expected_version` | `DELETE /source/files` 的樂觀鎖必填，body 為 `{paths, expected_version}` → `platform-behaviors.md` §5.1 |
+| `ctx.erp.xxx` 回 403（來自 `/internal/ctx/invoke`） | 該方法不在閘道白名單。可用的六個見 `platform-behaviors.md` §4.2；403 是「方法未開通」不是「能力不存在」 |
 | Action 超時 | 控制在 30 秒內，長任務切批次；若 timeout 出在對外呼叫，先確認不是 raw httpx 直連（見下一列） |
 | **Action 打第三方 API 連不出去** | 先看症狀對症：**timeout（約 20 秒）** = raw `import httpx/requests` 直連——runner 是 default-deny egress，必改 `ctx.http.call(<egress-slug>, <path>)`；**`ctx.http.call` 仍失敗** = slug 沒註冊同名 EgressService → 引導用戶到後台 `/dashboard/settings/integrations` 註冊（base_url + 金鑰）；**401** = action 自帶 `Authorization` header（閘道會剝掉，金鑰歸 EgressService）或 EgressService 憑證填錯。設定問題**停止改 code**；用戶看不到該頁 = 權限不足，請租戶管理員代設 → `custom-app-dev-guide.md` §25 |
 | pub/ API 403 | 確認 `allow_anonymous_access=true`；且**只有 `external` / `self_built` 能啟用匿名**，`internal` app 開不了 |

@@ -4,6 +4,61 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.4.0
+
+### 新增 `references/platform-behaviors.md`：實測平台行為補遺
+
+以正式站單一租戶實跑 API 取得，補上規格文件沒寫、但一踩就卡住的行為。
+全部條目都附驗證方式與實測數字。
+
+- **DB Proxy 查詢**：單次硬上限 500 筆、回傳是裸陣列（無 `total` 信封）；
+  `offset` 分頁**必須指定唯一鍵排序**，否則預設的 `created_at` 有重複值時會
+  跨頁重複又漏抓（實測某表 1866 筆只取回 1860 筆，且不會拋任何錯）。
+- **`custom_data` 不能在伺服器端過濾**：四種 JSONB path 語法全部回 400。
+  衍生的設計規則是「要被篩選／排序／分頁的維度一律放原生欄位」。
+- **補上 `queryAdvanced` 的完整簽名**（`src/db.ts` 有，但文件未載）。
+- **寫入 TIMESTAMP 欄位不可帶時區**：`toISOString()` 結尾的 `Z` 會讓 asyncpg 回 500，
+  附可接受／不可接受的格式對照表。另記一個 UTC+8 下 `toISOString().slice(0,10)`
+  會退回前一天的日期陷阱。
+- **平台 seed 表只能宣告 read**：新增錯誤碼 `seed_table_readonly` 的說明與
+  已知表清單（`stock_moves`／`stock_quants`／`mrp_workorders`），
+  以及「寫來源單據 + `ctx.erp.*` 觸發」的正確做法。
+- **`ctx` 實際有 20 個命名空間**（平台規格文件列 8 個），並補上 `ctx.erp` 的六個白名單方法
+  與回傳型別。釐清 `/internal/ctx/invoke` 的 **403 代表「方法不在白名單」**，
+  不是「能力不存在」——`dir()` 對遠端代理物件取不到方法名，只能實際呼叫判斷。
+- **`ctx.erp.validate_picking` 的冪等陷阱**：實測成功後 `stock_pickings.state`
+  **不會**轉為 `done`（只寫 `date_done`），真正反映完成的是 `stock_moves.state`。
+  以單據 state 做冪等判定會導致守門永遠不生效。
+- **Builder API 兩個必填／衝突**：`DELETE /source/files` 需 `expected_version`；
+  發布若會移除既有 action 會回 409 `ACTION_REMOVAL`。
+- **Internal App 執行期網址**為 `{tenant}.ai-go.app/runtime/{slug}`，
+  並註明 App 渲染在 Shadow DOM 內（自動化測試會踩到）。
+- **Server Action 必須 publish 後才可呼叫**，只 sync 會回 404。
+
+`troubleshooting.md` 同步新增 8 條錯誤速查，皆指向本檔對應章節。
+
+### `db.json` 不再是 Data Reference 的判定依據（★ 修正既有指引）
+
+實測 `src/db.json` 在 VFS 內恆為 `{}`，即使 Data Reference 全部註冊成功——
+它是執行期注入檔。原先 SKILL.md Phase 0 有一條 ★ 重要步驟要「解析 db.json 列出
+SaaS 表、欄位、權限、`app_domain` 分布」，照做只會拿到空清單。
+
+- `SKILL.md` Phase 0 步驟 5、Phase 1.5 盤點步驟改走
+  `GET /api/v1/refs/apps/{app_id}`，並明說 db.json 不可作為判定依據。
+- `custom-app-dev-guide.md` §19 兩軌差異表、§19 決策流程、§22.x 加入引用流程、
+  `CONTEXT.md` 同步改口徑。
+
+### 靜默出錯的兩條升為核心規則
+
+`platform-behaviors.md` 是按需讀取的，但 `offset` 分頁與 `validate_picking` 冪等
+這兩條**不拋例外、不報警告**，agent 不會因為看到錯誤而去翻文件。故規則本體
+放進常駐的 `SKILL.md`（核心規則 26、27）。
+
+### 其他
+
+- `custom-app-dev-guide.md` §7 ctx 清單補 `ctx.erp` 並指向 `platform-behaviors.md` §4.2。
+- §18 app_domain 補上「前端過濾 + 500 筆上限」的複合風險警語。
+
 ## 1.3.0
 
 ### 租戶邊界：補上「表沒有 `tenant_id` 不等於沒保護」
@@ -25,8 +80,7 @@
 - **§20.2 補註**：明示回應範例是「自帶 `tenant_id`」形態，不是每張表都有。
 - **§17 常見問題速查**：新增一列，讓 agent 不必讀完 §20 就能命中答案。
 - 平台側同步：AI GO repo `docs/integrations/custom-app-agent.md` §7.2 補上第四種形態
-  （全域表）與同一條警語；Introspection API 擬回傳 `tenancy` 欄位讓此判斷不必靠文件，
-  追蹤於 [AI-GO#874](https://github.com/urfit-tech/AI-GO/issues/874)。
+  （全域表）與同一條警語。
 
 ## 1.2.0
 
