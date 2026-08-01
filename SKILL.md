@@ -169,6 +169,7 @@ python scripts/check_update.py     # macOS / Linux 用 python3
      - `GET /api/v1/data-center/tables` — 租戶既有自建表（Phase 0 已做，此處覆核）
      - `GET /api/v1/refs/available-tables` — 可引用的 SaaS 表清單
      - 對候選 SaaS 表呼叫 `GET /api/v1/refs/tables/{name}/columns` 查欄位結構
+       ⚠️ **查到的表沒有 `tenant_id` 是正常的**，不代表不安全，也不要自補過濾——見規則 25
    - 列出所有需要的資料表，逐表判定走哪一軌（判定標準見規則 18）
    - **重用優先於新建**：既有自建表語意相同就重用，不要新建
    - 走 Data Reference 的表：說明如何用 `custom_data` JSONB 擴充、`app_domain` 標籤值
@@ -339,6 +340,14 @@ python scripts/check_update.py     # macOS / Linux 用 python3
     - **沒有旁路**——`db.ts` / `ctx.db` / `ctx.erp` 同一套守衛，不要換路徑硬寫
     - 要免寫後端就讓核准自動改狀態欄位；要做簽核 UI 用 `src/approval.ts` / `ctx.approval`
     - 詳見 `references/custom-app-dev-guide.md` §24
+25. **表沒有 `tenant_id` 不等於沒保護**（★ 強制）
+    - 查欄位時看到某張 SaaS 表**沒有** `tenant_id`（如 `msg_messages`、`announcement_reads`、
+      `ir_sequences`、`account_accounts`）**不是 bug**，租戶隔離也沒失效——
+      邊界另有欄位別名（`company_id`）、父表歸屬（`EXISTS` 繞父表）、全域表（刻意不過濾）三種形態
+    - **不要自己補 `WHERE tenant_id = ...`**：邊界由 DB Proxy 注入，
+      手動補在沒有該欄位的表上只會直接失敗
+    - **不要因為缺欄位就改用別的表或自己加一層過濾**——判定依據是後端的顯式登記表，不是欄位偵測
+    - 詳見 `references/custom-app-dev-guide.md` §20.3
 
 ### Server-Side Action 撰寫
 
