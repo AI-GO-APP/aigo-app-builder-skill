@@ -157,13 +157,11 @@ uv sync
 uv run python scripts/aigo_auth.py setup
 ```
 
-會產生 `.aigo/.env`（已被 `.gitignore` 忽略）。用編輯器打開，填入你自己的帳密：
+會產生 **`~/.aigo/.env`**（家目錄，機器級）。用編輯器打開，填入你自己的帳密：
 
 ```ini
 AIGO_EMAIL=your-email@example.com
 AIGO_PASSWORD=your-password
-AIGO_APP_ID=your-app-id
-AIGO_SLUG=your-slug
 ```
 
 驗證：
@@ -173,16 +171,32 @@ uv run python scripts/aigo_auth.py login
 ```
 
 之後 Skill 內所有 API 呼叫都走 `aigo_auth.get_token()`——Token 快取在
-`.aigo/token.json`，過期自動換新，**不會再問你密碼**。
+`<你的 app 專案>/.aigo/token.json`，過期自動換新，**不會再問你密碼**。
+
+> ⚠️ **不要把憑證放進 Skill 安裝目錄**（`.claude/skills/aigo-builder/` 之類）。
+> `npx skills update` 會**刪除整個 skill 資料夾再重新複製**，放在裡面的
+> `.aigo/.env`、`.aigo/token.json` 會連同一起消失，而且因為被 `.gitignore` 忽略、
+> 不在任何 commit 裡，救不回來。所以 `setup` 預設寫家目錄——它與 Skill 安裝位置無關。
+> （git clone 安裝 + `git pull --ff-only` 不會刪除 ignored 檔案，但別依賴這點。）
+
+### 憑證的查找順序
+
+| 順序 | 位置 | 用途 |
+|---|---|---|
+| 1 | 環境變數 `AIGO_EMAIL` / `AIGO_PASSWORD` … | 臨時覆寫、CI |
+| 2 | `<你的 app 專案>/.aigo/.env` | 專案專用（例如該專案用不同帳號，或放該 app 的 `AIGO_APP_ID` / `AIGO_SLUG`） |
+| 3 | `~/.aigo/.env` | 機器級預設，**建議放帳密** |
+
+先找到的優先；專案級只寫你要覆寫的鍵，其餘自動沿用機器級。
 
 | 指令 | 作用 |
 |---|---|
-| `aigo_auth.py setup` | 建立 `.aigo/.env` 範本 |
+| `aigo_auth.py setup` | 建立 `~/.aigo/.env` 範本（加專案路徑參數才寫進該專案，如 `setup ./my-app`） |
 | `aigo_auth.py login` | 驗證憑證並快取 Token |
 | `aigo_auth.py status` | 檢查憑證與 Token 狀態（不顯示秘密值） |
 | `aigo_auth.py logout` | 清除 Token 快取 |
 
-> 密碼請直接填進 `.aigo/.env`，**不要**放在指令列（會留在 shell 歷史紀錄），
+> 密碼請直接填進 `.env`，**不要**放在指令列（會留在 shell 歷史紀錄），
 > 也不要貼進 AI 對話框（會留在對話紀錄）。
 
 ## 使用方式
@@ -193,16 +207,21 @@ uv run python scripts/aigo_auth.py login
 
 ### 執行 E2E 測試
 
-憑證設定好之後直接跑，不必再設環境變數：
+帳密沿用 `~/.aigo/.env`；`AIGO_APP_ID` / `AIGO_SLUG` 屬於個別 app，放在該 app 專案的
+`.aigo/.env`，跑測試時用 `AIGO_PROJECT_ROOT` 指過去：
 
 ```bash
 cd scripts
-uv run run_e2e_tests.py
+AIGO_PROJECT_ROOT=/path/to/your-app uv run run_e2e_tests.py
 ```
+
+PowerShell 改成 `$env:AIGO_PROJECT_ROOT='C:\path\to\your-app'` 再執行。
+不指定時以目前目錄為專案根——**別讓它落在 skill 目錄裡**（見上方警告）。
 
 ## 注意事項
 
-- ⚠️ **密碼只存在 `.aigo/.env`**：不寫入 `config.json`、原始碼或 commit，也不放在指令列
+- ⚠️ **密碼只存在 `~/.aigo/.env`**（或你自訂的專案 `.env`）：不寫入 `config.json`、原始碼或 commit，也不放在指令列
+- ⚠️ **憑證不要放進 Skill 安裝目錄**：`npx skills update` 會刪除整個 skill 資料夾重建
 - ⚠️ **`.aigo/` 已在 `.gitignore`**：本地產生的 `.aigo/config.json` 含有 Token，不會被提交
 - ⚠️ **SDK 保護檔**：`src/api.ts`、`src/db.ts`、`src/action.ts` 等由平台注入，不可修改
 - ⚠️ **Shadow DOM 限制**：Custom App 運行在 Shadow DOM 中，不可使用 `document.querySelector`、全域 CSS 變數等

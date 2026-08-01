@@ -50,12 +50,12 @@ python scripts/check_update.py     # macOS / Linux 用 python3
 
 1. 確認 `.aigo/config.json` 中 `email` 和 `app_id` 已設定
 2. 呼叫 `aigo_auth.get_token()` 取得 JWT——**不要向用戶要密碼**。
-   該函式依序嘗試「未過期的 Token 快取 → refresh_token 換發 → 用 `.aigo/.env`
-   的帳密登入」，正常情況下完全無感。
-   - 只有在 `.aigo/.env` 與環境變數都沒有憑證時才會拋 `RuntimeError`，
+   該函式依序嘗試「未過期的 Token 快取 → refresh_token 換發 → 用憑證檔
+   （`<專案>/.aigo/.env` → `~/.aigo/.env`）的帳密登入」，正常情況下完全無感。
+   - 只有在兩個憑證檔與環境變數都沒有憑證時才會拋 `RuntimeError`，
      此時把它的訊息原樣轉給用戶（內含設定指引），請對方**自己**填一次憑證檔。
    - **絕不代替用戶輸入或寫入密碼**，也不要把密碼放進指令列
-     （會留在 shell 歷史紀錄）。用戶若在對話中貼出密碼，提醒對方改填 `.aigo/.env`
+     （會留在 shell 歷史紀錄）。用戶若在對話中貼出密碼，提醒對方改填 `~/.aigo/.env`
      並更換該密碼。
 4. `GET /api/v1/builder/apps/{app_id}` 取得完整 App 資訊含 VFS
 5. 分析 VFS 結構並輸出 Review 報告：
@@ -127,17 +127,22 @@ python scripts/check_update.py     # macOS / Linux 用 python3
    - 填入 `.aigo/config.json` 的 `email` 和 `app_id`
 4. 建立憑證檔（**整台機器只需做一次**）：
    ```bash
-   uv run python scripts/aigo_auth.py setup    # 產生 .aigo/.env 範本
+   uv run python scripts/aigo_auth.py setup    # 產生 ~/.aigo/.env 範本（機器級）
    ```
-   請用戶自己在 `.aigo/.env` 填入 `AIGO_EMAIL` / `AIGO_PASSWORD`，
+   請用戶自己在 `~/.aigo/.env` 填入 `AIGO_EMAIL` / `AIGO_PASSWORD`，
    然後 `uv run python scripts/aigo_auth.py login` 驗證。
 5. 驗證連線：`get_token()` → GET App → 自動回填 `slug`、`name`、`access_mode`
 
 ### 憑證規則（★ 不可違反）
 
-- 密碼**只存在** `.aigo/.env`（已被 `.gitignore` 忽略），或使用者自己設的環境變數。
+- 帳密預設放**機器級**的 `~/.aigo/.env`；`<專案>/.aigo/.env` 可覆寫個別鍵
+  （例如該 app 的 `AIGO_APP_ID` / `AIGO_SLUG`），先找到的優先。兩者都在 `.gitignore` 涵蓋範圍內。
+- **絕不把憑證寫進 Skill 安裝目錄**（`.claude/skills/aigo-builder/` 等）：
+  `npx skills update` 會刪掉整個 skill 資料夾再重建，放在裡面的 `.env` / `token.json`
+  會直接消失且無從還原。執行任何 `aigo_auth.py` 指令前，先確認 CWD 是**用戶的 app 專案**，
+  不是 skill 目錄；或用 `AIGO_PROJECT_ROOT` 明確指定。
 - **不得**寫進 `config.json`、原始碼、commit、log 或任何指令列參數。
-- Token 快取在 `.aigo/token.json`，過期自動換新；`aigo_auth.py logout` 可清除。
+- Token 快取在 `<專案>/.aigo/token.json`，過期自動換新；`aigo_auth.py logout` 可清除。
 - Agent **不代為輸入或寫入密碼**——憑證檔一律由使用者本人填寫。
 
 ## Phase 1.25：多系統遷入盤點（條件觸發）

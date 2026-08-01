@@ -4,6 +4,29 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.5.0
+
+### 憑證改以 `~/.aigo/.env` 為預設位置（★ 避免更新 Skill 洗掉憑證）
+
+`npx skills update` 的實作是重跑 `add`，而 installer 對目標資料夾先做
+`rm(path, { recursive: true, force: true })` 再整包複製——**整個 skill 目錄會被刪掉重建**。
+先前文件卻引導使用者在 skill 目錄下執行 `aigo_auth.py setup`（`cd scripts` 跑 E2E 亦同），
+憑證因此會落在 `<skill>/.aigo/.env`，一次更新就全數消失；又因被 `.gitignore` 忽略、
+不在任何 commit 內，無從還原。（git clone 安裝走 `git pull --ff-only` 不受影響——
+pull 不會刪除 ignored 檔案。）
+
+- `aigo_auth.load_env_file()` 改為依序讀 `<專案>/.aigo/.env` → `~/.aigo/.env`，
+  **先讀到的優先**（環境變數仍最優先）。專案級只需寫要覆寫的鍵，其餘沿用機器級。
+- `aigo_auth.py setup` 不帶參數時改寫 `~/.aigo/.env`；要寫進特定專案改用
+  `setup <專案路徑>`。新增 `credentials_path()` 供其他腳本取得位置。
+- `status` 同時列出機器級與專案級憑證檔及其存在狀態。
+- 找不到憑證時的 `RuntimeError` 訊息改指向 `~/.aigo/.env`。
+- `README.md`／`SKILL.md` 補上「憑證不得放進 Skill 安裝目錄」的警告與查找順序表；
+  README 的 E2E 範例改用 `AIGO_PROJECT_ROOT` 指向使用者的 app 專案。
+
+> 既有把憑證放在專案 `.aigo/.env` 的使用者不受影響，行為完全相容。
+> 若你的憑證目前在 skill 目錄裡，請儘快搬到 `~/.aigo/.env`。
+
 ## 1.4.0
 
 ### 新增 `references/platform-behaviors.md`：實測平台行為補遺

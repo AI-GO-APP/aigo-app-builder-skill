@@ -16,7 +16,7 @@ APP_ID = os.environ.get("AIGO_APP_ID", "")
 SLUG = os.environ.get("AIGO_SLUG", "")
 
 if not APP_ID:
-    print("❌ 缺少 AIGO_APP_ID（可寫進 .aigo/.env）")
+    print("❌ 缺少 AIGO_APP_ID（寫進該 app 專案的 .aigo/.env，並用 AIGO_PROJECT_ROOT 指過去）")
     sys.exit(1)
 
 try:
