@@ -243,7 +243,7 @@ Runtime 內建：react ^18.x, react-dom ^18.x, react-router-dom ^6.x, lucide-rea
 | 409 | VFS 版本衝突，重新 GET |
 | 423 | 有待審核發布，等待/取消 |
 | Action 連不到第三方 API | 讀回傳 status/error：raw httpx 直連必 timeout → 改 `ctx.http.call`；多為 slug 未註冊 EgressService → §25 |
-| 某張表沒有 `tenant_id`，是 bug 嗎？ | **不是**，租戶隔離也沒失效。邊界有四種形態（別名 / 父表歸屬 / 全域表）→ §20.3。不要自己補 `WHERE tenant_id` |
+| 某張表沒有 `tenant_id`，是 bug 嗎？ | **不是**，租戶隔離也沒失效。除了自帶 `tenant_id`，還有欄位別名 / 父表歸屬 / 全域表三種形態 → §20.3。不要自己補 `WHERE tenant_id` |
 
 ## 18. 核心策略：app_domain 標籤
 
@@ -430,7 +430,8 @@ Authorization: Bearer {access_token}
 | **父表歸屬** | 子表本身無租戶欄位，靠 `EXISTS` 子查詢繞父表驗證 | `msg_messages`→`msg_threads`、`announcement_reads`→`announcements`、`import_mappings`→`import_jobs` |
 | **全域表** | 平台 seed 的參考資料，全租戶共用，**刻意不過濾**；讀放行、寫 403 | `countries`、`currencies`、`account_accounts` |
 
-（自建表不在此列——它們走 per-tenant schema 隔離，見 §19 兩軌差異。）
+上表的例子是舉例、不是窮舉，**不要拿這份清單當判定依據**（真正的依據見下面守則 2）。
+（自建表不在此列，那是另一軌，見 §19。）
 
 **兩條實作守則：**
 

@@ -18,6 +18,10 @@
   列出 DB Proxy 的四種邊界形態（自帶 `tenant_id` ／ 欄位別名 `company_id` ／ 父表歸屬
   `EXISTS` 子查詢 ／ 全域表刻意不過濾）與各自的代表表，並給兩條實作守則
   （不自補 `WHERE tenant_id`、不因缺欄位就改用別的表）。原 §20.3 典型使用流程順延為 §20.4。
+- **`SKILL.md` 新增核心規則 25「表沒有 `tenant_id` 不等於沒保護」**（★ 強制）：
+  reference 是按需讀取的，但真正會誤判的時點是 Phase 1.5 查欄位結構的當下，
+  agent 未必開過指南——故規則本體放進常駐的 SKILL.md，並在 Phase 1.5「資料架構設計」
+  盤點步驟就地補一句警語。
 - **§20.2 補註**：明示回應範例是「自帶 `tenant_id`」形態，不是每張表都有。
 - **§17 常見問題速查**：新增一列，讓 agent 不必讀完 §20 就能命中答案。
 - 平台側同步：AI GO repo `docs/integrations/custom-app-agent.md` §7.2 補上第四種形態
