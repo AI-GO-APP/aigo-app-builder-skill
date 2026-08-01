@@ -49,6 +49,14 @@
 | 排程建了不跑 | `nextcall` 計算中（正常，稍候）／app 未發布／已被自動暫停 |
 | 排程突然停了 | 看 `paused_reason`：403×2、error×10、或降檔 tier 違規 |
 | 排程 action 逾時 | 超過上限要切批次；**webhook 的上限比 cron 短**，見 `event-triggers.md` §1.6／§2.6 |
+| 工時／天數算出來多 8 小時 | 原生 TIMESTAMP 是 offset-naive 的 UTC，JS 會當成本地時間 → 解析前補 `Z`，見 `platform-behaviors.md` §8 |
+| 顯示的時間比牆上時間早 8 小時 | 直接切字串顯示了 UTC 值 → 一律走本地時區的格式化函式 |
+| 日期比對整批對不上／少一天 | 用了 `toISOString().slice(0,10)`（UTC 日期）→ 改用本地日期 |
+| 新增回 500 `NotNullViolationError` | columns API 不回 nullable，必填欄位清單見 `platform-behaviors.md` §9 |
+| `'str' object has no attribute 'hour'` | TIME 欄位不收純時間字串，要送完整 ISO datetime |
+| `window.__CURRENT_USER__` 是 undefined | internal runtime 不注入；改解 `__APP_TOKEN__` 的 JWT payload，見 §10 |
+| 扣帳成功但單據還是「未扣帳」 | `stock_pickings.state` 不會變，只有 `date_done` 會寫，見 §11 |
+| validate 後庫存沒動 | 該單沒有 `stock_moves` 明細；明細是 seed 表，App 寫不了 |
 
 ---
 

@@ -4,6 +4,32 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.6.0
+
+### `platform-behaviors.md` 新增四節：時區、NOT NULL、登入身分、扣帳判定
+
+承 1.4.0，這批來自 26 支 Custom App 的逐頁實機測試（含每個寫入動作比對資料庫實際內容），
+補的是「只有真的按下按鈕才會浮現、看文件與型別都看不出來」的行為。
+
+- **§8 原生 TIMESTAMP／DATE 是 offset-naive 的 UTC**（★ 靜默出錯）：平台混用 timestamptz
+  （`created_at`，帶 `+00:00`）與原生 TIMESTAMP／DATE（`check_in`／`date_from`／`work_date`）。
+  後者存的是 UTC，但 ECMAScript 規定不帶時區的字串視為本地時間，在 UTC+8 直接差 8 小時——
+  實測相隔 6 分鐘的上下班打卡被算成 **8.1 小時**工時並寫進 `hr_attendances.worked_hours`。
+  附可直接沿用的 `toTime()`；顯示與日期推導同樣不可切字串。
+- **§9 NOT NULL 欄位只有在真的送出時才會浮現**：`GET /refs/tables/{table}/columns` 不回
+  nullable 資訊，列出實測到的 8 張表必填欄位，以及 TIME 欄位不收純時間字串（要送完整 ISO datetime）。
+- **§10 internal runtime 不注入 `__CURRENT_USER__`**：改解 `__APP_TOKEN__` 的 JWT payload
+  取 `sub`／`email`／`tenant_id`，不需呼叫本 skill 禁止的 `/api/v1/auth/me`。
+  這不只是顯示用途——`import_jobs.user_id` 是 NOT NULL，取不到就無法新增。
+- **§11 `validate_picking` 之後 `state` 不會變**：補上 §4.3 未涵蓋的一項——沒有 `stock_moves`
+  明細的單據呼叫 validate 不會產生任何庫存異動，而明細是 seed 表、App 寫不了，UI 應直接擋掉。
+
+`troubleshooting.md` 同步補 8 條徵狀速查。
+
+> 待辦（下一版處理）：§10 與 `custom-app-dev-guide.md` §6（User Context / `user.ts`）、
+> §13（Runtime 全域變數）口徑需對齊；§11 與 §4.3 內容重疊應合併；§8 屬「不拋例外的靜默出錯」，
+> 依 1.4.0 的判準應升為 `SKILL.md` 核心規則。
+
 ## 1.5.0
 
 ### 憑證改以 `~/.aigo/.env` 為預設位置（★ 避免更新 Skill 洗掉憑證）
