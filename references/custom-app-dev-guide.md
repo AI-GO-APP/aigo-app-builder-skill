@@ -129,7 +129,12 @@ def execute(ctx):
     ctx.secrets.get(k)      # 金鑰（webhook 驗簽等非對外憑證用）
     ctx.response.json(d)    # 回應
     ctx.csv.export(r)       # CSV
+    ctx.erp.confirm_sale_order(id)  # 觸發平台業務流程（方法級白名單，見 §24 與下方註）
 ```
+
+> 上面是常用的一組，`ctx` 實測共有 20 個命名空間。`ctx.erp` 只開放六個方法，
+> 呼叫白名單外的方法會由閘道回 **403**（意思是「方法未開通」，不是「能力不存在」）。
+> 完整清單與回傳型別見 `platform-behaviors.md` §4。
 
 Action 也可由 Webhook 或 App 排程觸發——**兩者都要求 action 冪等**，見 `event-triggers.md`。
 
@@ -280,6 +285,13 @@ const myRecords = allRecords.filter(
 );
 ```
 
+> ⚠️ **這個過濾只能在取回後做**——`custom_data` 是 JSONB，伺服器端過濾一律回 400。
+> 配上 DB Proxy「單次最多 500 筆」的硬上限，資料一多就會變成
+> 「只過濾了前 500 筆」而不自知。表裡資料可能超過 500 筆時，
+> **必須先用帶唯一鍵排序的 `offset` 迴圈取完整資料再過濾**——
+> 見 `platform-behaviors.md` §1.2、§1.3。這也是為什麼要被篩選／排序／分頁的維度
+> 應該放**原生欄位**，不要只存在 `custom_data` 裡。
+
 ### 實例
 
 ```json
@@ -308,7 +320,8 @@ const myRecords = allRecords.filter(
 2. 既有自建表語意相同 → **直接重用**，不要新建
 3. 對候選 SaaS 表查欄位（§20.2），確認有無 `custom_data` JSONB 可擴充、權限是否足夠
 4. 依下表判定走哪一軌
-5. 走 Data Reference → 把表加入引用，使其出現在 `db.json`。
+5. 走 Data Reference → 把表加入引用（引用狀態一律以 `GET /api/v1/refs/apps/{app_id}` 為準，
+   **不要看 `db.json`**，見 `platform-behaviors.md` §6）。
    可用 API `POST /api/v1/refs/apps/{app_id}`（`builder.access`，
    body `{table_name, columns[], permissions[]}`），或引導用戶到 Builder 後台操作
    走自建表 → 產出建表規格交用戶確認，再 `POST /api/v1/data-center/tables`
@@ -331,7 +344,7 @@ const myRecords = allRecords.filter(
 | 跨 app | 共用，靠 `app_domain` 區分來源 | 共用，**不需要也不該用** `app_domain` |
 | 外鍵 | 無原生 FK | relation → 自建表**有真 FK** |
 | 建立方式 | Builder 後台加入引用 | `POST /data-center/tables`（需 `system.admin`） |
-| 出現在 VFS | `src/db.json` | **不出現**（租戶級，靠 API 盤點） |
+| 怎麼盤點 | `GET /refs/apps/{app_id}`（**不是** `db.json`，那個恆為 `{}`） | `GET /data-center/tables`（租戶級，不在 VFS） |
 
 ### SaaS 表常見結構
 
@@ -457,13 +470,13 @@ Phase 1.5 實作計畫時：
 3. 決定資料架構：哪些需求用 SaaS 表、哪些用自建表（見 §19）
 
 4. 在 AI GO Builder 後台將選定的 SaaS 表加入 Data Reference
-   → 表即出現在 VFS 的 db.json 中
 
-5. 重新 Phase 0 Review 確認 db.json 已包含所需的表
+5. 用 GET /api/v1/refs/apps/{app_id} 確認引用已包含所需的表
 ```
 
 > **重要**：`available-tables` 僅列出可用表名，實際將表加入 App 的 Data Reference 需在 AI GO Builder 後台操作。
-> 加入後，該表的完整 schema 和資料會自動注入到 `src/db.json`。
+> 加入後，該表的 schema 由 Runtime 在執行期注入；**VFS 裡的 `src/db.json` 實測恆為 `{}`，
+> 不能用來確認引用狀態**——一律查 `GET /api/v1/refs/apps/{app_id}`（見 `platform-behaviors.md` §6）。
 
 ## 21. 架構設計理念
 

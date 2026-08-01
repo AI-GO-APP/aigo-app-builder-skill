@@ -33,7 +33,8 @@ SDK 雙軌並存所以存量 app 不會壞；舊模型與端點尚未移除。
 
 ### Data Reference
 
-把**既有的 ERP／SaaS 表**授權給某個 app 引用，授權後該表出現在 VFS 的 `src/db.json`。
+把**既有的 ERP／SaaS 表**授權給某個 app 引用，授權後由 Runtime 在執行期注入 schema。
+盤點引用狀態一律用 `GET /api/v1/refs/apps/{app_id}`——VFS 裡的 `src/db.json` 實測恆為 `{}`。
 
 **它不是新建的表**——是對平台既有表的引用授權。
 加入引用可在 Builder 後台操作，也可用 API：`POST /api/v1/refs/apps/{app_id}`
