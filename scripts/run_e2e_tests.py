@@ -9,7 +9,10 @@ import shutil
 sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, os.path.dirname(__file__))
 
-from aigo_auth import login, get_app_info, init_config, load_config, validate_config, load_env_file
+from aigo_auth import (
+    login, get_app_info, init_config, load_config, validate_config, load_env_file,
+    resolve_base_url,
+)
 from aigo_review import analyze_vfs, check_css_compliance, format_review_report, PROTECTED_FILES
 from aigo_scaffold import download_vfs_to_local
 from aigo_sync import read_local_files, diff_vfs, sync_to_cloud, get_remote_vfs
@@ -25,7 +28,13 @@ import httpx
 # 專案根用 AIGO_PROJECT_ROOT 指定；沒指定就是 CWD——別在 skill 目錄下跑。
 load_env_file(os.environ.get("AIGO_PROJECT_ROOT", "."))
 
-BASE_URL = os.environ.get("AIGO_BASE_URL", "https://ai-go.app")
+# 租戶空間（https://[tenant].ai-go.app）——無預設值，見 aigo_auth.resolve_base_url
+try:
+    BASE_URL = resolve_base_url(os.environ.get("AIGO_PROJECT_ROOT", "."))
+except RuntimeError as e:
+    print(e)
+    sys.exit(1)
+
 EMAIL = os.environ.get("AIGO_EMAIL", "")
 PASSWORD = os.environ.get("AIGO_PASSWORD", "")
 APP_ID = os.environ.get("AIGO_APP_ID", "")

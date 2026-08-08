@@ -15,13 +15,19 @@
 
 ## 2. 認證與連線
 
+**網址規則：`https://[tenant].ai-go.app/*`**——登入與所有 API 都走租戶子網域，
+主站 apex `https://ai-go.app` 不是租戶入口（`/login` 已是 workspace finder）。
+
 ```http
-POST https://ai-go.app/api/v1/auth/login
+POST https://urfit.ai-go.app/api/v1/auth/login
 {"email": "...", "password": "..."}
 → {"access_token": "...", "refresh_token": "...", "expires_in": 3600}
 ```
 
 所有 Builder API 需帶 `Authorization: Bearer {access_token}`。Token 有效期 1 小時。
+
+⚠️ 租戶由 **Host** 決定：同一組帳密打到別的租戶子網域，平台一律回 **401「帳號或密碼錯誤」**
+——與密碼真的打錯**完全同形**（反帳號列舉）。查 401 先確認網址列的租戶前綴。
 
 ## 3. VFS 標準檔案樹
 

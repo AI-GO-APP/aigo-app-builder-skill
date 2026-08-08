@@ -76,7 +76,11 @@ def execute(ctx):
 | 情況 | URL |
 |---|---|
 | app 有 `subdomain` | `https://{subdomain}.apps.{domain}/webhook/{hook_name}` |
-| 沒有 subdomain（相容端點，永不下線） | `https://ai-go.app/api/v1/custom-apps/webhook/{slug}/{hook_name}` |
+| 沒有 subdomain（相容端點） | `https://{tenant}.ai-go.app/api/v1/custom-apps/webhook/{slug}/{hook_name}` |
+
+> 相容端點是**依 path 的 slug 解 app**、不看 Host（核對 `backend/app/api/custom_app_webhook.py`），
+> 所以 apex `https://ai-go.app/api/v1/...` 的舊登記今天仍會投遞。但登記新的一律用租戶子網域
+> ——全平台網址規則已是 `https://[tenant].ai-go.app/*`，apex 只剩相容面。
 
 - 省略 `/{hook_name}` 即預設端點（→ `receive_webhook`）。
 - `hook_name` 正規：`^[A-Za-z0-9_-]{1,64}$`。

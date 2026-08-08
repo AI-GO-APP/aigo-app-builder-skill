@@ -38,7 +38,16 @@ STATE_FILE = Path.home() / ".aigo" / "update_check.json"
 
 FETCH_TIMEOUT = 3.0  # 秒；hook 情境下寧可放棄也不要卡住啟動
 THROTTLE_SECONDS = 24 * 60 * 60
+
+# ⚠️ 舊版使用者機器上跑的是**他們那一版**的 check_update.py，唯一會被讀到的新內容是
+# 遠端 CHANGELOG 的新版那一節、**只取前 CHANGELOG_MAX_LINES 行**。破壞性變更的警語
+# 因此必須寫在該節的最前面幾行，不能埋在機制說明後面。改動這個數字前先想清楚這件事。
 CHANGELOG_MAX_LINES = 20
+
+# 新版節裡出現這些字樣就視為破壞性變更 → 提示升級為「必須」而非「可選」。
+# 用字串比對而非額外的中繼檔案，是為了讓判斷跟著 CHANGELOG 走：寫 changelog 的人
+# 不會忘記同步一個他不知道存在的檔案。
+BREAKING_MARKERS = ("破壞性", "BREAKING")
 
 
 def _read_local_version() -> str | None:
@@ -187,6 +196,7 @@ def check(force: bool = False) -> dict:
         return {"status": "current", "local": local, "remote": remote}
 
     method = _install_method()
+    changelog = _changelog_excerpt(remote)
     return {
         "status": "outdated",
         "local": local,
@@ -194,7 +204,8 @@ def check(force: bool = False) -> dict:
         "skill_dir": str(SKILL_DIR),
         "install_method": method,
         "update_command": _update_command(method),
-        "changelog": _changelog_excerpt(remote),
+        "changelog": changelog,
+        "breaking": bool(changelog and any(m in changelog for m in BREAKING_MARKERS)),
     }
 
 
@@ -223,6 +234,12 @@ def main() -> int:
     print(
         f"[aigo-builder] 有新版可用：本地 {result['local']} → 遠端 {result['remote']}"
     )
+    if result.get("breaking"):
+        print(
+            "\n⚠️ 這是**破壞性變更**：不更新會讓平台呼叫直接失敗，"
+            "而失敗訊息通常不會指向真正的原因。\n"
+            "   請務必告知使用者這一點，不要只當成一般的可選更新。"
+        )
     if result.get("changelog"):
         print(f"\n變更摘要：\n{result['changelog']}\n")
     if "applied" in result:

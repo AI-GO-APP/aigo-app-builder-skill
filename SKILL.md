@@ -40,6 +40,12 @@ python scripts/check_update.py     # macOS / Linux 用 python3
     skills CLI 安裝為 `npx skills update`），完成後**重新讀取 `SKILL.md` 與相關
     `references/`**，讓新版指令在本回合就生效。
   - 使用者拒絕或無回應 → 照舊繼續，不阻斷開發流程。
+- **輸出含「破壞性變更」警語時**（`--json` 為 `"breaking": true`）：這類版本代表
+  **不更新就會失敗，且失敗訊息通常不指向真正的原因**（例如 1.7.0 的租戶網址規則，
+  症狀是與密碼錯完全同形的 401）。此時：
+  - 不要把它輕描淡寫成一般可選更新——明確告訴使用者「不更新的話會遇到什麼」。
+  - 使用者仍堅持不更新 → 照做，但在後續遇到相關錯誤時**優先回頭懷疑版本落差**，
+    不要往其他方向深掘。
 - **絕不自動覆寫**：使用者可能改過本地檔案；未取得同意前不要執行更新指令。
 
 ## Phase 0：Review 現有 Code（★ 強制步驟）
@@ -102,11 +108,33 @@ python scripts/check_update.py     # macOS / Linux 用 python3
 
 ## Phase 1：環境設定
 
+### 租戶空間網址規則（★ 不可違反）
+
+**所有登入與 API 一律走租戶子網域：`https://[tenant].ai-go.app/*`**
+
+```
+https://urfit.ai-go.app/api/v1/auth/login     ✅
+https://demo.ai-go.app/api/v1/builder/apps/…  ✅
+https://ai-go.app/api/v1/auth/login           ❌ 主站 apex，不是租戶入口
+https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不是 API host
+```
+
+- `tenant` = 用戶平時登入時**網址列的第一段**。不確定就直接問用戶，或請對方貼登入後的網址。
+- 平台是用 **Host header** 解租戶的（`{tenant}.ai-go.app/api/*` 同源代理到後端並保留 Host），
+  所以 base_url 打哪個 host，就等於宣告「要登入哪個租戶」。
+- apex `https://ai-go.app/login` 已被收斂成 **workspace finder**（找工作區的頁面），不是登入頁；
+  apex 的 **API 登入實測已回 401**（2026-08-08，正確帳密）。
+- ⚠️ **打錯租戶的症狀是 401「帳號或密碼錯誤」**——平台的反帳號列舉設計讓「這個 email 不在
+  這個租戶」與「密碼打錯」回**完全相同**的 401（連是否跑滿一次 bcrypt 都一樣）。
+  看到 401 時**先確認 base_url 的租戶對不對**，不要一路往密碼方向查。
+- 腳本端已把規則寫死在 `aigo_auth.resolve_base_url()`：**沒有預設值**，
+  填 apex 會直接被擋下並印出規則。不要在任何地方硬編 `https://ai-go.app`。
+
 ### 配置檔 `.aigo/config.json`
 
 ```json
 {
-  "base_url": "https://ai-go.app",
+  "base_url": "https://urfit.ai-go.app",
   "email": "",
   "app_id": "",
   "app_slug": "",
@@ -116,12 +144,28 @@ python scripts/check_update.py     # macOS / Linux 用 python3
 }
 ```
 
+#### base_url 的三層來源（`resolve_base_url()`，特定性越高越優先）
+
+| # | 來源 | 定位 |
+|---|------|------|
+| 1 | shell 環境變數 `AIGO_BASE_URL` → `AIGO_TENANT` | 臨時覆寫、CI |
+| 2 | `<專案>/.aigo/config.json` 的 `base_url` | 這個專案綁定的租戶 |
+| 3 | `.env` 的 `AIGO_BASE_URL` → `AIGO_TENANT`（`~/.aigo/.env`） | 機器級預設 |
+
+- **建議做法**：只服務單一租戶的機器，在 `~/.aigo/.env` 填 `AIGO_TENANT=urfit`
+  即可全機器通用——寫前綴比每次抄整串網址不容易錯。
+- **② 必須贏過 ③**：機器級 `.env` 是預設值不是唯一值。要在同一台機器開別的租戶的專案，
+  就在該專案 `config.json` 填完整 `base_url` 覆寫。
+- 三層都沒有 → 直接拋錯附設定指引，**不會 fallback 到 apex**。
+- `aigo_auth.py status` 會印出**實際生效的網址與它來自哪一層**——查 401 的第一站。
+
 ### 設定流程
 
 1. 檢查專案目錄下 `.aigo/config.json` 是否存在
-2. 不存在 → 建立骨架（可用 `scripts/aigo_auth.py` 的 `init_config()`）
+2. 不存在 → 建立骨架（可用 `scripts/aigo_auth.py` 的 `init_config()`；`base_url` 會留空）
 3. 引導用戶：
-   - 前往 AI GO 後台 `/dashboard`
+   - 前往 AI GO 後台 `https://[tenant].ai-go.app/dashboard`
+   - **記下網址列的租戶前綴**，填入 `.aigo/config.json` 的 `base_url`
    - 確認帳號具備 `builder.access` 權限
    - 進入 Builder → Custom Apps → 記下 App 的 UUID (`app_id`)
    - 填入 `.aigo/config.json` 的 `email` 和 `app_id`
@@ -131,7 +175,8 @@ python scripts/check_update.py     # macOS / Linux 用 python3
    ```
    請用戶自己在 `~/.aigo/.env` 填入 `AIGO_EMAIL` / `AIGO_PASSWORD`，
    然後 `uv run python scripts/aigo_auth.py login` 驗證。
-5. 驗證連線：`get_token()` → GET App → 自動回填 `slug`、`name`、`access_mode`
+5. 隨時可用 `uv run python scripts/aigo_auth.py status` 確認**實際生效的租戶空間**與憑證狀態
+6. 驗證連線：`get_token()` → GET App → 自動回填 `slug`、`name`、`access_mode`
 
 ### 憑證規則（★ 不可違反）
 
@@ -386,6 +431,16 @@ python scripts/check_update.py     # macOS / Linux 用 python3
       推導日期不可用 `toISOString().slice(0,10)`（那是 UTC 日期，UTC+8 凌晨會退回前一天）
     - DATE-only 欄位建議直接以**字串比對／顯示**，不要轉時間戳
     - 可直接沿用的 `toTime()` 與適用範圍見 `references/platform-behaviors.md` §8
+29. **所有 API 一律走租戶空間 `https://[tenant].ai-go.app/*`**（★ 強制，**打錯的錯誤訊息會誤導你**）
+    - 平台以 **Host header** 解租戶：base_url 打哪個 host = 宣告要登入哪個租戶。
+      主站 apex `https://ai-go.app` 推不出租戶，實測登入已回 401
+    - **不可硬編任何 base_url**——一律經 `aigo_auth.resolve_base_url()`
+      （shell 環境變數 → 專案 `config.json` → `.env` 的 `AIGO_TENANT`／`AIGO_BASE_URL`）
+    - ⚠️ **打錯租戶與密碼打錯回完全相同的 401「帳號或密碼錯誤」**（平台反帳號列舉，
+      連是否跑滿一次 bcrypt 都一樣）。看到 401 **先跑 `aigo_auth.py status` 確認租戶空間**，
+      不要往密碼、Token、權限方向深掘
+    - 租戶前綴 = 用戶登入時網址列的第一段；不確定就直接問用戶，別猜
+    - 細節見 `references/platform-behaviors.md` §6.1
 
 ### Server-Side Action 撰寫
 

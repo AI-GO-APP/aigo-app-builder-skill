@@ -233,7 +233,39 @@ HTTP 409
 
 ---
 
-## 6. Internal App 的執行期網址
+## 6. 租戶空間網址與 Internal App 執行期網址
+
+### 6.1 全平台網址規則：`https://[tenant].ai-go.app/*`
+
+> 來源：核對平台原始碼（`backend/app/core/workspace_host.py`、`api/auth.py`、
+> `frontend/src/middleware.ts`），2026-08-08。
+
+登入頁與**所有 API** 都在租戶子網域下。租戶是由 **Host header** 解出來的——
+`{tenant}.ai-go.app/api/*` 同源代理到後端並保留 Host，所以「網址說哪個工作區，
+就只在那個工作區找帳號」。
+
+| 寫法 | 結果 |
+|---|---|
+| `https://urfit.ai-go.app/login`、`/api/v1/*` | **正確** |
+| `https://ai-go.app/login` | 主站 apex，已收斂成 **workspace finder**（找工作區的頁面），不是登入頁 |
+| `https://ai-go.app/api/v1/auth/login` | **401「帳號或密碼錯誤」**（實測，正確帳密；apex 推不出租戶 → fail-closed） |
+| `https://xxx.apps.ai-go.app/*` | Custom App 沙箱域，不是 API host |
+
+實測對照（2026-08-08，同一組正確帳密）：
+
+```
+POST https://ai-go.app/api/v1/auth/login       → 401 {"detail":"帳號或密碼錯誤"}
+POST https://urfit.ai-go.app/api/v1/auth/login → 200 {"access_token": ...}
+```
+
+⚠️ **401 有兩種成因且平台刻意讓兩者無法分辨**（反帳號列舉）：「密碼錯」與
+「這個 email 不在這個租戶／根本沒有租戶範圍」回**完全相同**的 `401 帳號或密碼錯誤`
+——狀態碼、detail、甚至是否跑滿一次 bcrypt 都一樣。所以打錯租戶的症狀會**完美偽裝成
+憑證問題**，往密碼方向查一定查不到底。查 401 時**先確認 base_url 的租戶前綴**。
+
+本 Skill 的 `aigo_auth.resolve_base_url()` 因此**直接擋掉 apex，且不留任何預設值**。
+
+### 6.2 Internal App 的執行期網址
 
 ```
 https://{tenant}.ai-go.app/runtime/{slug}

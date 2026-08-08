@@ -22,6 +22,8 @@
 | 回傳帶 `approval_status: "pending"` | 命中租戶簽核流程，**既非成功也非失敗**。記錄已寫入但未生效，**不可重試 insert**（會重複建單）→ `custom-app-dev-guide.md` §24 |
 | Action 拋「需要簽核審批」 | `ctx.db.update/remove` 或 `ctx.erp.*` 的 pre-guard，操作**未執行**、payload 已暫存，核准後平台自動執行 → **不重試、不換路徑繞過**（§24） |
 | 寫入「成功」但 SaaS 表資料沒變 | 十之八九是簽核攔截：先看回傳有無 `approval_status` / 例外訊息，不要往 Data Reference 權限或 500 方向誤診 |
+| **登入回 401「帳號或密碼錯誤」** | 兩種成因**平台刻意讓它同形**：① 密碼錯 ② `base_url` 指到**別的租戶**——同一組帳密在其他租戶等同不存在。先確認網址是 `https://[tenant].ai-go.app`（tenant = 用戶登入時網址列第一段），**別一路往密碼方向查**。`aigo_auth.py status` 會印出實際生效的租戶空間 → `platform-behaviors.md` §6.1 |
+| 打 `https://ai-go.app/...` 沒反應／導去找工作區的頁面 | apex 已不是租戶入口，`/login` 被收斂成 workspace finder。全平台規則是 `https://[tenant].ai-go.app/*` → `platform-behaviors.md` §6.1 |
 | 401 | Token 過期，重新登入 |
 | 409 Conflict | VFS 版本衝突，重新 GET 後重試 |
 | 409 `ACTION_REMOVAL` | 本次發布會移除既有 action（回應的 `removed_actions` 列出是哪些）。目前未找到 API 層的確認參數，暫以「把該 action 檔放回再發布」處理 → `platform-behaviors.md` §5.2 |
