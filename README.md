@@ -189,6 +189,38 @@ uv run python scripts/aigo_auth.py login
 
 先找到的優先；專案級只寫你要覆寫的鍵，其餘自動沿用機器級。
 
+### 租戶空間網址（★ 必填，無預設值）
+
+AI GO 的登入與 API 一律走租戶子網域：
+
+```
+https://[tenant].ai-go.app/*     例如 https://urfit.ai-go.app、https://demo.ai-go.app
+```
+
+`tenant` 就是你平時登入時**網址列的第一段**。主站 apex `https://ai-go.app` 已不是登入入口
+（`/login` 是找工作區的頁面），填 apex 會被腳本直接擋下。
+
+**最省事的設定**：在 `~/.aigo/.env` 加一行前綴，整台機器通用——
+
+```
+AIGO_TENANT=urfit
+```
+
+完整的查找順序（**特定性越高越優先**）：
+
+| 順序 | 位置 | 定位 |
+|---|---|---|
+| 1 | shell 環境變數 `AIGO_BASE_URL` 或 `AIGO_TENANT` | 臨時覆寫、CI |
+| 2 | `<你的 app 專案>/.aigo/config.json` 的 `base_url` | 這個專案綁定的租戶 |
+| 3 | `.env` 的 `AIGO_BASE_URL` 或 `AIGO_TENANT` | 機器級預設 |
+
+第 2 層會蓋過第 3 層——所以同一台機器可以一邊用 `AIGO_TENANT=urfit` 當預設，
+一邊讓某個 demo 租戶的專案在自己的 `config.json` 填 `"base_url": "https://demo.ai-go.app"`。
+
+> ⚠️ **打錯租戶的症狀是 401「帳號或密碼錯誤」**——平台為了防帳號列舉，
+> 讓「帳號不在這個租戶」與「密碼打錯」回完全相同的錯誤。看到 401 先跑
+> `aigo_auth.py status` 確認租戶空間，再懷疑密碼。
+
 | 指令 | 作用 |
 |---|---|
 | `aigo_auth.py setup` | 建立 `~/.aigo/.env` 範本（加專案路徑參數才寫進該專案，如 `setup ./my-app`） |

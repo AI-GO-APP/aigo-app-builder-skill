@@ -3,7 +3,7 @@ import sys, os, time, json
 sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, os.path.dirname(__file__))
 
-from aigo_auth import get_token, get_app_info, load_env_file
+from aigo_auth import get_token, get_app_info, load_env_file, resolve_base_url
 from aigo_sync import get_remote_vfs
 from aigo_compile import compile_app
 from aigo_publish import publish_app
@@ -11,7 +11,13 @@ import httpx
 
 load_env_file(os.environ.get("AIGO_PROJECT_ROOT", "."))
 
-BASE_URL = os.environ.get("AIGO_BASE_URL", "https://ai-go.app")
+# 租戶空間（https://[tenant].ai-go.app）——無預設值，見 aigo_auth.resolve_base_url
+try:
+    BASE_URL = resolve_base_url(os.environ.get("AIGO_PROJECT_ROOT", "."))
+except RuntimeError as e:
+    print(e)
+    sys.exit(1)
+
 APP_ID = os.environ.get("AIGO_APP_ID", "")
 SLUG = os.environ.get("AIGO_SLUG", "")
 

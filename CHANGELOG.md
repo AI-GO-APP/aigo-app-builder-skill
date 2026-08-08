@@ -4,6 +4,65 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.8.0
+
+### ★ 破壞性：登入與 API 改走租戶空間 `https://[tenant].ai-go.app/*`
+
+**沒更新到本版的話，AI GO 的登入已經是壞的。**舊版硬編主站 apex，而 apex 實測已回
+`401 {"detail":"帳號或密碼錯誤"}`——與密碼真的打錯**完全同形**，所以症狀會偽裝成
+憑證問題，往密碼方向查一定查不到底。
+
+```
+POST https://ai-go.app/api/v1/auth/login       → 401 帳號或密碼錯誤   ← 舊版走這條
+POST https://urfit.ai-go.app/api/v1/auth/login → 200 access_token OK  ← 本版走這條
+```
+
+**更新後要做的事**（否則腳本會在第一步停下）：在 `~/.aigo/.env` 加一行
+`AIGO_TENANT=你的租戶前綴`（就是登入時網址列的第一段，例如 `urfit`），
+然後 `uv run python scripts/aigo_auth.py status` 確認。跨租戶的專案改在該專案
+`.aigo/config.json` 填 `"base_url": "https://demo.ai-go.app"`，會蓋過機器級設定。
+
+---
+
+以下為機制說明。平台的 workspace 子網域上線後，**租戶是由 Host header 解出來的**——
+`{tenant}.ai-go.app/api/*` 同源代理到後端並保留 Host，所以 base_url 打哪個 host
+就等於宣告「要登入哪個租戶」。apex 推不出任何租戶，`/login` 也已被收斂成
+workspace finder（找工作區的頁面）。
+
+401 同形是平台刻意的反帳號列舉設計：狀態碼、detail、是否跑滿一次 bcrypt 三者皆不可
+區分。這正是本版**不留任何預設值、直接在 `resolve_base_url()` 擋掉 apex 並印出規則**
+的理由——與其讓使用者去查一個無解的「密碼錯誤」，不如當場說清楚。
+
+舊版另有一個獨立的 bug：`get_token()` 只讀環境變數 `AIGO_BASE_URL`、
+**完全不看 `config.json` 的 `base_url`**，所以就算把 config 改成租戶網址，登入仍打 apex。
+
+- `scripts/aigo_auth.py` 新增租戶空間的單一權威來源：
+  - `resolve_base_url()` 三層優先序，**特定性越高越優先**：
+    ① shell 環境變數 `AIGO_BASE_URL` / `AIGO_TENANT`（臨時覆寫、CI）
+    ② `<專案>/.aigo/config.json` 的 `base_url`（這個專案綁定的租戶）
+    ③ `.env` 的 `AIGO_BASE_URL` / `AIGO_TENANT`（機器級預設）。
+    ②必須贏過③：機器級 `.env` 是預設值不是唯一值，否則同一台機器再也開不了
+    另一個租戶的專案——而那個錯誤同樣以同形 401 浮現。
+  - `AIGO_TENANT` 只給前綴（`urfit`），由 `tenant_base_url()` 組出完整網址。
+  - `validate_base_url()`：擋掉 apex、`www`、`*.apps.ai-go.app` 與多層前綴；
+    本機與 UAT（`uat-ai-go.app`）等非 `ai-go.app` 命名空間不套此規則。
+  - `get_token()` 改走 `resolve_base_url()`；Token 快取加記 `base_url`，
+    **換租戶即整份作廢**（Token 綁租戶，跨租戶沿用會變成難查的 403）。
+  - `init_config()` 的 `base_url` 改為留空——沒有一個對全部租戶都成立的預設值。
+  - `aigo_auth.py status` 會印出**實際生效的租戶空間與它來自哪一層**；
+    `login` 遇 401 時直接列出「密碼錯 / 租戶錯」兩種可能，不再只叫人查密碼。
+- `scripts/check_update.py` 新增破壞性版本偵測：遠端 CHANGELOG 新版節含「破壞性」
+  字樣時，提示語升級為「必須更新」並說明不更新的後果（`--json` 多一個 `breaking` 欄位）。
+- `run_e2e_tests.py` / `retest_verification.py` 移除 apex 預設值，改用 `resolve_base_url()`。
+- `SKILL.md` Phase 1 新增「租戶空間網址規則」，並依 1.4.0 立下的判準新增**核心規則 29**
+  （會誤導的錯誤要放進常駐的 SKILL.md——這條比靜默出錯更糟，401 是主動指向錯誤方向）；
+  Phase -1 補上破壞性版本的處置。`README.md`、`custom-app-dev-guide.md` §2、
+  `event-triggers.md` §1.3、`platform-behaviors.md` §6.1、`troubleshooting.md` 同步。
+
+> 本版行為以**實機測試**（2026-08-08，同一組正確帳密對打 apex 與租戶空間）
+> 加**平台原始碼核對**（`backend/app/core/workspace_host.py`、`backend/app/api/auth.py`、
+> `backend/app/services/user_provisioning_service.py`、`frontend/src/middleware.ts`）雙重確認。
+
 ## 1.7.0
 
 ### 登入身分／權限的口徑統一（★ 修正 1.6.0 的一項錯誤記載）
@@ -55,6 +114,7 @@
 - `troubleshooting.md` 新增 4 條徵狀速查（`import "../user"` 編譯失敗、
   `__IS_AUTHENTICATED__` 誤用、身分欄位被竄改、負偏移時區的 DATE 欄位），
   並改寫 `__CURRENT_USER__` 那一列。
+
 
 ## 1.6.0
 
