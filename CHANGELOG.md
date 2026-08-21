@@ -4,6 +4,34 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.9.0
+
+### ★ 行為修正：Egress 閘道改為純域名白名單，不再注入／剝除 Authorization
+
+平台已硬切（ADR 0010／0011，2026-07-29，無相容期），舊版文件的憑證模型整個反了：
+
+- **閘道只做域名驗證**：外部服務（EgressService）= slug + base_url 白名單。
+  Runtime 不再解密、注入或校驗憑證；寫入 API 拒絕憑證欄位
+  （`auth_type ≠ none` 或非空 `connection_config` → 400）。
+- **呼叫端 headers（含 `Authorization`）原樣轉送**，只擋 hop-by-hop
+  （`Host`、`Content-Length`、`proxy-*`）。舊文件「閘道會剝掉自帶
+  Authorization（實測回 401）」的行為已不存在；401 的語義反轉為
+  「外部 API 拒絕 app 自帶的憑證」——是 app 側問題，不是平台設定。
+- **金鑰責任改在 app**：API key 存 `ctx.secrets`，action 自組
+  `headers={"Authorization": ...}` 傳給 `ctx.http.call`（簽名本就收 `headers`）。
+- **設定入口搬家**：`/dashboard/settings/integrations` 已移除；唯一入口是
+  Builder（`/builder/{app_id}`）的「外部服務」tab，同處做租戶級建立與
+  per-app 授權（新建預設授權本 App）。建立需 `builder.access` 且本 App
+  擁有者或 `system.admin`；外部服務為租戶共用池、無服務擁有者。
+- **授權是兩層**：slug 沒建立（`egress_service_not_found`）與服務未授權給
+  本 App（`egress_not_authorized`）都會連不出去，排錯要分開看。
+
+更新範圍：SKILL.md（ctx 模組註解、Action 範例、錯誤處理）、
+`custom-app-dev-guide.md` §25 全節、`troubleshooting.md` 對外呼叫症狀列。
+依據：平台 ADR 0010（external-service-domain-only）、ADR 0011
+（external-service-builder-entry），並經 `connector_proxy.py`、
+`egress_services.py`、`action_context.py` 原始碼核對（2026-08-21）。
+
 ## 1.8.0
 
 ### ★ 破壞性：登入與 API 改走租戶空間 `https://[tenant].ai-go.app/*`
