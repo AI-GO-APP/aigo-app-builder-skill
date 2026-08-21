@@ -94,8 +94,11 @@ python scripts/check_update.py     # macOS / Linux 用 python3
    - republish 或改動 action 名稱前必須知道這些，否則會把排程觸發到自動暫停
 8. **盤點對外呼叫與 Egress**（若 code 內有 `ctx.http.call` 或 `import httpx` 等對外請求）
    - 從既有 action 原始碼撈出所有 `ctx.http.call` 的 egress slug 與殘留的對外網域，列成清單
-   - 提醒用戶到後台 `/dashboard/settings/integrations` 確認每個 slug 都已註冊
-     **同名 EgressService**（base_url + 憑證）——舊 code 能跑不代表新加的服務也通
+   - 提醒用戶到 Builder（`/builder/{app_id}`）的「外部服務」tab 確認每個 slug 都已
+     建立**同名外部服務**（base_url 域名白名單）**且授權給本 App**——
+     舊 code 能跑不代表新加的服務也通
+   - 舊 app 若靠平台代灌金鑰（不自帶 `Authorization`）→ **標記為必改**：
+     閘道已不再注入憑證（ADR 0010），金鑰要改存 `ctx.secrets`、action 自組 header
    - 發現 raw `import httpx / requests / urllib.request` 直連外部的 action → **標記為必改**：
      runner 是 default-deny egress，raw 連線一律 timeout（見 Phase 3「呼叫外部 API」）
 9. **確認已完全理解現有結構後，才可進入開發**
@@ -248,11 +251,13 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
 4.6. **對外 API 呼叫盤點**（★ 若有打第三方 API 就不可省）
    - 列出**所有要連出去的外部服務**
      `| egress slug | base_url（網域） | 用途 | 哪個 action 會用 |`
-   - **在計畫階段就提醒用戶去註冊 EgressService**：後台 `/dashboard/settings/integrations`
-     以**同名 slug** 註冊，填 base_url 與該租戶自己的金鑰
-     - 看不到該頁 → 帳號權限不足，要請租戶管理員代設
-   - EgressService 沒註冊，寫完的 code 一律連不出去——**等部署才發現等於整段白做**
-   - 金鑰歸 EgressService 管，action 程式碼不碰——**不需要**為 API 金鑰開 secret key
+   - **在計畫階段就提醒用戶去建立外部服務**：Builder（`/builder/{app_id}`）的
+     「外部服務」tab，以**同名 slug** 建立（base_url 域名白名單）並授權本 App
+     （新建預設授權本 App）
+     - 建立需本 App 擁有者或 `system.admin`；權限不足要請租戶管理員代設
+   - 外部服務沒建立或沒授權，寫完的 code 一律連不出去——**等部署才發現等於整段白做**
+   - 金鑰歸 app 自管：為每個 API 金鑰開 `ctx.secrets` 欄位，action 自組
+     `Authorization` header——閘道只驗域名，不代管憑證（ADR 0010）
    - 詳見 `references/custom-app-dev-guide.md` §25
 
 5. **app_domain 標籤設計**
@@ -455,8 +460,8 @@ def execute(ctx):
     # ctx.db.insert_row(table, data) / ctx.db.update_row(table, row_id, data)
     # ctx.db.delete_row(table, row_id)
     # ── 其他
-    # ctx.http.call(slug, path, method=..., body=...) — 對外 HTTP（經 egress 閘道）
-    # ctx.secrets.get(key) — 金鑰（webhook 驗簽等非對外憑證用）
+    # ctx.http.call(slug, path, method=..., body=..., headers=...) — 對外 HTTP（經 egress 閘道）
+    # ctx.secrets.get(key) — 金鑰（外部 API key、webhook 驗簽等，由 app 自管）
     # ctx.response.json(data) — 回應
     # ctx.csv.export(rows) — CSV 匯出
     data = ctx.params.get("key", "default")
@@ -471,12 +476,13 @@ default-deny egress，raw 連線出不去（實測 20 秒 timeout），且這些
 
 ```python
 def execute(ctx):
-    # slug 對應租戶在後台註冊的 EgressService（base_url + 憑證都在那裡）；
-    # 這裡只寫 slug 與 path，不碰金鑰、不自帶 Authorization header（閘道會剝掉）。
+    # slug 對應租戶註冊的「外部服務」（EgressService）——純域名白名單，只鎖 host。
+    # 金鑰由 app 自己帶：存 ctx.secrets，action 自組 Authorization header。
     resp = ctx.http.call(
         "example-api",
         "/v1/send",
         method="POST",
+        headers={"Authorization": f"Bearer {ctx.secrets.get('EXAMPLE_API_KEY')}"},
         body={"text": ctx.params.get("text")},
     )
     if int(resp.get("status") or 500) >= 400:
@@ -485,11 +491,12 @@ def execute(ctx):
     ctx.response.json(resp.get("data") or {})
 ```
 
-> ⚠️ **slug 必須先在後台註冊同名 EgressService（base_url + 該租戶自己的金鑰），
+> ⚠️ **slug 必須先建立同名「外部服務」（base_url 域名白名單）並授權給本 App，
 > 否則連不出去**——見 `references/custom-app-dev-guide.md` §25。這是設定問題，
 > 不是程式問題，改 code 改不掉。
-> 憑證由閘道注入：**不要自組 `Authorization` header**（會被剝掉、實測回 401），
-> 也不需要為 API 金鑰開 `ctx.secrets` 欄位。
+> 閘道只做**域名驗證**，**不代管、不注入、也不剝除憑證**（ADR 0010）：
+> `Authorization` 等呼叫端 headers 原樣轉送（僅擋 hop-by-hop）。
+> API 金鑰請開 `ctx.secrets` 欄位、由 action 自組 header。
 
 
 ### 前端呼叫 Action
@@ -608,18 +615,20 @@ if (file) downloadFile(file);
 
 - **timeout／連不出去**：① action 是不是 raw `import httpx / requests` 直連？
   runner 是 default-deny egress，raw 連線必 timeout——改寫成 `ctx.http.call`
-  ② 已是 `ctx.http.call` → 多半是 slug 沒有註冊同名 EgressService
-- **401**：action 自帶了 `Authorization` header（閘道會剝掉、以 EgressService
-  憑證取代）——刪掉它；或 EgressService 裡填的金鑰不對
+  ② 已是 `ctx.http.call` → slug 沒有同名「外部服務」，或服務未授權給本 App
+- **401**：外部 API 拒絕請求帶的憑證——閘道**不注入也不剝除** `Authorization`
+  （域名驗證 only，ADR 0010）。檢查 action 是否自組了正確的
+  `Authorization` header、`ctx.secrets` 的金鑰對不對——這是 app 側問題，
+  不用去動外部服務設定
 
 訊息指向 Egress／權限時：
 
 1. **立刻停止修改程式碼**——這是設定問題，改幾次結果都一樣
-2. 把原始 error message 轉給用戶，引導到後台
-   `/dashboard/settings/integrations` 以同名 slug 註冊 EgressService
-   （base_url + 該租戶自己的金鑰）
-3. 用戶看不到該頁 → 權限不足，請租戶管理員代設
-4. EgressService 確認生效後才重試
+2. 把原始 error message 轉給用戶，引導到 Builder（`/builder/{app_id}`）的
+   「外部服務」tab，以同名 slug 建立外部服務（base_url 域名白名單）並授權本 App
+3. 建立需 `builder.access` 且為本 App 擁有者（或 `system.admin`）；
+   權限不足請租戶管理員代設
+4. 外部服務確認生效後才重試
 
 詳見 `references/custom-app-dev-guide.md` §25.3。
 

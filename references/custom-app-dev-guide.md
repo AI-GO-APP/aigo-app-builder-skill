@@ -793,12 +793,13 @@ Server-Side Action 要打第三方 API，**一律走 `ctx.http.call(<egress-slug
 
 ```python
 def execute(ctx):
-    # slug 對應租戶在後台註冊的 EgressService（base_url + 憑證都在那裡）；
-    # 這裡只寫 slug 與 path，不碰金鑰、不自帶 Authorization（閘道會剝掉）。
+    # slug 對應租戶註冊的「外部服務」（EgressService）——純域名白名單，
+    # base_url 鎖定可打的 host。金鑰由 app 自己帶：存 ctx.secrets、自組 header。
     resp = ctx.http.call(
         "example-api",
         "/v1/orders",
         method="GET",
+        headers={"Authorization": f"Bearer {ctx.secrets.get('EXAMPLE_API_KEY')}"},
     )
     if int(resp.get("status") or 500) >= 400:
         ctx.response.json({"error": "外部服務暫時無法使用", "status": resp.get("status")})
@@ -809,28 +810,38 @@ def execute(ctx):
 - **不要直接 `import httpx / requests / urllib.request`**：runner pod 是
   **default-deny egress**（出口網路只放行平台閘道），raw 連線**必定 timeout**
   （實測約 20 秒後才失敗，還會把 action 拖到逾時）；這些套件也在沙箱 denylist 上。
-- **憑證不進 action**：金鑰在租戶註冊 EgressService 時填入，由閘道對外注入。
-  自組 `headers={"Authorization": ...}` 沒有用——閘道會把自帶的授權標頭剝掉
-  （實測回 401）。也因此**不需要**為第三方 API 金鑰開 `ctx.secrets` key；
-  `ctx.secrets.get()` 留給非對外憑證用途（例如 webhook 驗簽的 channel secret）。
+- **閘道只做域名驗證，不碰憑證**（平台 ADR 0010，2026-07-29 起）：閘道**不代管、
+  不注入、也不剝除**任何認證標頭——呼叫端 headers（含 `Authorization`）**原樣轉送**，
+  只擋 hop-by-hop（`Host`、`Content-Length`、`proxy-*`）。API 金鑰是 **app 自己的
+  責任**：開 `ctx.secrets` 欄位存金鑰，action 自組 `headers={"Authorization": ...}`
+  傳給 `ctx.http.call`。
+  > 舊行為（閘道注入 EgressService 憑證、剝除自帶 `Authorization` 並回 401）
+  > 已**整個移除**，硬切、無相容期——靠平台代灌 key 的舊 app 需改寫。
 - 回傳是 dict：`resp["status"]`（HTTP 狀態碼）與 `resp["data"]`（回應 body）——
   **自己檢查 status**，閘道不會替你 raise。
 - Webhook 或排程觸發的 action 要**冪等**（見 `event-triggers.md`），
   對外呼叫失敗重試時才不會重複送出。
 
-### 25.2 EgressService 註冊（★ 呼叫前的必要設定）
+### 25.2 外部服務註冊與 App 授權（★ 呼叫前的必要設定）
 
-`ctx.http.call` 的第一參數 slug 必須對應租戶註冊的 **EgressService**——
-以**同名 slug** 登記，填 base_url 與**該租戶自己的金鑰**。沒註冊的 slug 一律連不出去，
-這是平台的出口管制。
+`ctx.http.call` 的第一參數 slug 必須對應租戶已建立的**外部服務**（EgressService）——
+以**同名 slug** 登記，填 base_url 鎖定可打的 host。**沒有金鑰欄位**：寫入 API 對
+`auth_type ≠ none` 或非空 `connection_config` 直接回 400（域名驗證 only，ADR 0010）。
 
-設定位置：**後台 → Settings → Integrations**，路徑 `/dashboard/settings/integrations`
+而且是**兩層設定**：slug 沒建立連不出去；服務存在但**沒授權給本 App** 也連不出去
+（`egress_not_authorized`）。
+
+設定位置：**Builder（`/builder/{app_id}`）的「外部服務」tab**——唯一入口，
+同一處做租戶級建立／編輯與本 App 授權，新建預設順便授權本 App。
+（舊入口 `/dashboard/settings/integrations` 已移除，ADR 0011。）
 
 > 一律用**相對路徑**指引用戶，不要寫死主機名稱——子網域日後可能變動。
 > 用戶自己登入的後台網域是什麼就接在前面。
 
-> **看不到這個頁面 = 你的帳號權限不足**，不是頁面不存在。
-> 這種情況要**請租戶管理員代為設定**，開發者自己繞不過去。
+- 建立／編輯權限：`builder.access` 且（本 App 擁有者或 `system.admin`）。
+  權限不足時請租戶管理員代設，開發者自己繞不過去。
+- 外部服務是**租戶共用池**、無服務擁有者：任一 App 擁有者或 admin 可改／刪／停用，
+  其他 App 各自授權使用。
 
 ### 25.3 被擋掉時長什麼樣
 
@@ -839,21 +850,24 @@ def execute(ctx):
 | 症狀 | 成因 | 處置 |
 |------|------|------|
 | timeout（約 20 秒） | raw `httpx`/`requests` 直連——default-deny egress，連線被黑洞 | 改寫成 `ctx.http.call` |
-| `ctx.http.call` 連不出去／錯誤指向 egress | slug 沒有註冊同名 EgressService | 引導用戶到 `/dashboard/settings/integrations` 註冊（base_url + 金鑰） |
-| 401 | action 自帶 `Authorization` header 被閘道剝掉；或 EgressService 憑證填錯 | 刪掉自帶 header；請租戶檢查 EgressService 金鑰 |
+| `ctx.http.call` 連不出去／錯誤指向 egress | slug 沒有同名外部服務（`egress_service_not_found`），或服務未授權給本 App（`egress_not_authorized`） | 引導用戶到 Builder「外部服務」tab 建立（base_url）並授權本 App |
+| 401 | 外部 API 拒絕請求帶的憑證——閘道不注入也不剝除，`Authorization` 是 action 自己組的 | 檢查 action 是否有帶 `Authorization` header、`ctx.secrets` 的金鑰是否正確 |
 
 給 AI Agent 的處理準則：
 
 1. Action 對外呼叫失敗時，**先把回傳的 error message 完整讀出來**，
    不要立刻假設是程式碼寫錯。
 2. 若訊息指向 Egress／權限，**停止改 code**——這是設定問題，改幾次都一樣。
-3. 把原始 error message 轉給用戶，並引導到後台 `/dashboard/settings/integrations`
-   以同名 slug 註冊／修正 EgressService；看不到該頁 → 權限不足，請管理員代設。
-4. 確認 EgressService 設好後才重試。
+3. 把原始 error message 轉給用戶，並引導到 Builder（`/builder/{app_id}`）的
+   「外部服務」tab，以同名 slug 建立／修正外部服務並授權本 App；
+   權限不足（非本 App 擁有者且非 admin）→ 請管理員代設。
+4. **401 是 app 側問題不是平台設定**：回頭檢查 action 組的 header 與
+   `ctx.secrets` 金鑰，別再往外部服務設定找。
+5. 確認設定生效後才重試。
 
 ### 25.4 規劃階段就要處理
 
 Phase 1.5 實作計畫裡就該**列出所有要打出去的外部服務（egress slug + base_url）**，
-讓用戶在寫 code 前先去註冊 EgressService——等到部署後才發現連不出去，
-等於整段開發白做。
+讓用戶在寫 code 前先去建立外部服務並授權本 App，同時把各 API 的金鑰存進
+`ctx.secrets`——等到部署後才發現連不出去，等於整段開發白做。
 
