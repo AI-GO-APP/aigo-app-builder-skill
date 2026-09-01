@@ -170,7 +170,14 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
    - 前往 AI GO 後台 `https://[tenant].ai-go.app/dashboard`
    - **記下網址列的租戶前綴**，填入 `.aigo/config.json` 的 `base_url`
    - 確認帳號具備 `builder.access` 權限
-   - 進入 Builder → Custom Apps → 記下 App 的 UUID (`app_id`)
+   - **既有 App**：進入 Builder → Custom Apps → 記下 App 的 UUID (`app_id`)
+   - **新 App 可直接用 API 建立，不必走 UI**（2026-09-01 實測）：
+     `POST /api/v1/builder/apps`，`name` + `template_slug` 必填——
+     起手式依情景選 `starter-internal`（租戶成員的內部工具）或
+     `starter-external`（對外應用、終端使用者自助註冊）；
+     **access_mode 由模板決定、建立後不可改**，回應的 `id` 就是 `app_id`。
+     完整契約與「起手式帶示範檔案要先清」等注意事項見
+     `references/custom-app-dev-guide.md` §26
    - 填入 `.aigo/config.json` 的 `email` 和 `app_id`
 4. 建立憑證檔（**整台機器只需做一次**）：
    ```bash
