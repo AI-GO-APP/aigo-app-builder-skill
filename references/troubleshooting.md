@@ -49,7 +49,8 @@
 | Action 驗證失敗 | 檢查 execute(ctx) 函式、依賴模組是否可用 |
 | Publish 一致性失敗 | 重新 sync → compile → publish 完整循環 |
 | 建表 403 | 帳號缺 `datacenter.schema_write`（也非 `system.admin`），改輸出建表規格引導用戶到資料中心 UI 自建；**刪表／刪欄另限 `system.admin`**（建改與刪除是兩段權限）→ `data-center.md` §2 |
-| 建表／加欄 409 | 撞配額（`table_quota_exceeded` / `field_quota_exceeded`，數值見 `data-center.md` §4）或實體名撞名；「**與平台保留表名衝突**」= 撞到平台地板表名（users/tenants/api_keys…），沒有補救管道，換個實體名 → `data-center.md` §1 |
+| 建表／加欄 409 | 撞配額（`table_quota_exceeded` / `field_quota_exceeded`，數值見 `data-center.md` §4）或實體名撞名；「**與平台保留表名衝突**」= 撞到平台地板表名（users/tenants/api_keys…），沒有補救管道，換個實體名（⚠️ 2026-09-01 實測此檢查 prod 尚未生效——沒被擋≠可以用，一律自律避開）→ `data-center.md` §1 |
+| 文件宣稱的端點回 404／回應缺欄位 | 先懷疑**部署落差**（prod 落後 monorepo main 約一週，2026-09-01 實測），不是文件錯也不是打錯路徑。隔幾天再試；受影響清單見 `hosted-apps.md` 檔頭與 `data-center.md` §9 |
 | 刪表／刪欄被擋 | 兩段式刪除：先取 `/impact`，確認值必須是**實體名**不是顯示名 |
 | webhook 端點 404 | manifest 缺 `"webhook": true`，或**改完沒 republish** |
 | webhook 驗簽失敗 | 用了重新序列化的 body；必須用 `ctx.params["body"]` 原字串 |

@@ -2,7 +2,20 @@
 
 > **這不是 Custom App 的部署模式，是一條平行產品線**（平台文件明文「勿混稱」）。
 > 本 skill 的主流程（Phase 2–4）不適用於 Hosted App；Phase 1.5 判斷走這條線時讀本檔。
-> 內容核對自平台原始碼與文件（2026-09-01），非逐項實測。
+> 內容核對自平台原始碼與文件（2026-09-01），部分端點已實測（見下）。
+
+### ⚠️ 部署落差（2026-09-01 對 prod 實測）
+
+本檔以平台 monorepo `main` 為準，**prod 落後 main 約一週**。實測結果：
+
+- ✅ 可用：`GET /hosted-apps`（含 visibility 欄）、`GET .../deployments`、
+  `GET|PUT .../runtime-settings`、`GET /deploy-tokens`
+- ❌ 尚未部署（404 或回應缺欄位）：`GET .../resource-usage`；
+  `runtime-settings` 回應**沒有** `env_availability`／`persistent_disk` 欄位
+  ——env 執行期/建置期標記、持久碟、以及 §2.8 之後的多數新功能（網域、檔案／終端、
+  記錄工具、複製、圖示）在 prod 生效與否**未逐項驗證**，使用前先打一次確認
+- **判讀原則**：對著本檔宣稱的端點拿到 404 或回應缺欄位，**先懷疑部署落差**，
+  不是文件錯也不是你打錯——隔幾天再試或問平台
 
 ## 1. 是什麼：與 Custom App 的邊界
 
