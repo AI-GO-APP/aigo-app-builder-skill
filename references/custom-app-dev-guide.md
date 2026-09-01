@@ -427,8 +427,11 @@ const myRecords = allRecords.filter(
 1. **先盤點兩邊**：
    - `GET /api/v1/data-center/tables` — 租戶既有自建表（★ 不可跳過）
    - `GET /api/v1/refs/available-tables` — 可引用的 SaaS 表（見 §20）
-2. 既有自建表語意相同 → **直接重用**，不要新建
-3. 對候選 SaaS 表查欄位（§20.2），確認有無 `custom_data` JSONB 可擴充、權限是否足夠
+2. 既有自建表語意相同 → **直接重用**，不要新建；重用的表**欄位不足 → 加實體欄位**
+   （`data-center.md` §7），不要因缺欄就另建表或把結構化欄位塞進 json 欄
+3. 對候選 SaaS 表查欄位（§20.2），確認權限是否足夠；缺欄位時有兩個擴充選項——
+   租戶級正式欄位用**延伸欄位**（EAV，`data-center.md` §10）、
+   app 私有標記與鬆散擴充用 `custom_data` JSONB（SaaS 表本體不可加實體欄位）
 4. 依下表判定走哪一軌
 5. 走 Data Reference → 把表加入引用（引用狀態一律以 `GET /api/v1/refs/apps/{app_id}` 為準，
    **不要看 `db.json`**，見 `platform-behaviors.md` §6）。
@@ -626,8 +629,10 @@ TypeScript（前端）和 Python（後端 Server Action）是 AI GO 精選的開
 1. 列出外部系統的所有資料表與欄位
 2. 盤點兩邊：GET /data-center/tables（既有自建表）＋ Refs API（可用 SaaS 表，見 §20）
 3. 逐表比對：
-   租戶已有語意相同的自建表？    → 重用
-   要與 ERP/SaaS 功能連動？      → SaaS 表原生欄位；無原生對應 → custom_data JSONB
+   租戶已有語意相同的自建表？    → 重用；欄位不足 → 加實體欄位（data-center.md §7）
+   要與 ERP/SaaS 功能連動？      → SaaS 表原生欄位；無原生對應 →
+                                   正式欄位用延伸欄位（data-center.md §10）、
+                                   app 私有標記用 custom_data JSONB
    租戶自有的新業務實體？        → 自建表（遷入案例主力）
 4. 處理外鍵 / 關聯
 5. 產出映射表（模板見 resources/migration_mapping_template.md）
@@ -790,6 +795,56 @@ def execute(ctx):
 ✓ custom_data 結構：JSONB 欄位的 key 符合映射表定義
 ✓ 無殘留測試資料：遷移過程中的測試記錄已清除
 ```
+
+### 23.6 資料抽取路徑（★ 資料怎麼離開來源系統）
+
+§23.2 的匯入 action 假設 records 已經在 `ctx.params` 裡——**「誰去源頭拉資料」要先定案**。
+依來源型態選路徑：
+
+| 來源 | 抽取路徑 |
+|------|---------|
+| **MySQL / Postgres 直連**（含 Supabase 的 DB 連線字串） | **只能在本地做**：本地腳本用 DB driver 讀出 → 打平台 API 寫入（見下）。`ctx.http.call` 只講 HTTP，講不了 MySQL/Postgres 線協定；runner 又是 default-deny egress——**不存在「Server Action 直連源 DB」這條路**，不要往那個方向設計 |
+| **Supabase REST**（PostgREST） | 本地腳本打 REST 抓取（最簡單）；或 Server Action `ctx.http.call` + egress 白名單 `<project>.supabase.co`（§25）——只有「遷移後仍要持續同步」才值得建 egress，一次性遷移用本地路徑就好 |
+| **Google Sheet** | 匯出 CSV 本地解析（量小）；或 Sheets API 走 egress（要持續同步時） |
+| **CSV / Excel 匯出檔** | 本地解析 → 打平台 API 寫入 |
+
+**本地腳本的寫入端（兩軌各有路）**：
+
+- **自建表**：`scripts/aigo_data_center.py` 的 `insert_record()`
+  （`POST /api/v1/data-center/...`，逐筆）——量小直接用
+- **SaaS 表、或需要匯入邏輯**（補 `app_domain`、ID 映射、型別轉換）：
+  先佈一支 §23.2 的匯入 action，本地腳本分批呼叫
+  `POST /api/v1/actions/apps/{app_id}/run/{action_name}`，records 放 params。
+  base_url 一律走租戶空間（核心規則 29），token 用 `aigo_auth.get_token()`
+
+**大量資料（數千筆以上）的節奏**：
+
+- Server Action 有執行時間上限（`event-triggers.md` §1.6）——**分批的迴圈放在本地腳本**，
+  每批 100~500 筆呼叫一次 action；不要設計成「一發 action 自己拉完全部」，
+  超時中斷後你不知道停在哪
+- 本地腳本記錄斷點（已成功的批次序號 / 最後一筆外部 ID），失敗可續傳
+- 匯入 action 對「同一批重送」要冪等（以外部 ID 查重），否則斷點續傳會重複建資料
+
+一次性遷移結束後，把只為遷移建立的 egress 外部服務與金鑰**清掉**，不要留白名單。
+
+### 23.7 外部型別 → 自建表型別降級對照
+
+自建表只有 9 種型別（`data-center.md` §3），外部 DB 的型別按此表降級：
+
+| 外部型別 | 自建表型別 | 注意 |
+|---------|-----------|------|
+| VARCHAR / TEXT / CHAR / UUID | `text` | |
+| INT / BIGINT / FLOAT / NUMERIC | `number` | 金額等高精度欄位遷移後**必做抽驗比對**；不容許任何精度損失時改 `text` 保存原字串 |
+| BOOLEAN / TINYINT(1) | `boolean` | |
+| DATE | `date` | |
+| TIMESTAMP / DATETIME | `datetime` | 時區語意先確認（平台側行為見 SKILL.md 規則 28） |
+| ENUM / CHECK IN (...) | `select` | 正好對應——必須提供選項集，值受 CHECK 約束 |
+| JSON / JSONB | `json` | |
+| ARRAY | `json` | 存成 JSON 陣列 |
+| 外鍵欄位 | `relation` | 目標是自建表 → 真 FK；目標是 SaaS 表 → 軟關聯（§22.3） |
+| 圖片 / 附件 URL | `image` 或 `text` | `image` 存 storage key（`data-center.md` §6）——外部檔案要先下載、重新上傳 Storage、再存 key；不遷檔案就用 `text` 暫存外部 URL，並向用戶說明原站關閉後連結會失效 |
+| 自增 ID | 不遷 | UUID 自動生成，走 §23.3 的 ID 映射 |
+| 複合唯一鍵 / 跨欄 CHECK / DEFAULT 運算 | 無對應 | 約束上移：匯入與後續寫入都經同一支 Server Action，在 action 內檢查 |
 
 ## 24. 簽核工作流攔截（Approval）
 

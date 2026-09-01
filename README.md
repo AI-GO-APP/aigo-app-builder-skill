@@ -111,6 +111,7 @@ aigo-builder/
 ├── resources/
 │   ├── vfs_template.json             # VFS 範本（單頁/多頁）
 │   ├── migration_mapping_template.md # 外部 Schema ↔ AI GO 映射表模板
+│   ├── project_deconstruction_template.md # 既有專案解構清單（前+後+DB 遷入用）
 │   └── hooks/                        # SessionStart 更新檢查 hook 範本
 │       ├── claude-code.settings.example.json
 │       └── codex.config.example.toml

@@ -40,7 +40,7 @@
 
 | 操作 | 需要權限 |
 |------|---------|
-| 建表／改表／加欄／改欄（含 ERP 延伸欄位建改） | **`datacenter.schema_write`**（2026-08 起；`system.admin` 直通） |
+| 建表／改表／加欄／改欄（含 ERP 延伸欄位建改，→ §10） | **`datacenter.schema_write`**（2026-08 起；`system.admin` 直通） |
 | 刪表／刪欄／刪延伸欄位 | **`system.admin`**（刻意不下放） |
 | 讀結構（列表／讀 schema） | `builder.access` 或 `datacenter.schema_write`（任一即可） |
 | 記錄 CRUD（查／增／改／刪） | `builder.access` |
@@ -257,3 +257,51 @@ def execute(ctx):
 
 > 平台方向是未來讓 UUID 欄升級成關聯選單，此端點是前置建設；
 > 落地前不要嘗試 `target_erp_key='users'` 之類的寫法。
+
+---
+
+## 10. ERP 延伸欄位（EAV）：幫 SaaS／ERP 預設表加正式欄位（2026-08 起）
+
+> 端點與行為核對自平台原始碼（`backend/app/api/data_center_ext.py`、
+> `services/data_center/ext_fields.py`），prod 未逐項實測——
+> 拿到 404 或缺欄位先懷疑部署落差，不是文件錯。
+
+### 定位：Data Reference 軌的第三種擴充機制
+
+SaaS／ERP 表**本體 schema 不可改**（平台定義，沒有任何 API 能對它 ALTER TABLE）。
+要讓預設表「更符合使用者的資料結構需求」，有三個選項，**不是只有 custom_data**：
+
+| 需求 | 選 | 理由 |
+|------|-----|------|
+| 原生欄位語意能對上 | **原生欄位** | 永遠優先 |
+| 租戶級的正式欄位：要有型別、要在資料中心 UI 對全租戶可見可管理 | **延伸欄位**（本節） | 有型別驗證、有欄位定義、跨 app 一致 |
+| app 私有標記（`app_domain` 必在此）、鬆散或暫時性的擴充 | `custom_data` JSONB | 免定義成本，但無型別、僅該 app 自己認得 |
+
+讀寫頻繁且 app 是該資料的主要使用者時，回頭重新考慮：這個實體也許該整個走自建表。
+
+### 是 overlay，不是實體欄位（★ 讀寫契約，最容易踩）
+
+延伸欄位的定義與值存在**獨立的 EAV 表**，ERP 表本體零改動。後果：
+
+- **`ctx.db.query`／`db.ts` 的查詢結果不會包含延伸欄位值**——讀 = 主列查詢
+  ＋另打 `:batch-get` 自己合成；寫 = 原生欄位走既有路徑、延伸欄位另打 PATCH
+- 「缺值不回填」：batch-get 只回傳實際存在的值，**不代入 `default_value`**
+- relation 型別一律**軟關聯無 FK**；required／unique 由應用層保證，DB 不擋
+- Custom App SDK（`api.ts`／`ctx.db`）**沒有封裝**——app 執行期要用得自己打 REST；
+  需要在 app 內大量讀寫延伸欄位時，優先重新評估改走自建表
+
+### 端點速查（前綴 `/api/v1/data-center`）
+
+| 動作 | 方法與路徑 | 權限 |
+|------|-----------|------|
+| 列出定義 | GET `/ext-fields/{erpKey}` | `builder.access` 或 `datacenter.schema_write` |
+| 建欄 | POST `/ext-fields/{erpKey}` | `datacenter.schema_write`（`system.admin` 直通） |
+| 改欄 | PATCH `/ext-fields/{erpKey}/{fieldKey}` | `datacenter.schema_write` |
+| 刪欄（兩段式：impact → confirm） | GET `.../{fieldKey}/impact` → DELETE | **`system.admin`**（帶走該欄所有值，刻意不下放） |
+| 批取值 | POST `/ext-values/{erpKey}:batch-get`（body `row_ids` ≤ **200**） | `builder.access` |
+| 寫值 | PATCH `/ext-values/{erpKey}/{rowId}` | `builder.access` |
+
+- `{erpKey}` 是 ERP meta registry 的表 key；`{fieldKey}` 是延伸欄位實體名
+- 型別與自建表**同一套 9 型別**（§3），select 選項集驗證也同一套
+- 配額沿用每表欄數配額（§4）
+- 管結構的人不自動獲得看資料的權——定義面與值面的權限是分開的

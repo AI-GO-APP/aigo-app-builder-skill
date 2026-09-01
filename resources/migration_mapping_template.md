@@ -1,7 +1,9 @@
 # 外部 Schema → AI GO 映射表
 
-> 本模板用於 Phase 1.5 第 6 點 b「外部 Schema → AI GO 架構映射」步驟。
+> 本模板用於 `references/migration-workflow.md` §2.4「外部 Schema → AI GO 架構映射」步驟。
 > 每個外部系統的每張表填寫一份。
+> ⚠️ **使用者／認證表不進本流程**——它們走 `project_deconstruction_template.md`
+> 的認證映射（建成自建表是規則 23 禁止的反模式）。
 
 ## 系統資訊
 
@@ -28,8 +30,11 @@
 
 > 對應方式填寫規則：
 > - `直接對應`：外部欄位可直接寫入 SaaS 表的原生欄位
-> - `custom_data`：放入 SaaS 表的 `custom_data` JSONB 欄位
-> - `自建表`：需建立自建表來存放（租戶級，建表需 system.admin）
+> - `延伸欄位`：SaaS 表加租戶級正式欄位（EAV；有型別、全租戶可見，
+>   但 ERP 既有 CRUD 不回傳其值——見 data-center.md §10）
+> - `custom_data`：放入 SaaS 表的 `custom_data` JSONB 欄位（app 私有標記、鬆散擴充）
+> - `既有自建表加欄`：重用租戶既有自建表，缺的欄位用加實體欄位補（data-center.md §7）
+> - `自建表`：需建立新自建表來存放（租戶級，建表需 system.admin）
 > - `不遷移`：系統欄位，AI GO 自動管理
 
 ### 無法對應 SaaS 表的欄位 → 自建表

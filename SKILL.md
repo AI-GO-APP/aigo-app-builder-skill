@@ -3,8 +3,8 @@ name: aigo-builder
 description: >
   Use when working on an AI GO Custom App (ai-go.app)：開發前端（React + TypeScript）
   或 Server-Side Action（Python）、部署與驗證、規劃資料架構（資料中心自建表 /
-  Data Reference）、接 Webhook 或設定 App 排程、將現有系統（Supabase / Google Sheet
-  / MySQL）遷入 AI GO。
+  Data Reference）、接 Webhook 或設定 App 排程、將現有系統或整套專案
+  （前端＋後端＋DB；Supabase / Google Sheet / MySQL 等）搬入／遷入 AI GO。
 ---
 
 # AI GO Custom App Builder
@@ -229,6 +229,13 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
      自訂網域 → 建議 Hosted App（→ `references/hosted-apps.md`，開發流程完全不同，
      不走本 skill 的 Phase 2–4）；要在平台內做業務介面、直接用 `ctx`/SDK 存取
      租戶資料 → Custom App，繼續本流程
+   - **遷入情景（既有系統／整套專案要搬進來）→ 一律先走
+     `references/migration-workflow.md` §2.1 的三向決策**：除了 Custom vs Hosted，
+     還要先問「原系統的登入使用者是誰」定 internal / external——
+     **access_mode 建立後不可改，選錯要砍掉重建**，這一步不能靠預設值帶過
+   - ⚠️ **「Hosted = 整套搬」指的是程式，不是資料**：不論哪條產品線，
+     業務資料一律遷入 AI GO 的表（預設引用＋自建）、原 DB 退場——
+     Hosted App 的資料層改寫與資料去向見 `hosted-apps.md` §7.1
    - 拿不準就把兩條線的差異表（`hosted-apps.md` §1）給用戶選
 
 2. **場景拆分與 App 邊界建議**
@@ -243,7 +250,9 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
      - 對候選 SaaS 表呼叫 `GET /api/v1/refs/tables/{name}/columns` 查欄位結構
        ⚠️ **查到的表沒有 `tenant_id` 是正常的**，不代表不安全，也不要自補過濾——見規則 25
    - 列出所有需要的資料表，逐表判定走哪一軌（判定標準見規則 18）
-   - **重用優先於新建**：既有自建表語意相同就重用，不要新建
+   - **重用優先於新建**：既有自建表語意相同就重用，不要新建；
+     **重用的表欄位不足 → 直接加實體欄位**（`data-center.md` §7 加欄），
+     不要因缺欄就另建新表或把結構化欄位塞進 json 欄
    - 走 Data Reference 的表：說明如何用 `custom_data` JSONB 擴充、`app_domain` 標籤值
    - 走自建表且需要新建的：產出**建表規格表**
      `| 表顯示名 | 欄位顯示名 | 型別 | 必填 | 唯一 | relation 目標 |`
@@ -291,8 +300,9 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
 6. **現有系統遷移評估**（若適用）
 
    > 用戶有現存系統（Supabase / Google Sheet / MySQL / 既有程式碼）要遷入
-   > → 先讀 `references/migration-workflow.md` §2，那裡有語言架構評估、
-   > Schema 映射與資料遷移計畫的完整流程。純新建 App 跳過本項。
+   > → 先讀 `references/migration-workflow.md` §2，依序做：產品線與模式判斷（§2.1，
+   > 不可逆）、專案解構盤點（§2.2，前+後+DB 完整專案時，含使用者表與 DB 層邏輯的
+   > 特殊處理）、語言架構評估、Schema 映射與資料遷移計畫。純新建 App 跳過本項。
 
 ### 計畫閘門
 
@@ -350,6 +360,10 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
 
     - **自建表不是「最後手段」**——它是租戶級的真實 Postgres 表，200 張配額（付費檔），
       是遷入案例的主力承載體。
+    - **既有表欄位不夠 ≠ 換軌或塞 json**：自建表可直接**加實體欄位**
+      （`data-center.md` §7）；SaaS 表本體不可改，但可加**延伸欄位**
+      （租戶級正式欄位，EAV，`data-center.md` §10）——`custom_data` 不是
+      SaaS 表唯一的擴充點，它留給 app 私有標記（`app_domain`）與鬆散暫時性擴充。
     - **建表前必須先 `GET /api/v1/data-center/tables` 盤點**（Phase 0 步驟 6）。
       語意相同的表已存在就重用，不要新建——自建表跨 app 共用，重複建表 = 資料分裂。
     - 建表需 `system.admin`。收到 **403 不重試、不繞路**：輸出可照抄的建表規格，
@@ -685,9 +699,9 @@ uv run python scripts/report_issue.py submit "一句話標題" \
 |------|------|
 | `CONTEXT.md` | ★ 術語表——自建表／CustomObject／Data Reference／app_domain |
 | `references/custom-app-dev-guide.md` | 核心 API 規格與架構理念 |
-| `references/data-center.md` | 自建表完整規格（型別、配額、權限、SDK） |
+| `references/data-center.md` | 自建表完整規格（型別、配額、權限、SDK）＋ ERP 延伸欄位（§10） |
 | `references/event-triggers.md` | Webhook 與 App 排程（冪等要求、宣告、限制） |
-| `references/migration-workflow.md` | **有現存系統要遷入時**：盤點、Schema 映射、資料遷移 |
+| `references/migration-workflow.md` | **有現存系統要遷入時**：產品線／模式三向判斷（不可逆）、專案解構、Schema 映射、資料遷移 |
 | `references/verification-details.md` | **要執行驗證時**：四項驗證的完整定義、Phase 5 里程碑 |
 | `references/troubleshooting.md` | **出錯時**：錯誤速查表 |
 | `references/issue-reporting.md` | **回報平台問題時**：BDD 撰寫規範、指令、進度追蹤 |

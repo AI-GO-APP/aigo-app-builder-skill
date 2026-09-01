@@ -166,6 +166,46 @@ curl -fsSL https://raw.githubusercontent.com/AI-GO-APP/aigo-cli-releases/main/in
 - **複製（clone）不複製 `/data` 內容**，也不複製 Deploy Token 與部署歷史
 - 縮到零**不會**因排程或背景工作自動喚醒——需要常駐就開 `always_on`
 
+### 7.1 遷入既有服務時：資料一律遷入平台，原 DB 退場
+
+> 遷移評估（`migration-workflow.md` §2.1）判走 Hosted App 後，**預期行為只有一種**：
+> 業務資料遷入 AI GO 的表（預設 SaaS 表引用＋自建表），app 改用 Open Proxy 存取，
+> **原 DB 退場、不再使用**。「Hosted = 整套搬」指的是**程式**，不是資料。
+
+**預期路徑（唯一的常態）：資料遷入平台 + Open Proxy**
+
+- **落點依雙軌分流**（與 Custom App 同一套規則，SKILL.md 規則 18）：
+  要與 ERP／SaaS 功能連動的資料 → 在「資料存取」tab 加**預設（SaaS）表引用**
+  （ERP 表預設零授權，要先加引用並發布，§5）；租戶自有的新業務實體 → **自建表**
+  （資料中心自建表預設整租戶可用，§5）
+- **映射先行**：逐表逐欄做完 Schema 映射（`custom-app-dev-guide.md` §22、
+  映射表模板）並經用戶確認，**才可執行匯入**——Hosted 線不因「程式整套搬」而免掉這一步
+- **程式的資料層要改寫**：原專案的 ORM／SQL／DB driver 呼叫全部改成
+  `Authorization: Bearer $AIGO_API_TOKEN` 打 `$AIGO_PLATFORM_API_URL/api/v1/open/...`
+  （§5；Hosted App **沒有** `ctx.db`）。這是 Hosted 遷入的**必做工項**，
+  工作量要在計畫階段向用戶如實預告
+- **歷史資料匯入在本地做**：走 data-center API 或匯入 action
+  （`custom-app-dev-guide.md` §23.6）
+
+**為什麼「繼續連原 DB」不是選項**——★ 執行期出站只放 TCP 443
+（核對自平台 operator 的 NetworkPolicy 原始碼
+`infra/operator/internal/controller/resources.go`，2026-09-01 main；未實機驗證，
+部署落差判讀原則同本檔開頭）：hosted app 容器對外只能連**公網的 443 埠**
+（排除叢集私網段）＋ DNS，另可達平台 backend 與同租戶命名空間內的其他 app。
+Postgres 5432、MySQL 3306、Redis 6379 一律不通——連線字串直連原 DB 這條路
+**在網路層就不存在**，不是 driver 或防火牆設定問題。
+
+**兩個標註後才可用的例外**（都不是與預期路徑並列的選項，用了要在計畫中明寫）：
+
+| 例外 | 允許條件 | 硬前提與陷阱 |
+|---|---|---|
+| **短期過渡：暫連原 DB 的 HTTPS 介面** | 僅限分批遷移期間，計畫中**必須明寫遷移終點**（哪一批遷完就切斷）；沒有終點的「先這樣跑」不接受 | 只有當原 DB 有**走 443 的 HTTPS 介面**（Supabase REST／Neon、PlanetScale 的 HTTP driver／自架 API 層）才技術可行；程式仍要從連線字串改成 HTTP 呼叫 |
+| **`/data` 放非業務資料** | 只放快取、暫存檔、衍生產物——**業務資料不可落在 `/data`** | 10 GiB EFS；⚠️ **max-scale 平台常數為 2**（同前述原始碼核對），可能同時跑兩個實例，共享 EFS 上的 SQLite 併發寫有鎖定風險；clone 不帶 `/data`（§7） |
+
+用戶堅持長期外接原 DB 或把業務資料放 `/data` 時：如實說明這偏離平台預期行為
+（資料進不了平台功能、其他 App 用不到、平台也不備援它），確認後照做，
+但在計畫文件中留下記錄。
+
 ## 8. 日誌與除錯
 
 - **建置日誌**：`GET /{id}/deployments/{dep_id}/logs?after={cursor}`——只有 cursor 增量，

@@ -4,6 +4,72 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.14.0
+
+### 遷入情景補強：前+後+DB 整套專案搬入 AI GO 的完整引導
+
+針對「用戶把一個前端＋後端＋DB 專案移進 AI GO」情景的四項缺口修補：
+
+**1. 產品線與模式三向判斷（`migration-workflow.md` §2.1，新）**
+- 兩問定四象限：先問「原系統的登入使用者是誰」（internal / external），
+  再問技術形狀（Custom / Hosted）——原本三個判斷散在三處且遷移文件不引用
+- 明寫不可逆警示：access_mode 建立後不可改、internal 不能開匿名、
+  Hosted 付費檔限定；「員工後台＋客戶前台」要拆兩個 App
+- §1 多系統盤點改為逐系統過 §2.1，全景表新增「產品線／模式」欄
+- SKILL.md Phase 1.5 第 1.5 點與第 6 點接線
+
+**2. 專案解構清單（`resources/project_deconstruction_template.md`，新）**
+- 元件落點對照：routes／背景排程／webhook 接收／檔案儲存／第三方 API／
+  金鑰／realtime 各自落到 AI GO 的哪裡
+- **使用者表特殊處理**：不進 Schema 映射（建成自建表 = 規則 23 反模式）；
+  internal 走成員邀請、external 走 custom-app-auth 且密碼 hash 不可遷
+- DB 層邏輯（trigger／view／RLS／procedure／edge functions）上移 Server Action 的對照
+- 前端可移植性核對：即使原專案是 React+TS，CSS 與依賴幾乎必然重寫
+  （§2.3 同步補核對清單，修正原「已是 TS 可評估遷移」的過度樂觀）
+
+**3. 資料抽取路徑與型別對照（`custom-app-dev-guide.md` §23.6／§23.7，新）**
+- MySQL/Postgres 直連**只能在本地做**——`ctx.http.call` 講不了 DB 線協定，
+  「Server Action 直連源 DB」這條路不存在
+- 本地腳本寫入端兩軌：自建表走 `aigo_data_center.insert_record()`；
+  SaaS 表／需匯入邏輯走匯入 action 的 run 端點分批呼叫
+- 大量資料：分批迴圈放本地、記斷點、匯入 action 要冪等
+- 外部型別 → 自建表 9 型別降級對照表（enum→select、array→json、
+  附件先下載重傳 Storage 等）
+
+**4. Hosted App 遷入時原 DB 的三個去向（`hosted-apps.md` §7.1，新）**
+- ★ 原始碼核對（operator NetworkPolicy，未實機驗證）：**執行期出站只放 TCP 443**
+  ——Postgres 5432／MySQL 3306 連不出去，連線字串直連原 DB 這條路不存在
+- 三選項：A 外接原 DB（僅限有 HTTPS 介面者）／B 遷自建表＋Open Proxy
+  （要共用資料的正解；Hosted 沒有 `ctx.db`，匯入在本地做）／C `/data` 自帶
+  （max-scale=2，共享 EFS 上 SQLite 併發寫有風險，單寫低併發限定）
+
+另：SKILL.md description 補「整套專案（前端＋後端＋DB）搬入」觸發語；
+`migration_mapping_template.md` 標注使用者表不進映射流程。
+
+**5. 政策校正：Hosted 遷入的資料一律進平台、原 DB 退場（`hosted-apps.md` §7.1 重寫）**
+- §7.1 從「中性三選項」改為單一預期路徑：業務資料依雙軌分流遷入
+  **預設（SaaS）表引用＋自建表**、app 改用 Open Proxy、原 DB 退場——
+  「Hosted = 整套搬」指程式不指資料（SKILL.md Phase 1.5 同步加警語）
+- 「暫連原 DB 的 HTTPS 介面」降格為**須明寫遷移終點的短期過渡例外**；
+  「`/data` 自帶」限縮為**僅非業務資料**（快取、暫存、衍生產物）
+- 解構模板的 Hosted 註記改寫：資料層改寫（ORM/SQL → Open Proxy）列為必做工項，
+  要求盤點原專案所有下 SQL 的位置作為工作量依據
+- `migration-workflow.md` §2.5 加顯式閘門：**映射表未產出／未經用戶確認前
+  不可執行任何匯入**，兩條產品線都受約束
+
+**6. 既有表加欄位：三種擴充機制補齊（新增 `data-center.md` §10）**
+- 釐清「既有表欄位不夠」的正解：**自建表直接加實體欄位**（§7 既有端點）；
+  **SaaS 表本體不可改，但可加「ERP 延伸欄位」**（EAV overlay，2026-08 起，
+  端點核對自平台原始碼、prod 未逐項實測）——`custom_data` 不是 SaaS 表唯一擴充點
+- 新 §10 完整記載：三選項比較表（原生欄位／延伸欄位／custom_data 各自時機）、
+  端點速查、與自建表同一套 9 型別與欄數配額、
+  ★ 讀寫契約（`ctx.db`/`db.ts` **不回傳**延伸欄位值，要另打 `:batch-get`
+  ≤200 rows／PATCH 寫值；缺值不回填 default；無 DB 級 FK/unique；SDK 無封裝）
+- 注入各決策點：SKILL.md 規則 18 加「欄位不夠 ≠ 換軌或塞 json」、
+  Phase 1.5 第 3 點「重用的表欄位不足 → 加實體欄位」、
+  dev-guide §19 決策流程與 §22.1 映射流程、
+  映射表模板的對應方式新增 `延伸欄位` 與 `既有自建表加欄` 兩個選項
+
 ## 1.13.0
 
 ### 問題回報支援附加截圖（--image）
