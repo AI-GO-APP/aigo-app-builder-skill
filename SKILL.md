@@ -260,6 +260,13 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
      `Authorization` header——閘道只驗域名，不代管憑證（ADR 0010）
    - 詳見 `references/custom-app-dev-guide.md` §25
 
+4.7. **平台 API 權限面盤點**（權限 gate 目前 audit，enforce 後前端呼叫會 403）
+   - 列出**前端（瀏覽器 SDK）會直接呼叫的平台 API 群**——app 的宣告範圍是從
+     `actions/*.py` 靜態推導的，**不含前端呼叫面**
+   - 提醒用戶在 Builder（`/builder/{app_id}`）「API 權限」分頁把這些群開啟
+     （寫入需 `builder.manage_access`）
+   - 詳見 `references/platform-behaviors.md` §12
+
 5. **app_domain 標籤設計**
    - 確定此 App 的 `app_domain` 值（snake_case，如 `patent_os`、`crm_leads`）
    - 說明標籤用途：所有寫入 SaaS 表的資料都會帶上此標籤
@@ -446,6 +453,12 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
       不要往密碼、Token、權限方向深掘
     - 租戶前綴 = 用戶登入時網址列的第一段；不確定就直接問用戶，別猜
     - 細節見 `references/platform-behaviors.md` §6.1
+30. **啟動先渲染 skeleton，不要讓長 API 擋住首次渲染**（★ 強制）
+    - 平台會監看掛載後 **8 秒**：Shadow root 全空就自動回報 runtime error，
+      並對使用者顯示「App 已載入但沒有顯示任何內容」banner
+    - 「先跑長 API、成功後才第一次渲染」的寫法會被誤報——
+      一律先渲染 loading／skeleton 佔位，資料到了再替換
+    - 詳見 `references/platform-behaviors.md` §11
 
 ### Server-Side Action 撰寫
 
@@ -632,6 +645,22 @@ if (file) downloadFile(file);
 
 詳見 `references/custom-app-dev-guide.md` §25.3。
 
+## 問題回報（平台問題 → 開發團隊）
+
+遇到「平台自身」的問題——實測與文件不符、troubleshooting 查無此症或照表仍卡死、
+被平台缺陷擋住流程——**直接回報給開發團隊**，不要繞道硬改：
+
+```bash
+uv run python scripts/report_issue.py submit "一句話標題" \
+  --expected "預期行為" --actual "實際結果（含錯誤原文）" --steps "重現步驟"
+```
+
+- 憑證重用 `~/.aigo/.env`，零設定；在 AI IDE 內直接執行，不開任何 UI、
+  不經平台（回報系統獨立部署，平台掛掉時照樣可報）
+- ★ 內容寫**行為**不寫解法：預期 vs 實際＋重現步驟；
+  **不要**替用戶提出技術建議或實作方式——完整規範見 `references/issue-reporting.md`
+- 追蹤進度與官方回覆：`report_issue.py list`／`show <ticket_id>`
+
 ## 參考文件
 
 | 檔案 | 內容 |
@@ -643,4 +672,5 @@ if (file) downloadFile(file);
 | `references/migration-workflow.md` | **有現存系統要遷入時**：盤點、Schema 映射、資料遷移 |
 | `references/verification-details.md` | **要執行驗證時**：四項驗證的完整定義、Phase 5 里程碑 |
 | `references/troubleshooting.md` | **出錯時**：錯誤速查表 |
+| `references/issue-reporting.md` | **回報平台問題時**：BDD 撰寫規範、指令、進度追蹤 |
 | `references/platform-behaviors.md` | **實測行為補遺**：DB Proxy 分頁與筆數上限、`custom_data` 不可伺服器端過濾、TIMESTAMP 格式、seed 表唯讀、`ctx.erp` 白名單 |
