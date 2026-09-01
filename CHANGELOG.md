@@ -4,6 +4,23 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.10.0
+
+### 新功能：平台問題回報（AI IDE 內直接回報，不開 UI）
+
+開發中遇到平台自身的問題（實測與文件不符、troubleshooting 查無此症、
+被平台缺陷卡死）可直接提報進開發團隊的 Scrum Board，並追蹤處理進度與官方回覆：
+
+- 新增 `scripts/report_issue.py`：`submit`（結構化 BDD 參數
+  `--expected/--actual/--steps/--context`，自動組版）／`list`／`show`
+- 新增 `references/issue-reporting.md`：回報時機、★ BDD 撰寫規範
+  （描述預期行為 vs 實際結果與重現步驟；**不要**提技術建議或實作方式）、
+  隱私註記（不要貼機密）
+- SKILL.md 新增「問題回報」一節與參考文件索引
+- 憑證重用 `~/.aigo/.env` 零設定：回報帳號在本地以 sha256 衍生，
+  AI GO 密碼不離開本機；AI GO 密碼變更後自動換用新回報帳號，不會卡死
+- 回報系統獨立部署（Cloudflare），平台掛掉時照樣可報
+
 ## 1.9.0
 
 ### ★ 行為修正：Egress 閘道改為純域名白名單，不再注入／剝除 Authorization
