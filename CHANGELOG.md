@@ -4,6 +4,40 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.11.0
+
+### 平台同步（至 2026-09-01）：Hosted App 產品線納入 + Custom App 面更新
+
+**新增 `references/hosted-apps.md`——Hosted App（UI 繁中「自訂 App」）是與
+Custom App 平行的獨立產品線**（任意技術棧原始碼 → 容器 → Knative，
+網址 `{slug}.deploy.ai-go.app`）。SKILL.md Phase 1.5 新增「產品線判斷」（1.5 項）；
+參考檔涵蓋：命名地雷（code 的 `CustomApp` 指 Builder 產物、繁中「自訂 App」指
+Hosted App）、應用形狀六條硬規則、env 規則（128 顆／單值 32 KiB／總量 128 KiB、
+`AIGO_*` 保留、PUT 全量替換）、部署 API 與 Deploy Token vs session 權限矩陣、
+`AIGO_*` 資料契約（ERP 表預設零授權）、internal app 401 處置（判 `code` 後
+`reload()`）、持久化語意（唯一持久是 `/data`）、錯誤碼對照（分清重試會好與不會好）。
+
+**Custom App 面更新**（皆核對平台原始碼）：
+
+- **`actions/requirements.txt` per-app wheelhouse**：action 可宣告 pip 依賴
+  （`name==version`、≤20 行、≤80 MiB、aarch64 only-binary；解析只在試跑／發布；
+  有 pin 時試跑走 draft runner 冷啟 ~60s）——`custom-app-dev-guide.md` §16.2
+- **VFS 路徑寫入前正規化**：非法路徑 400、`Actions/`→`actions/` 大小寫折疊——§10
+- **空渲染偵測**：掛載後 8 秒 root 全空 → 自動回報 runtime error + 使用者 banner；
+  升為核心規則 30（先渲染 skeleton）——`platform-behaviors.md` §11
+- **權限 gate 現況（audit）**：`__APP_TOKEN__` 已改 app 憑證；enforce 前要在
+  「API 權限」分頁補前端呼叫面（Phase 1.5 新增 4.7 項）；自建表撞平台保留表名
+  （users／tenants 等）現在建表當下 409——`platform-behaviors.md` §12、`data-center.md` §1
+- **data-center**：結構權限拆出 `datacenter.schema_write`（刪除仍限 `system.admin`）；
+  配額超限錯誤碼；新端點 `GET /api/v1/users` 租戶使用者目錄與「自建表關聯使用者」
+  的正確做法（目前不能建 relation 指向 users）——`data-center.md` §2／§4／§9
+- **External Auth**：自助端 `PATCH .../me` 改顯示名稱；邀請成員可指定落點
+  `redirect_url: "/app-login/{slug}"`（白名單、純 ASCII）——`custom-app-dev-guide.md` §14
+- **平台標識改版**：右下角常駐藥丸 → 首次造訪頂部橫條 5 秒自動消失；
+  不要嘗試蓋掉（有自癒防護）——§9
+- troubleshooting 新增 7 條速查（VFS 400、WHEELHOUSE 422、draft runner、
+  空渲染誤報、保留表名 409、jsonb 引用頁籤、requirements 改壞導致 action 全逾時）
+
 ## 1.10.0
 
 ### 新功能：平台問題回報（AI IDE 內直接回報，不開 UI）

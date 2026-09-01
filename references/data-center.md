@@ -20,6 +20,12 @@
 
 **所有 API 在指涉既有表／欄位時一律用實體名。** 改顯示名不影響任何既有引用。
 
+⚠️ **實體名有保留名單（2026-08 擴大）**：除了 ERP 表名與 SQL 保留字，
+現在還包含**平台地板表名**（`users`／`tenants`／`audit_logs`／`api_keys`／
+`countries` 等共 76 張）。撞名在建表當下就回 **409**（「與平台保留表名衝突」），
+**沒有事後補救管道**——顯示名取「使用者」這類會生成保留實體名的名稱前，
+先想好實體名會長什麼樣（可加業務前綴避開，如「專案成員」→ `project_members`）。
+
 > **唯一例外**：relation 欄位指向自建表時用的是 `target_table_id`（目標表的 **UUID**，
 > 從 `GET /tables` 回應的 `id` 取），不是實體名。填錯會拿到泛用 422。
 
@@ -29,11 +35,15 @@
 
 | 操作 | 需要權限 |
 |------|---------|
-| 建表／改表／刪表／加欄／改欄／刪欄 | **`system.admin`** |
-| 讀結構（列表／讀 schema） | `builder.access` |
+| 建表／改表／加欄／改欄（含 ERP 延伸欄位建改） | **`datacenter.schema_write`**（2026-08 起；`system.admin` 直通） |
+| 刪表／刪欄／刪延伸欄位 | **`system.admin`**（刻意不下放） |
+| 讀結構（列表／讀 schema） | `builder.access` 或 `datacenter.schema_write`（任一即可） |
 | 記錄 CRUD（查／增／改／刪） | `builder.access` |
 
 這是平台刻意收窄的治理界線：管制的是 schema 的形狀，不是它的使用。
+**建改與刪除是兩段權限**：可以建表的角色不一定能刪表。
+⚠️ 預設角色**沒有**被回填 `datacenter.schema_write`——要讓非 admin 角色建表，
+必須由租戶擁有者到角色 UI 勾選；既有 `system.admin` 呼叫端不受影響（直通）。
 
 ### Agent 的建表流程（★ 強制）
 
@@ -43,7 +53,7 @@
 3. 需要新表 → 產出「建表規格」給用戶確認（Phase 1.5 計畫閘門）
 4. POST /api/v1/data-center/tables
    ├─ 201 → GET 驗收，繼續開發
-   └─ 403 → 用戶不是租戶管理員
+   └─ 403 → 帳號缺 datacenter.schema_write（也非 system.admin）
           → 不重試、不繞路
           → 輸出可照抄的建表規格，引導用戶到資料中心 UI 自建
           → 用戶回報建好後，GET /tables 驗收再繼續
@@ -87,6 +97,11 @@
 | 每表非系統欄位數 | **50** | **100** |
 
 - 付費判定 = 有 active 訂閱 ∪ 平台租戶；取不到狀態時 **fail-closed 落免費檔**。
+- 平台 ops 可對個別租戶覆寫配額（`tenants.settings.data_center_quota`）——
+  **不是租戶自助**，撞限且有正當需求時引導用戶聯絡平台，不要嘗試繞。
+- 超限錯誤是 **409**，body `{"error": code, "message": ...}`：
+  `table_quota_exceeded`「已達自建表數上限（N 張，目前 M 張）」／
+  `field_quota_exceeded`「已達欄位數上限（N 欄，目前 M 欄）」。
 - ⚠️ **單次 `POST /tables` 最多帶 50 個欄位**（schema 層上限），這與每表欄位配額是兩回事：
   付費租戶想一次建 60 欄會拿到 **422 而不是 409**，必須先建表再逐次 `POST /tables/{key}/fields`。
 - ERP 延伸欄位（EAV）沿用同一組欄數配額。
@@ -211,3 +226,26 @@ def execute(ctx):
 
 已退場的部分：builder 的 CustomObject 工具（派發層直接拒絕舊工具名）、後台「資料」tab、
 新租戶的示範表自動建立。存量資料遷移尚未排程。
+
+---
+
+## 9. 租戶使用者目錄：自建表要「關聯使用者」怎麼做（2026-09 起）
+
+新端點 **`GET /api/v1/users`**（已登入即可，無需額外權限）回傳租戶使用者目錄：
+
+- 參數只有 `page`（預設 1）與 `page_size`（1–500，預設 200）；回傳分頁信封
+  `{items, total, page, page_size}`
+- 每筆**只有三欄**：`id`（UUID）、`name`、`status`（`pending`/`active`/`disabled`）。
+  **刻意沒有 email、roles、member_id**——沒有名字的帳號回固定字串「（未命名帳號）」，
+  **不要自己拿 email 或 id 去補顯示名**（平台明文禁止的呈現方式）
+- 資料中心也多了一張唯讀表 `users`（「使用者帳號」，readonly-shared，
+  無側欄入口、可直開 `/dashboard/data/users`）
+
+⚠️ **自建表目前不能把 relation 欄位指向 `users`**——它不在可解析的關聯目標內
+（選了會 422，前端建欄選單也已排除身分表）。要在自建表記「哪個使用者」：
+
+1. 開一般 `text` 欄存 user UUID（寫入時 action 用 `ctx.user_id` 覆蓋，見核心規則 23）
+2. 顯示時用 `GET /api/v1/users` 的結果解 UUID → name（建個 id→name 的 Map 快取）
+
+> 平台方向是未來讓 UUID 欄升級成關聯選單，此端點是前置建設；
+> 落地前不要嘗試 `target_erp_key='users'` 之類的寫法。

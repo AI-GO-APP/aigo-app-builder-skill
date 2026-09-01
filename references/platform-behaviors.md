@@ -459,3 +459,48 @@ export function currentIdentity(): { userId: string; email: string; tenantId: st
 >     payload["user_id"] = ctx.user_id          # ★ 一律覆蓋，不用前端送的
 >     ctx.response.json(ctx.db.insert("import_jobs", payload))
 > ```
+
+## 11. 空渲染偵測：掛載後 8 秒內必須渲染出東西（2026-08 起）
+
+平台會監看 Shadow DOM root：bundle 掛載後 **8 秒內** root 完全沒有任何元素或非空白文字，
+就自動回報一則 runtime error，並對使用者顯示 banner
+「**App 已載入但沒有顯示任何內容——程式很可能在啟動時就失敗了。請聯絡此 App 的擁有者。**」
+（原始碼 `frontend/src/lib/emptyMountWatch.ts`）。
+
+- 判定是聯集：`root.firstElementChild` 存在**或** `textContent.trim()` 非空即算有內容；
+  寬限期內**曾經**出現過內容就不回報；逾時當下會重新量一次再決定
+- 本意是抓「啟動即拋例外」的 app（例外發生在 app 自己的執行環境時，
+  平台的 window 層攔截不到，以前只會一片空白）
+- **反面效應**：app 若「先跑長 API、成功後才第一次渲染」，超過 8 秒就會被誤報一次
+- **對策（開發規則）**：啟動時立刻渲染 skeleton／loading 佔位，資料到了再替換。
+  這同時也是正確的 UX——不要讓使用者對著空白等
+
+## 12. App API 權限閘（通用權限 gate）：現況 audit，enforce 前要做的準備
+
+2026-08 起 internal app bundle 注入的 `__APP_TOKEN__` 已改為 **app 憑證**
+（短效，claims = 該 app 宣告的 API 範圍 ∩ 使用者權限），不再是使用者本人的完整平台 JWT。
+閘門本體目前是 **audit 模式**：判定照跑、記錄 would-deny，但**一律放行**——
+所以現在打範圍外的 API 還不會壞，**切 enforce 後會 403**。
+
+**現在就生效的一條**：自建表實體名的保留名母體已擴大到**平台地板表名**
+（`users`／`tenants`／`audit_logs`／`api_keys`／`countries` 等 76 張）。
+撞名在**建表當下就回 409**（訊息「與平台保留表名衝突」；ERP 撞名與 SQL 保留字
+各有自己的訊息）。只擋新建、不回溯既有表。撞到地板名**沒有事後補救管道**，
+建表規格階段就要避開（→ `data-center.md` §1）。
+
+**enforce 前的準備（寫 code 時就做，不要等）**：
+
+1. Builder（`/builder/{app_id}`）的「**API 權限**」分頁列出此 app 的 API 群授權。
+   app 的宣告範圍是從 `actions/*.py` **靜態推導**的——只涵蓋 server-side `ctx` 面，
+   **不含前端（瀏覽器 SDK）直接呼叫的 API**。只在前端打的 API 群要在面板手動開啟，
+   否則 enforce 後前端呼叫全面 403
+2. 面板的寫入權限是 `builder.manage_access`（敏感群另需 `system.admin`）；
+   無權限時整面唯讀
+3. 資料中心面 enforce 後：未授權的表回 404 並落入「待允許清單」，
+   管理員可一鍵允許——但地板表刻意不收錄
+4. 陷阱：面板「撤回全部」＝刪列＝回到 baseline 全開；但 baseline 以外若還有殘留列，
+   effective 會塌成**全部停用**。儲存是逐群多次呼叫、非原子，中途失敗會停在部分套用
+
+> enforce 切換時程未定（manifest 明寫「MODE 一律維持 audit」直到既有 app 的
+> 前端呼叫面補宣告完畢）。本節的意義是：**新開發的 app 從現在起就把 API 權限面板
+> 對齊實際呼叫面**，enforce 落地時才不用回頭救。
