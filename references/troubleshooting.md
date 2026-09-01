@@ -43,7 +43,8 @@
 | Action 超時 | 控制在 30 秒內，長任務切批次；若 timeout 出在對外呼叫，先確認不是 raw httpx 直連（見下一列） |
 | **Action 打第三方 API 連不出去** | 先看症狀對症：**timeout（約 20 秒）** = raw `import httpx/requests` 直連——runner 是 default-deny egress，必改 `ctx.http.call(<egress-slug>, <path>)`；**`ctx.http.call` 仍失敗** = slug 沒有同名「外部服務」或服務未授權給本 App → 引導用戶到 Builder（`/builder/{app_id}`）「外部服務」tab 建立（base_url 域名白名單）並授權本 App；**401** = 外部 API 拒絕憑證——閘道不注入也不剝除 `Authorization`（域名驗證 only，ADR 0010），檢查 action 自組的 header 與 `ctx.secrets` 金鑰（app 側問題，別改外部服務設定）。前兩種設定問題**停止改 code**；建立需本 App 擁有者或 admin，權限不足請管理員代設 → `custom-app-dev-guide.md` §25 |
 | pub/ API 403 | 確認 `allow_anonymous_access=true`；且**只有 `external` / `self_built` 能啟用匿名**，`internal` app 開不了 |
-| **呼叫 action 回 403** | 依序查：① **有 publish 嗎**——sync 與 compile 都不會讓 action 上線，觸發看的是**發布快照**（最常見成因）② action 在 `actions/manifest.json` 裡嗎、`is_enabled` 是不是 false、名字與 `runAction()` 傳的字串是否完全一致 ③ 帳號缺 `builder.access`（403 是權限，401 才是 token 過期）④ 403 是否其實來自 action **內部**——看執行紀錄的 `error`，不要只看外層狀態碼 |
+| **一般使用者用 internal app 時資料載不出來／操作沒反應，network 見 `/data-center/...` 403** | **builder.access 破口**：前端直呼了自建表 SDK（`queryTable` 等），以登入者身分過 `builder.access` 閘，無開發權限的員工必 403。修法**只有一條**：包成 Server Action（`ctx.db.*`）＋前端 `runAction`，並在 action 內補授權分流；**不要**發 `builder.access` 給全員、也**不能**改成 external（`access_mode` 不可改）。開發帳號測不出此問題（必有 `builder.access`）→ `data-center.md` §7.5、SKILL.md 規則 31 |
+| **呼叫 action 回 403** | 依序查：① **有 publish 嗎**——sync 與 compile 都不會讓 action 上線，觸發看的是**發布快照**（最常見成因）② action 在 `actions/manifest.json` 裡嗎、`is_enabled` 是不是 false、名字與 `runAction()` 傳的字串是否完全一致 ③ `use_dev=true`（開發預覽）才要求 `builder.access`——**已發布 action 只需登入＋app 可見度**；一般使用者連已發布 action 都 403 時查 app 的存取角色設定，不是叫他要開發權限（403 是權限，401 才是 token 過期）④ 403 是否其實來自 action **內部**——看執行紀錄的 `error`，不要只看外層狀態碼 |
 | Compile 產物驗證失敗 | 檢查 main.tsx 入口和 App.css import |
 | CRUD 驗證失敗 | 確認自建表已建立且欄位實體名正確 |
 | Action 驗證失敗 | 檢查 execute(ctx) 函式、依賴模組是否可用 |

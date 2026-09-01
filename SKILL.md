@@ -74,6 +74,10 @@ python scripts/check_update.py     # macOS / Linux 用 python3
    - **Legacy 偵測**：`data.json` 有內容、或 code 用 `listRecords`／`submitRecord`／
      `ctx.db.query_object` → 標記為 legacy CustomObject（見 `CONTEXT.md`）。
      存量功能維持原樣即可運作，**但不要往上加東西**，新資料需求一律開自建表
+   - **builder.access 破口偵測**（★ internal app 必查，規則 31）：前端檔
+     （排除 `src/api.ts` 本體）有 import `../api` 或呼叫 `queryTable`／`insertRow`
+     等自建表方法 → 一般員工執行期必 403，**標記為必改**並列出受影響檔案，
+     修復流程見 `references/data-center.md` §7.5（`aigo_review.py` 會自動標記）
    - **解析 actions/manifest.json 的 webhook 宣告**：列出所有 `"webhook": true` 的 action
      與 `receive_webhook`，這些是對外端點
    - **盤點 Data Reference**（★ 重要）：用 `GET /api/v1/refs/apps/{app_id}`，
@@ -245,6 +249,11 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
    - 每個 App 的 `app_domain` 標籤建議值
 
 3. **資料架構設計**（★ 必須遵循雙軌分流策略，見 Phase 3 規則 18）
+   - **先盤受眾**（★ 決定資料存取層的寫法，見規則 31）：這個 app 會開給誰？
+     受眾中有沒有**無 `builder.access` 的一般員工**？
+     - internal app 且有一般員工受眾（絕大多數情況）→ 自建表存取
+       **全部包 Server Action**，前端不直呼 `queryTable` 等方法
+     - external app、或受眾全員持有 `builder.access` 的開發工具 → 前端 SDK 可直呼
    - **盤點兩邊**（順序不可省）：
      - `GET /api/v1/data-center/tables` — 租戶既有自建表（Phase 0 已做，此處覆核）
      - `GET /api/v1/refs/available-tables` — 可引用的預設表清單
@@ -495,6 +504,18 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
     - 「先跑長 API、成功後才第一次渲染」的寫法會被誤報——
       一律先渲染 loading／skeleton 佔位，資料到了再替換
     - 詳見 `references/platform-behaviors.md` §11
+31. **Internal app 前端禁止直呼自建表 SDK**（★ 強制，**開發時測不出來、上線就爆**）
+    - 前端 `src/api.ts` 的 `listTables`／`queryTable`／`insertRow`／`updateRow`／
+      `deleteRow` 是以**登入者身分**打 `/api/v1/data-center/*`，記錄 CRUD 一律要求
+      `builder.access`——internal app 的一般員工受眾沒有這個權限，**執行期必 403**
+    - 開發與驗證帳號必有 `builder.access`，所以 Phase 4/5 怎麼測都是通的；
+      2026-08-31 prod 盤點有 44 支 internal app 現行中招——照直覺寫就會踩
+    - internal app 的自建表存取一律包成 Server Action（`ctx.db.*` 走 app 憑證，
+      不過此閘），前端 `runAction`；並在 action 內用 `ctx.user_permissions`
+      分流授權（規則 23）——**跳過補閘會把 403 破口修成資料過度開放，更糟**
+    - 前端 SDK 只有兩種情境可直呼：external app（自動分流 `/ext/data-center`，
+      不受影響）、或受眾全員持有 `builder.access` 的開發工具型 app
+    - 機制、存量修復流程、假修法排除清單見 `references/data-center.md` §7.5
 
 ### Server-Side Action 撰寫
 

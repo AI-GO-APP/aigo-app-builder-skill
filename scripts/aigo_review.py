@@ -111,6 +111,9 @@ def analyze_vfs(vfs_state: dict) -> dict:
     # Legacy CustomObject 偵測（已退場的前代模型，見 CONTEXT.md）
     legacy = detect_legacy_custom_object(vfs_state)
 
+    # builder.access 破口偵測（前端直呼自建表 SDK，規則 31）
+    dc_frontend = detect_data_center_frontend_usage(vfs_state)
+
     # 解析 Actions（含 webhook 宣告——決定哪些 action 有對外端點）
     actions = []
     actions_manifest = vfs_state.get("actions/manifest.json", "")
@@ -177,11 +180,41 @@ def analyze_vfs(vfs_state: dict) -> dict:
         "router_type": router_type,
         "pages": pages,
         "legacy_custom_object": legacy,
+        "data_center_frontend_usage": dc_frontend,
         "webhook_actions": [a["name"] for a in actions if a.get("webhook")],
         "data_references": data_references,
         "actions": actions,
         "css_issues": css_issues,
     }
+
+
+# 前端自建表 SDK 方法（src/api.ts）。這些呼叫以「登入者身分」打 /data-center/*，
+# 記錄 CRUD 掛 builder.access——internal app 的一般員工受眾執行期必 403（規則 31）。
+DATA_CENTER_FRONTEND_METHODS = {
+    "listTables", "queryTable", "listRows", "getRow",
+    "insertRow", "updateRow", "deleteRow",
+}
+
+
+def detect_data_center_frontend_usage(vfs_state: dict) -> list[dict]:
+    """盤點前端檔對自建表 SDK 的直接呼叫（builder.access 破口偵測，規則 31）。
+
+    比對的是方法名字面，所以表名帶變數（SNAP_TABLE 之類）也抓得到。
+    回傳 [{"path", "methods"}]；是否構成破口要配合 access_mode 判讀
+    （internal＝必改；external 走 /ext/data-center 不受影響），
+    判讀放在 format_review_report()。
+    """
+    hits = []
+    for path, content in sorted(vfs_state.items()):
+        if not isinstance(content, str) or path in SDK_FILES:
+            continue
+        if not path.endswith((".ts", ".tsx")):
+            continue
+        used = sorted(m for m in DATA_CENTER_FRONTEND_METHODS
+                      if re.search(rf"\b{m}\s*\(", content))
+        if used:
+            hits.append({"path": path, "methods": used})
+    return hits
 
 
 def detect_legacy_custom_object(vfs_state: dict) -> dict:
@@ -296,6 +329,27 @@ def format_review_report(app_info: dict, analysis: dict,
                          f"{lt['records_count']} 記錄) — {lt['name']}")
         lines.append("  → 存量功能維持原樣即可運作，但**不要往上加東西**；")
         lines.append("    新資料需求一律開自建表（見 CONTEXT.md / data-center.md）")
+        lines.append("")
+    dc_frontend = analysis.get("data_center_frontend_usage") or []
+    access_mode = app_info.get("access_mode", "")
+    legacy_fe = {"listRecords", "submitRecord", "updateRecord", "deleteRecord"}
+    legacy_fe_used = sorted(legacy_fe & set(legacy.get("legacy_calls", [])))
+    if dc_frontend and access_mode == "external":
+        lines.append(f"ℹ️ 前端直呼自建表 SDK（{len(dc_frontend)} 檔）——external app 走"
+                     " /ext/data-center，不受 builder.access 閘影響")
+        for hit in dc_frontend:
+            lines.append(f"    {hit['path']} — {', '.join(hit['methods'])}")
+        lines.append("")
+    elif dc_frontend or (legacy_fe_used and access_mode != "external"):
+        lines.append("🚨 builder.access 破口：前端以登入者身分直打資料端點（必改）")
+        lines.append("  無 builder.access 的一般員工執行期必 403，且開發帳號測不出此問題。")
+        lines.append("  修法：包 Server Action（ctx.db.*）＋前端 runAction，並在 action 內")
+        lines.append("  補授權分流 → data-center.md §7.5、SKILL.md 規則 31")
+        for hit in dc_frontend:
+            lines.append(f"    {hit['path']} — {', '.join(hit['methods'])}")
+        if legacy_fe_used:
+            lines.append("  ⚠️ 含 legacy CustomObject 前端方法（走 /data/objects/*，"
+                         f"掛同一道閘）：{', '.join(legacy_fe_used)}")
         lines.append("")
     if analysis["actions"]:
         lines.append(f"⚡ Server Actions（{len(analysis['actions'])} 個）")
