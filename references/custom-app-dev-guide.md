@@ -946,3 +946,50 @@ Phase 1.5 實作計畫裡就該**列出所有要打出去的外部服務（egres
 讓用戶在寫 code 前先去建立外部服務並授權本 App，同時把各 API 的金鑰存進
 `ctx.secrets`——等到部署後才發現連不出去，等於整段開發白做。
 
+## 26. 建立與刪除 App（API，不必走 UI）
+
+> 2026-09-01 對 prod 實測全流程通過（create → GET 驗收 → delete → 404）。
+
+```http
+POST /api/v1/builder/apps          （權限：builder.access）
+{
+  "name": "我的系統",                    // 必填，1–100 字
+  "template_slug": "starter-internal",  // 必填——API 是模板驅動，不能建純空白 app
+  "subdomain": "...",                   // 選填；撞名 422
+  "url_name": "..."                     // 選填；未填由 name 自動產生
+}
+→ 201 CustomAppResponse——app_id 從回應的 id 拿，回填 .aigo/config.json
+```
+
+### 26.1 起手式模板怎麼選（★ 建立前先確認情景）
+
+| slug | access_mode | 情景 |
+|---|---|---|
+| `starter-internal` | `internal` | **租戶成員用的內部工具**。登入者＝平台成員，Runtime 注入權限快照（`__USER_ROLES__`／`__USER_PERMISSIONS__`），沿用平台角色權限（規則 23） |
+| `starter-external` | `external` | **對外應用**。終端使用者透過 custom-app-auth 自助註冊／登入（§14），權限快照恆空、UI 要有降級路徑；執行期 API 走 `/ext/*`（SDK 自動分流）；可開匿名 `/pub` |
+
+- **`access_mode` 由模板決定**——body 裡的 `access_mode` 欄位是殘留 fallback，
+  模板必填所以恆被模板蓋掉。建立後不可改模式，選錯要砍掉重建
+- 模板商城的其他模板（實測 116 個）也可用其 slug 建立；
+  清單：`GET /api/v1/templates`（唯讀）
+- `self_built` 是 access_mode 的第三值，但它屬於 Hosted App 隨附整合，
+  **不是** builder 起手式的選項，不要手動指定
+
+### 26.2 建立後的注意事項
+
+- app 的 `slug` 系統自動生成（如 `961273541bc6`），**不可指定**
+- **起手式不是全空白**：實測 `starter-internal` seed 了 23 個檔案，
+  含示範 action（`export_leads_csv.py`／`summarize_leads.py` 等 leads 範例）——
+  走 Phase 0 review 時會看到，與需求無關就清掉，不要在範例上疊功能
+- 模板會一併 seed 模板定義的自訂表與 Data Reference 引用（起手式兩款不帶）
+- 金鑰**刻意不在建立時收**——建立後在 Builder「服務」tab 設定
+- 複製既有 app：`POST /apps/{app_id}/duplicate` → 201
+
+### 26.3 刪除
+
+```http
+DELETE /api/v1/builder/apps/{app_id}   （builder.access；實測回 200，之後 GET 404）
+```
+
+不像自建表有兩段式確認——**打了就刪**。代用戶刪除前必須明確確認過。
+

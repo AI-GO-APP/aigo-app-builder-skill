@@ -4,6 +4,24 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.12.0
+
+### 新功能：API 建立 App，不必先走 UI 拿 UUID（實測通過）
+
+`custom-app-dev-guide.md` 新增 §26（2026-09-01 對 prod 實測
+create → GET 驗收 → delete → 404 全通過）：
+
+- `POST /api/v1/builder/apps`：`name` + `template_slug` 必填（**模板驅動**，
+  不能建純空白 app）；`access_mode` 由模板決定、建立後不可改；
+  app slug 系統自動生成；回應 `id` 即 `app_id`
+- **起手式情景對照**：`starter-internal`（租戶成員內部工具、權限快照注入）
+  vs `starter-external`（對外應用、custom-app-auth 自助註冊、快照恆空）；
+  `self_built` 屬 Hosted App 隨附整合，不要手動指定
+- **起手式非全空白**：實測 seed 23 檔含 leads 示範 action——Phase 0 會看到，
+  與需求無關就清掉
+- 刪除 `DELETE /apps/{app_id}` **沒有兩段式確認**，代用戶刪除前必須明確確認
+- SKILL.md Phase 1 設定流程改為雙路徑（既有 App 走 UI 抄 UUID／新 App 走 API）
+
 ## 1.11.2
 
 ### ★ 實測回填：prod 落後 main 約一週，1.11.0 的部分宣稱尚未上線
