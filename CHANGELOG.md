@@ -4,6 +4,31 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.16.0
+
+### ★ builder.access 執行期破口：internal app 前端禁止直呼自建表 SDK（規則 31）
+
+2026-08-31 prod 盤點揭露：44 支 internal app 的前端直呼 `queryTable` 等自建表方法，
+以**登入者身分**過 `builder.access` 閘——一般員工執行期必 403，另有 18 支未爆彈。
+開發帳號必有 `builder.access`，所以既有驗證流程**永遠測不出**這個問題。
+（源碼核對：記錄 CRUD 在 router 層掛閘；`ctx.db.*` 走 app 憑證不受影響；
+external 走 `/ext/data-center` 不受影響）
+
+- **SKILL.md 核心規則 31**：internal app 自建表存取一律包 Server Action＋
+  `runAction`；前端 SDK 僅限 external app 或全員持 `builder.access` 的開發工具
+- **Phase 1.5 加受眾盤點**：計畫階段先問「受眾有沒有無開發權限的一般員工」，
+  據此決定資料存取層寫法
+- **Phase 0 加破口偵測**：`aigo_review.py` 自動標記前端直呼自建表 SDK 的檔案
+  （internal＝🚨 必改；external＝ℹ️ 資訊性；legacy CustomObject 前端方法掛同一道閘，
+  一併偵測）
+- **`data-center.md` §7.5**：三通道身分對照、存量修復五步流程、
+  **授權語意警告**（包 action 後「看得到 app 就打得到」，必須用
+  `ctx.user_permissions` 補閘——跳過會把 403 破口修成資料過度開放）、
+  假修法排除清單（改 external 不可行、發 `builder.access` 給全員是反模式）
+- **troubleshooting 修正**：「呼叫 action 403」的 `builder.access` 項只適用
+  `use_dev=true` 開發預覽，已發布 action 只需登入＋可見度；新增
+  「一般使用者資料載不出來＋`/data-center` 403」症狀列
+
 ## 1.15.0
 
 ### 資料承載體總決策 SSOT（dev-guide §19 重寫）＋ 延伸欄位 prod 實測

@@ -50,6 +50,11 @@
 ⚠️ 預設角色**沒有**被回填 `datacenter.schema_write`——要讓非 admin 角色建表，
 必須由租戶擁有者到角色 UI 勾選；既有 `system.admin` 呼叫端不受影響（直通）。
 
+> ⚠️ **這張權限表就是執行期的權限表，不只是後台的。** internal app 的前端 SDK
+> 以**登入者身分**打同一組端點，所以「記錄 CRUD 需 `builder.access`」意味著：
+> **沒有開發權限的一般員工，在 app 畫面上做任何自建表讀寫都會 403**。
+> 這是 internal app 最容易踩、且開發階段測不出來的破口——完整機制與修復流程見 §7.5。
+
 ### Agent 的建表流程（★ 強制）
 
 ```
@@ -176,6 +181,11 @@ External app 的執行期走 `/api/v1/ext/data-center/...`——含 `GET /tables
 
 ### 前端 SDK（`src/api.ts`，Custom App 內）
 
+> ⚠️ **先確認適用範圍再用（§7.5）**：前端 SDK 只適用 **external app**、
+> 或受眾全員持有 `builder.access` 的開發工具型 app。
+> **internal app 的自建表存取一律包成 Server Action（`ctx.db.*`）**，
+> 前端走 `runAction`——直呼下面這些方法，一般員工執行期必 403。
+
 ```typescript
 import { listTables, queryTable, insertRow, updateRow, deleteRow } from "../api";
 
@@ -214,6 +224,64 @@ def execute(ctx):
 ```
 
 **SDK 不提供結構操作**——app 執行期無法建表或改欄，這是刻意的能力邊界。
+
+---
+
+## 7.5 internal app 的執行期權限破口（★ 必讀）
+
+### 機制：前端 SDK 是「登入者身分」，不是「app 身分」
+
+三條資料中心通道的身分與權限完全不同：
+
+| 通道 | 身分 | `builder.access` 閘 |
+|---|---|---|
+| 前端 SDK（internal，`/data-center/*`） | **登入使用者** | **有**——記錄 CRUD 全掛（router 層，源碼核對 2026-08-31） |
+| 前端 SDK（external，`/ext/data-center/*`） | app 憑證脈絡 | 無 |
+| Server Action（`ctx.db.*`，`/internal/ctx/invoke`） | app 憑證（invocation token） | 無——走 allowlist + scope gate，不驗使用者權限 |
+
+後果：internal app 的受眾大多是**沒有** `builder.access` 的一般員工，
+前端直呼 `queryTable`／`insertRow` 等方法時，他們拿到的是 403——
+症狀是「畫面資料載不出來／按鈕按了沒反應」，network 面板可見 `/data-center/...` 403。
+
+**為什麼開發時測不出來**：開發與驗證用的帳號必有 `builder.access`
+（不然連 Builder 都進不去），所以 FDE 自己怎麼點都是通的。
+2026-08-31 prod 盤點：**44 支 internal app 現行中招、另有 18 支未爆彈**——
+這不是邊角案例，是照直覺寫就會踩的預設路徑。
+
+### 正確寫法（新開發）
+
+- internal app：自建表讀寫**一律**包 Server Action，前端 `runAction`。
+- 前端 SDK 僅限兩種情境直呼：external app（SDK 自動分流 `/ext/data-center`）、
+  或受眾全員持有 `builder.access` 的開發工具型 app。
+- 受眾在 Phase 1.5 計畫階段就要確認（SKILL.md 核心規則 31）。
+
+### 存量 app 修復流程
+
+1. **盤點**：找出前端（`.ts`/`.tsx`，排除 `src/api.ts` 本體）所有
+   `listTables`／`queryTable`／`listRows`／`getRow`／`insertRow`／`updateRow`／`deleteRow`
+   呼叫與 `../api` import——`aigo_review.py` 的 Review 報告會自動標記（Phase 0）。
+2. **逐組包 action**：前端與 `ctx.db` 的查詢契約相同
+   （同樣的 `filters`/`sort`/`page` 與分頁信封；insert/update 同收扁平 dict），
+   搬移本身是低風險的機械工作。
+3. **★ 授權語意會改變，必須補閘**：前端直呼時「至少要有 `builder.access`」雖是錯的閘，
+   但也是一道閘；包進 action 後變成「**看得到 app 的人都打得到這個 action**」。
+   凡有權限差異的操作，action 內必須用 `ctx.user_permissions` 分流（核心規則 23）；
+   身分欄位一律以 `ctx.user_id` 覆蓋前端送來的值。
+   **跳過這一步，等於把「403 太多」修成「資料開太大」——後者更糟。**
+4. **前端改 `runAction`**，並記得 action 要 **republish 才上線**（核心規則 21 精神）。
+5. **驗證**：重跑 `aigo_review.py` 確認前端零殘留直呼；有條件時再用
+   **無 `builder.access` 的測試帳號**實測關鍵路徑——用 FDE 帳號點過不算數（見上）。
+
+### 假修法排除清單（都不要做）
+
+- **把 app 改成 external**：`access_mode` 建立後不可改，且 external 語意完全不同
+  （匿名／自助註冊、權限快照恆空）——不是修復路徑。
+- **發 `builder.access` 給全員**：等於把開發權限發給全公司，反模式。
+- **前端捕捉 403 後改打別的端點**：沒有旁路；正路只有 action 化。
+
+> legacy CustomObject 的前端方法（`listRecords` 等）走 `/data/objects/*`，
+> **同樣掛 `builder.access` 閘**——存量 legacy app 有一般員工受眾時是同一個病，
+> 修法相同（包 action；legacy 原則見 §8：不要往上加東西）。
 
 ---
 
@@ -260,7 +328,7 @@ def execute(ctx):
 
 ---
 
-## 10. ERP 延伸欄位（EAV）：幫預設表加正式欄位（2026-08 起）
+## 10. 延伸欄位（EAV）：幫預設表加正式欄位（2026-08 起）
 
 > 端點與行為核對自平台原始碼（`backend/app/api/data_center_ext.py`、
 > `services/data_center/ext_fields.py`）。**2026-09-01 prod 唯讀實測**：
