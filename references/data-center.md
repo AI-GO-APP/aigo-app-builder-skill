@@ -328,7 +328,7 @@ def execute(ctx):
 
 ---
 
-## 10. ERP 延伸欄位（EAV）：幫預設表加正式欄位（2026-08 起）
+## 10. 延伸欄位（EAV）：幫預設表加正式欄位（2026-08 起）
 
 > 端點與行為核對自平台原始碼（`backend/app/api/data_center_ext.py`、
 > `services/data_center/ext_fields.py`）。**2026-09-01 prod 唯讀實測**：

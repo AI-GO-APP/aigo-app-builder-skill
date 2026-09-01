@@ -145,7 +145,7 @@ def validate_field_spec(field: dict) -> None:
         if bool(tid) == bool(erp):
             raise ValueError(
                 f"relation 欄位 '{name}' 必須指定 target_table_id"
-                "（指向自建表，建真外鍵）或 target_erp_key（指向 ERP 表，軟關聯）之一"
+                "（指向自建表，建真外鍵）或 target_erp_key（指向預設表，軟關聯）之一"
             )
         if tid:
             # ★ 這是本模組唯一不用實體名的地方，最容易填錯
@@ -170,7 +170,7 @@ def create_table(base_url: str, token: str, display_name: str,
          "is_required": True, "is_unique": False,
          "options": [...],            # 僅 select
          "target_table_id": "<UUID>", # 僅 relation → 自建表（真 FK）
-         "target_erp_key": "..."}     # 僅 relation → ERP 表（軟關聯）
+         "target_erp_key": "..."}     # 僅 relation → 預設表（軟關聯）
     """
     import httpx
     for f in fields:
@@ -407,7 +407,7 @@ def format_create_spec(display_name: str, fields: list[dict]) -> str:
         elif f.get("target_table_id"):
             note = "關聯 → 自建表"
         elif f.get("target_erp_key"):
-            note = f"關聯 → ERP 表 {f['target_erp_key']}"
+            note = f"關聯 → 預設表 {f['target_erp_key']}"
         lines.append(
             f"| {f.get('display_name', '?')} | {f.get('field_type', '?')} | "
             f"{'✓' if f.get('is_required') else ''} | "

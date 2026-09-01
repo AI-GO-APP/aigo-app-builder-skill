@@ -368,7 +368,7 @@ def format_review_report(app_info: dict, analysis: dict,
                          "改 manifest 必須 republish 才生效")
         lines.append("")
     if analysis.get("data_references"):
-        lines.append(f"🗃️ Data Reference / SaaS 表（{len(analysis['data_references'])} 張）")
+        lines.append(f"🗃️ Data Reference / 預設表（{len(analysis['data_references'])} 張）")
         for dr in analysis["data_references"]:
             perms = ", ".join(dr["permissions"]) if dr["permissions"] else "N/A"
             cd_mark = " ★ 含 custom_data" if dr["has_custom_data"] else ""

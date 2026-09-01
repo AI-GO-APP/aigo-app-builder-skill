@@ -725,7 +725,7 @@ uv run python scripts/report_issue.py submit "一句話標題" \
 |------|------|
 | `CONTEXT.md` | ★ 術語表——預設表／自建表兩大類＋四個機制詞（含稱謂對照：舊稱 SaaS 表已停用） |
 | `references/custom-app-dev-guide.md` | 核心 API 規格與架構理念 |
-| `references/data-center.md` | 自建表完整規格（型別、配額、權限、SDK）＋ ERP 延伸欄位（§10） |
+| `references/data-center.md` | 自建表完整規格（型別、配額、權限、SDK）＋ 延伸欄位（§10） |
 | `references/event-triggers.md` | Webhook 與 App 排程（冪等要求、宣告、限制） |
 | `references/migration-workflow.md` | **有現存系統要遷入時**：產品線／模式三向判斷（不可逆）、專案解構、Schema 映射、資料遷移 |
 | `references/verification-details.md` | **要執行驗證時**：四項驗證的完整定義、Phase 5 里程碑 |
