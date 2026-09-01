@@ -488,6 +488,10 @@ export function currentIdentity(): { userId: string; email: string; tenantId: st
 各有自己的訊息）。只擋新建、不回溯既有表。撞到地板名**沒有事後補救管道**，
 建表規格階段就要避開（→ `data-center.md` §1）。
 
+> ⚠️ **2026-09-01 實測：`GET /api/v1/apps/{app_id}/api-grants` 在 prod 回 404**
+> ——授權管理後端已 merge 尚未部署，本節的「準備動作」目前做不了，先記著等它上線。
+> 保留表名 409 也尚未生效（實測仍可建成，見 `data-center.md` §1）。
+
 **enforce 前的準備（寫 code 時就做，不要等）**：
 
 1. Builder（`/builder/{app_id}`）的「**API 權限**」分頁列出此 app 的 API 群授權。

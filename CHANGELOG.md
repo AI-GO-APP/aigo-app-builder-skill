@@ -4,6 +4,22 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.11.2
+
+### ★ 實測回填：prod 落後 main 約一週，1.11.0 的部分宣稱尚未上線
+
+對 prod（urfit 租戶）跑唯讀 smoke test（2026-09-01）：
+
+- ✅ 實測可用：`GET /hosted-apps`（含 visibility）、`.../deployments`、
+  `.../runtime-settings`、`GET /deploy-tokens`、`GET /data-center/tables`
+- ❌ 已 merge 未部署：`GET /api/v1/users`（404）、`.../api-grants`（404）、
+  `.../resource-usage`（404）、**平台保留表名 409 檢查**（`users` 表實際建成了
+  ——測試表已刪）、`runtime-settings` 回應缺 `env_availability`／`persistent_disk`
+- 回填四處：`hosted-apps.md` 檔頭加「部署落差」節與判讀原則（404/缺欄位先懷疑
+  落差，不是文件錯）；`data-center.md` §1／§9 加實測註記（保留名未生效更要自律
+  避開）；`platform-behaviors.md` §12 註記準備動作目前做不了；troubleshooting
+  加「端點 404 先懷疑部署落差」條目
+
 ## 1.11.1
 
 ### Hosted App CLI 入口（保有入口、指令面另外管理）
