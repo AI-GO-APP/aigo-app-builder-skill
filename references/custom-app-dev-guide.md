@@ -197,16 +197,36 @@ html, :host { line-height: 1.5; }
 JS API 限制：confirm()→false, alert()→不顯示, prompt()→null。
 容器必須：`height: 100vh; overflow-y: auto`。
 
+**平台標識（2026-08 改版）**：舊的右下角常駐藥丸已改為**頂部滿版橫條**
+「第三方應用程式｜由 AI GO 平台代管，非官方頁面」——只在每個使用者
+**首次造訪**顯示 5 秒後自動消失（per-slug 記在 localStorage），
+`pointer-events: none` 不吃點擊。App 不再需要為它避讓右下角；
+但**不要嘗試用 CSS/DOM 蓋掉或移除它**——平台有 MutationObserver 自癒
+（移除會掛回、竄改樣式會整體重設），這是明文防護面。
+
 ## 10. VFS 注入規範
 
 - 每次注入必須提供完整的檔案內容（raw string）
 - 禁止字串拼接或模板佔位符
 - 禁止 `// ... 省略` 之類的佔位
 
+**路徑會在寫入前正規化（2026-08 起）**：
+
+- 非法路徑直接 **400 `無效的檔案路徑`**（不再靜默寫入髒 key）：
+  含 `\` 反斜線、以 `/` 開頭、含 `..` 段、normalize 後為空
+- 大小寫自動折疊三處：首段 `Actions/`→`actions/`、第二段 `_Shared/`→`_shared/`、
+  副檔名 `.PY`→`.py`；其餘路徑段大小寫不動
+- `actions/./foo.py` 與 `actions/foo.py` 視為同一檔（last-wins 合併，不再分叉）
+
+action 路徑約定不變：`actions/**.py` 是可呼叫 action（`action_name` = 去前綴去副檔名，
+如 `sub/x` ↔ `actions/sub/x.py`）；`actions/_shared/**.py` 是共用模組——
+**不是 action**，不要求 `execute(ctx)`、不可用 action_name 呼叫。
+
 ## 11. 自建表 API
 
 自建表是**租戶級**的真實 Postgres 表，端點前綴 `/api/v1/data-center/`。
-建表需 `system.admin`，記錄 CRUD 需 `builder.access`。
+建表／改結構需 `datacenter.schema_write`（2026-08 起，`system.admin` 直通）；
+**刪表／刪欄仍限 `system.admin`**；記錄 CRUD 需 `builder.access`。
 
 **完整規格見 `data-center.md`**——型別、配額、兩段式刪除、SDK 用法都在那裡。
 
@@ -250,10 +270,35 @@ JS API 限制：confirm()→false, alert()→不顯示, prompt()→null。
 - POST `.../register` → 註冊
 - POST `.../login` → 登入
 - GET `.../me` → 當前用戶
+- **PATCH `.../me`** → 使用者改自己的顯示名稱（2026-08 起）。
+  payload 只收 `{"display_name": "..."}`（strip 後非空、≤100 字，違反 422）；
+  身分由 token 決定，天然只能改自己；不撤 session
 - POST `.../refresh` → 刷新 Token
 - POST `.../logout` → 登出
 
 Auth SDK：`window.__auth__.login()`, `.register()`, `.logout()`, `.getToken()`
+
+### 14.1 邀請平台使用者直達 App（internal app 的成員邀請）
+
+邀請成員時**指定落點**，受邀者完成註冊後直接進 App（不指定會落到 dashboard）：
+
+```http
+POST /api/v1/members
+{"name": "...", "email": "...", "role_ids": [roleId],
+ "redirect_url": "/app-login/{slug}",
+ "send_email": true}
+```
+
+- 需 **`hr.member_manage`** 權限——只有 `builder.access` 會 403，UI 要顯式處理，
+  不要讓邀請按鈕靜默失敗
+- `redirect_url` 是 fail-closed 白名單（422）：站內路徑、前綴限
+  `/app-login/`、`/runtime/`、`/customApp/`、`/builder/`、`/dashboard/` 等；
+  **純 ASCII `[A-Za-z0-9/._~-]`**——slug 含中文或空白的路徑組不出合法落點；
+  不可含 `?`／`#`、≤256 字
+- `POST /members/{id}/resend-invite` 同樣支援；重寄時省略 `redirect_url`
+  會沿用該成員上一張邀請的落點（重寄是冪等修復動作）
+- `send_email=false` 時平台不寄信，呼叫端要自己轉交回應裡的 `chat_invite_link`，
+  且受邀者註冊多一道信箱驗證
 
 ## 15. 匿名存取 API（/pub/* 端點）
 
@@ -267,8 +312,36 @@ Rate Limit：120 次/分鐘 per IP。
 
 ## 16. 套件管理
 
+### 16.1 前端（bundle）
+
 Runtime 內建：react ^18.x, react-dom ^18.x, react-router-dom ^6.x, lucide-react latest, react-hot-toast latest
 不支援：CSS Modules, Tailwind, styled-components, @mui/material, 動態 import, Node.js 原生模組
+
+### 16.2 Python action 依賴：`actions/requirements.txt`（per-app wheelhouse）
+
+Action 可以用第三方 Python 套件了。宣告檔是 VFS 內的 **`actions/requirements.txt`**，
+Builder UI 對應「套件」面板（用面板儲存會清掉檔案裡的註解）。
+
+**格式（違反 → 422，code 為 `WHEELHOUSE_*`）**：
+
+- 只收 **`name==version`** 精確 pin，可帶 extras（`requests[socks]==2.32.3`）
+- 空行與整行 `#` 註解忽略；**拒絕** option 行（`-r`／`--index-url`）、URL、`git+`、
+  範圍運算子（`>=`、`~=`、`*`）
+- 最多 **20 行**；解出的 wheel 合計 ≤ **80 MiB**；解析逾時 **90 秒**
+
+**硬限制：目標平台固定 aarch64 / manylinux / cp312、`--only-binary :all:`**——
+沒有預編譯 aarch64 wheel 的套件（要現場編譯的）用不了，解析階段就會失敗
+（`WHEELHOUSE_RESOLVE_FAILED`），不是部署後才炸。
+
+**時機與行為**：
+
+- 存檔只寫 VFS；**解析只在試跑（try-run）與發布時發生**。發布解析失敗回 422，
+  不會發出缺套件的版本
+- 有 pin 時試跑改走**專屬 draft runner**（不再是共享 dev-runner），
+  冷啟最長約 **60 秒**——第一次試跑看到 `draft runner not ready` 是在等冷啟，不是壞了
+- **執行期仍禁止 `pip`**：runtime 內不能動態安裝，一切依賴都要進 requirements.txt
+- 安裝失敗的版本不會帶病上線（runner 直接起不來），症狀是 action 全面逾時
+  ——先檢查 requirements.txt，而不是改 action 邏輯
 
 ## 17. 常見問題速查
 
@@ -283,6 +356,8 @@ Runtime 內建：react ^18.x, react-dom ^18.x, react-router-dom ^6.x, lucide-rea
 | 409 | VFS 版本衝突，重新 GET |
 | 423 | 有待審核發布，等待/取消 |
 | Action 連不到第三方 API | 讀回傳 status/error：raw httpx 直連必 timeout → 改 `ctx.http.call`；多為 slug 未註冊 EgressService → §25 |
+| 使用者看到「App 已載入但沒有顯示任何內容」banner | 平台的空渲染偵測：掛載後 8 秒 Shadow root 全空就回報 runtime error。啟動先渲染 skeleton，別讓長 API 擋住首次渲染 → `platform-behaviors.md` §11 |
+| 想用第三方 Python 套件 | `actions/requirements.txt` 精確 pin → §16.2 |
 | 某張表沒有 `tenant_id`，是 bug 嗎？ | **不是**，租戶隔離也沒失效。除了自帶 `tenant_id`，還有欄位別名 / 父表歸屬 / 全域表三種形態 → §20.3。不要自己補 `WHERE tenant_id` |
 
 ## 18. 核心策略：app_domain 標籤

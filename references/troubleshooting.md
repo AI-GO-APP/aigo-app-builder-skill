@@ -33,6 +33,12 @@
 | `filters` 指到 `custom_data` 回 400 `不合法的欄位名稱` | JSONB 不支援伺服器端過濾。要篩選的維度請放原生欄位 → `platform-behaviors.md` §1.3 |
 | 分頁取回的筆數比實際少 | `offset` 分頁沒指定唯一鍵排序，預設 `created_at` 有重複值時會跨頁重複又漏抓。加 `order_by: [{column:"id",direction:"asc"}]` → `platform-behaviors.md` §1.2 |
 | 刪除 VFS 檔案回 400 缺 `expected_version` | `DELETE /source/files` 的樂觀鎖必填，body 為 `{paths, expected_version}` → `platform-behaviors.md` §5.1 |
+| VFS 寫入回 400 `無效的檔案路徑` | 路徑含 `\`、以 `/` 開頭、或含 `..` 段。用 POSIX 相對路徑（`actions/foo.py`）；`Actions/`→`actions/` 等大小寫會被自動折疊 → `custom-app-dev-guide.md` §10 |
+| 使用者回報看到「App 已載入但沒有顯示任何內容」 | 平台空渲染偵測（掛載後 8 秒 root 全空）。真啟動失敗 → 查 runtime-errors；app 其實沒壞 → 是「長 API 擋住首次渲染」的誤報，改成先渲染 skeleton → `platform-behaviors.md` §11 |
+| 試跑回「draft runner not ready」 | 有 requirements.txt pin 時試跑走專屬 draft runner，冷啟最長約 60 秒——稍候重試，不是壞了 → `custom-app-dev-guide.md` §16.2 |
+| 發布／試跑回 422 `WHEELHOUSE_*` | `actions/requirements.txt` 出界：格式限 `name==version`、≤20 行、wheel 合計 ≤80 MiB；`WHEELHOUSE_RESOLVE_FAILED` 常見成因是套件沒有 aarch64 預編譯 wheel → `custom-app-dev-guide.md` §16.2 |
+| Builder 引用頁籤 jsonb 欄顯示 `[object Object]`／存檔炸 invalid JSON | 舊版顯示 bug 已修（2026-08）：現在顯示與輸入都是 JSON 字面值——字串要帶引號（`"pro"`），物件寫 `{"k":"v"}` |
+| Action 全面逾時、且最近改過 requirements.txt | 依賴安裝失敗會讓 runner 起不來（不帶病上線）。先回頭檢查 requirements.txt 的 pin，不要改 action 邏輯 → `custom-app-dev-guide.md` §16.2 |
 | `ctx.erp.xxx` 回 403（來自 `/internal/ctx/invoke`） | 該方法不在閘道白名單。可用的六個見 `platform-behaviors.md` §4.2；403 是「方法未開通」不是「能力不存在」 |
 | Action 超時 | 控制在 30 秒內，長任務切批次；若 timeout 出在對外呼叫，先確認不是 raw httpx 直連（見下一列） |
 | **Action 打第三方 API 連不出去** | 先看症狀對症：**timeout（約 20 秒）** = raw `import httpx/requests` 直連——runner 是 default-deny egress，必改 `ctx.http.call(<egress-slug>, <path>)`；**`ctx.http.call` 仍失敗** = slug 沒有同名「外部服務」或服務未授權給本 App → 引導用戶到 Builder（`/builder/{app_id}`）「外部服務」tab 建立（base_url 域名白名單）並授權本 App；**401** = 外部 API 拒絕憑證——閘道不注入也不剝除 `Authorization`（域名驗證 only，ADR 0010），檢查 action 自組的 header 與 `ctx.secrets` 金鑰（app 側問題，別改外部服務設定）。前兩種設定問題**停止改 code**；建立需本 App 擁有者或 admin，權限不足請管理員代設 → `custom-app-dev-guide.md` §25 |
@@ -42,8 +48,8 @@
 | CRUD 驗證失敗 | 確認自建表已建立且欄位實體名正確 |
 | Action 驗證失敗 | 檢查 execute(ctx) 函式、依賴模組是否可用 |
 | Publish 一致性失敗 | 重新 sync → compile → publish 完整循環 |
-| 建表 403 | 帳號非 `system.admin`，改輸出建表規格引導用戶到資料中心 UI 自建 |
-| 建表／加欄 409 | 撞配額或實體名撞名 → 配額數值見 `data-center.md` §4 |
+| 建表 403 | 帳號缺 `datacenter.schema_write`（也非 `system.admin`），改輸出建表規格引導用戶到資料中心 UI 自建；**刪表／刪欄另限 `system.admin`**（建改與刪除是兩段權限）→ `data-center.md` §2 |
+| 建表／加欄 409 | 撞配額（`table_quota_exceeded` / `field_quota_exceeded`，數值見 `data-center.md` §4）或實體名撞名；「**與平台保留表名衝突**」= 撞到平台地板表名（users/tenants/api_keys…），沒有補救管道，換個實體名 → `data-center.md` §1 |
 | 刪表／刪欄被擋 | 兩段式刪除：先取 `/impact`，確認值必須是**實體名**不是顯示名 |
 | webhook 端點 404 | manifest 缺 `"webhook": true`，或**改完沒 republish** |
 | webhook 驗簽失敗 | 用了重新序列化的 body；必須用 `ctx.params["body"]` 原字串 |

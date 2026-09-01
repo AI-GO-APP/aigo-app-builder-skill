@@ -214,6 +214,16 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
    - 每個功能的目標使用場景
    - 預期的使用者流程
 
+1.5. **產品線判斷（Custom App vs Hosted App）**
+   - 平台有兩條**平行**產品線：本 skill 教的 **Custom App**（Builder VFS + Shadow DOM，
+     在平台內跑）與 **Hosted App**（任意技術棧原始碼 → 容器 → `{slug}.deploy.ai-go.app`，
+     UI 繁中叫「自訂 App」——注意 code 裡的 `CustomApp` 反而指 Builder 產物）
+   - **判斷**：要遷入整套既有服務／需要自選後端框架、常駐進程、WebSocket、
+     自訂網域 → 建議 Hosted App（→ `references/hosted-apps.md`，開發流程完全不同，
+     不走本 skill 的 Phase 2–4）；要在平台內做業務介面、直接用 `ctx`/SDK 存取
+     租戶資料 → Custom App，繼續本流程
+   - 拿不準就把兩條線的差異表（`hosted-apps.md` §1）給用戶選
+
 2. **場景拆分與 App 邊界建議**
    - 若需求涵蓋 2 群以上不同功能與目的的情景，**必須建議用戶分別做成不同的 Custom App**
    - 例如：「客戶管理」和「財務報表」應為 2 個獨立 App
@@ -673,4 +683,5 @@ uv run python scripts/report_issue.py submit "一句話標題" \
 | `references/verification-details.md` | **要執行驗證時**：四項驗證的完整定義、Phase 5 里程碑 |
 | `references/troubleshooting.md` | **出錯時**：錯誤速查表 |
 | `references/issue-reporting.md` | **回報平台問題時**：BDD 撰寫規範、指令、進度追蹤 |
-| `references/platform-behaviors.md` | **實測行為補遺**：DB Proxy 分頁與筆數上限、`custom_data` 不可伺服器端過濾、TIMESTAMP 格式、seed 表唯讀、`ctx.erp` 白名單 |
+| `references/platform-behaviors.md` | **實測行為補遺**：DB Proxy 分頁與筆數上限、`custom_data` 不可伺服器端過濾、TIMESTAMP 格式、seed 表唯讀、`ctx.erp` 白名單、空渲染偵測、API 權限閘 |
+| `references/hosted-apps.md` | **Hosted App（「自訂 App」）產品線**：與 Custom App 的邊界、部署 API、env 規則、錯誤碼對照——Phase 1.5 判斷走這條線時讀 |
