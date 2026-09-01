@@ -49,7 +49,7 @@ await queryAdvanced(table, {
 | `custom_data`（op=eq） | 500 `invalid input syntax` |
 | `custom_data`（op=is_not_null） | 200（整欄操作可用） |
 
-**推論出的設計規則**：任何需要被**篩選、排序、分頁**的維度，一律放 SaaS 表**原生欄位**；
+**推論出的設計規則**：任何需要被**篩選、排序、分頁**的維度，一律放預設表**原生欄位**；
 `custom_data` 只適合存「取回之後才用」的資料。`app_domain` 過濾只能在前端或 action 內做
 （見 `custom-app-dev-guide.md` §18）——**且必須先照 §1.2 取完整資料再過濾**，
 否則配上 §1.1 的 500 筆上限就會變成「只過濾了前 500 筆」。

@@ -17,7 +17,7 @@
 同時涵蓋：
 
 - **資料架構雙軌分流** — 依資料性質在「資料中心自建表」（租戶級真實資料表）
-  與「Data Reference」（引用平台既有 ERP／SaaS 表）之間判定，建表前強制盤點避免重複建表
+  與「Data Reference」（引用平台預設表）之間判定，建表前強制盤點避免重複建表
 - **Webhook** — manifest 宣告、多端點、驗簽、冪等要求
 - **App 排程** — 結構化排程、tier 限制、重疊與自動暫停語義
 - **現有系統遷入** — Supabase / Google Sheet / MySQL 的 Schema 映射與資料遷移
@@ -96,7 +96,7 @@ python scripts/check_update.py --apply   # git 安裝：就地 pull --ff-only
 ```
 aigo-builder/
 ├── SKILL.md                          # Skill 主文件（工作流骨架 + 核心規則）
-├── CONTEXT.md                        # 術語表（自建表／CustomObject／Data Reference／app_domain）
+├── CONTEXT.md                        # 術語表（預設表／自建表兩大類＋機制詞、稱謂對照）
 ├── README.md                         # 本文件
 ├── VERSION                           # 版本標記（更新檢查的比對基準）
 ├── CHANGELOG.md                      # 版本變更紀錄
@@ -111,6 +111,7 @@ aigo-builder/
 ├── resources/
 │   ├── vfs_template.json             # VFS 範本（單頁/多頁）
 │   ├── migration_mapping_template.md # 外部 Schema ↔ AI GO 映射表模板
+│   ├── project_deconstruction_template.md # 既有專案解構清單（前+後+DB 遷入用）
 │   └── hooks/                        # SessionStart 更新檢查 hook 範本
 │       ├── claude-code.settings.example.json
 │       └── codex.config.example.toml

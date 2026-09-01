@@ -364,7 +364,7 @@ Builder UI 對應「套件」面板（用面板儲存會清掉檔案裡的註解
 
 ### 概念
 
-每個 Custom App 在寫入 SaaS 表（Data Reference）時，必須在 `custom_data` JSONB 中標記 `app_domain`，
+每個 Custom App 在寫入預設表（Data Reference）時，必須在 `custom_data` JSONB 中標記 `app_domain`，
 用於標識該筆資料由哪個 App 建立，實現多 App 共用同一張表但資料隔離。
 
 ### 格式
@@ -387,7 +387,7 @@ Builder UI 對應「套件」面板（用面板儲存會清掉檔案裡的註解
 
 ### 讀取規範
 
-讀取 SaaS 表資料時，應用 `app_domain` 過濾，僅處理本 App 建立的資料：
+讀取預設表資料時，應用 `app_domain` 過濾，僅處理本 App 建立的資料：
 
 ```typescript
 const myRecords = allRecords.filter(
@@ -418,33 +418,82 @@ const myRecords = allRecords.filter(
 }
 ```
 
-## 19. Data Reference vs 自建表 選擇指引
+## 19. 資料承載體總決策（★ SSOT——所有分流指引以本節為準）
 
-兩者是**並列的雙軌**，依資料性質分流，沒有絕對優先序。
+平台可用的資料承載體有**四種**＋一種已退場：**預設表原生欄位／預設表延伸欄位（EAV）／
+預設表 `custom_data` JSONB／自建表（重用加欄或新建）**；CustomObject 已退場僅存量維護。
+SKILL.md 規則 18、§22 遷移映射、`migration-workflow.md` §2.4 的分流都是本節這棵樹的投影
+——彼此如有出入，以本節為準。
 
-### 決策流程
+**直接開發與現有應用遷入用同一棵樹**，只是輸入不同：直接開發的輸入是需求分析的
+資料表清單；遷入的輸入是外部 schema 的映射表——判定邏輯完全一致，不因「這是搬進來的」
+就放寬。
+
+### 決策樹（表級 → 欄位級）
+
+```
+一個資料需求（新功能的表／欄位，或遷入映射中的外部表／欄位）
+│
+├─ 表級：這個實體要與平台既有功能連動嗎？（看板、專案、發票、客戶…）
+│   ├─ 是 → Data Reference 軌：把該預設表加入引用；每個欄位進下面「欄位級」
+│   └─ 否（租戶自有業務實體——遷入案例的主力）→ 自建表軌：
+│       租戶已有語意相同的自建表？
+│       ├─ 有 → 重用；欄位不足 → 加實體欄位（data-center.md §7）
+│       └─ 無 → 新建自建表（建表規格 → 用戶確認 → POST /data-center/tables）
+│
+└─ 欄位級（只有預設表需要走這段；自建表缺欄一律加實體欄位）：
+    原生欄位語意對得上？ → 原生欄位（永遠優先）
+    對不上 → 這欄位是「租戶級業務欄位」還是「app 私有標記」？
+    ├─ 租戶級正式欄位（要型別驗證、資料中心 UI 全租戶可見可管理、跨 app 一致）
+    │   → 延伸欄位（EAV，data-center.md §10；★ ctx.db／db.ts 不回傳其值，
+    │     讀寫走獨立端點——app 要大量讀寫時回頭考慮改自建表）
+    └─ app 私有標記（app_domain 恆在此）、暫時性、鬆散擴充
+        → custom_data JSONB（標記規範見 SKILL.md 規則 19）
+```
+
+### 決策流程（動手前的盤點順序）
 
 1. **先盤點兩邊**：
    - `GET /api/v1/data-center/tables` — 租戶既有自建表（★ 不可跳過）
-   - `GET /api/v1/refs/available-tables` — 可引用的 SaaS 表（見 §20）
-2. 既有自建表語意相同 → **直接重用**，不要新建
-3. 對候選 SaaS 表查欄位（§20.2），確認有無 `custom_data` JSONB 可擴充、權限是否足夠
-4. 依下表判定走哪一軌
+   - `GET /api/v1/refs/available-tables` — 可引用的預設表（見 §20）
+2. 既有自建表語意相同 → **直接重用**，不要新建；重用的表**欄位不足 → 加實體欄位**
+   （`data-center.md` §7），不要因缺欄就另建表或把結構化欄位塞進 json 欄
+3. 對候選預設表查欄位（§20.2），確認權限是否足夠；缺欄位時依決策樹的欄位級分流——
+   租戶級正式欄位用**延伸欄位**（EAV，`data-center.md` §10）、
+   app 私有標記與鬆散擴充用 `custom_data` JSONB（預設表本體不可加實體欄位）
+4. 每張表／每個欄位走上面的決策樹定案
 5. 走 Data Reference → 把表加入引用（引用狀態一律以 `GET /api/v1/refs/apps/{app_id}` 為準，
    **不要看 `db.json`**，見 `platform-behaviors.md` §6）。
    可用 API `POST /api/v1/refs/apps/{app_id}`（`builder.access`，
    body `{table_name, columns[], permissions[]}`），或引導用戶到 Builder 後台操作
    走自建表 → 產出建表規格交用戶確認，再 `POST /api/v1/data-center/tables`
 
-### 選擇矩陣
+### 選擇矩陣（速查——結論與決策樹一致）
 
 | 條件 | 選擇 | 說明 |
 |------|------|------|
-| 要與 ERP／SaaS 功能連動（看板、專案、發票、客戶） | **Data Reference** | 與平台功能共用同一份資料 |
+| 要與平台既有功能連動（看板、專案、發票、客戶） | **Data Reference** | 與平台功能共用同一份資料 |
 | 租戶已有語意相同的自建表 | **重用該自建表** | 自建表跨 app 共用，重複建 = 資料分裂 |
+| 重用的自建表缺欄位 | **加實體欄位** | `data-center.md` §7；不要另建表或塞 json |
 | 租戶自有的新業務實體（外部系統遷入的主力） | **自建表** | 真實資料表、真外鍵、200 張配額 |
 | 需要真正的關聯完整性（刪除被引用列要被擋） | **自建表** | relation → 自建表會建真 FK |
-| 臨時、單 app 私有、不值得建表 | **SaaS 表 `custom_data`** | 免建表成本 |
+| 預設表缺「租戶級正式欄位」 | **延伸欄位** | EAV overlay；讀寫走獨立端點（`data-center.md` §10） |
+| app 私有標記、臨時、鬆散、不值得定義欄位 | **預設表 `custom_data`** | 免定義成本；`app_domain` 恆在此 |
+
+### 入口情景對照（同一棵樹的三個入口）
+
+| 情景 | 輸入 | 走法 |
+|------|------|------|
+| 直接開發新功能 | Phase 1.5 需求分析的資料表清單 | 每張表／欄位直接走決策樹 |
+| 現有應用遷入（Custom App） | `migration-workflow.md` §2.4 的映射表 | 外部每張表／欄位經映射走**同一棵樹**；映射未經用戶確認不得匯入（§2.5 閘門） |
+| 現有應用遷入（Hosted App） | 同上 | **分流結果相同**；差別只在存取方式改走 Open Proxy（`hosted-apps.md` §7.1），原 DB 退場 |
+
+### 禁止項（不進決策樹的選項）
+
+- **CustomObject**（`data.json`／`listRecords`／`ctx.db.query_object`）——已退場，
+  存量維護、新需求禁用（`CONTEXT.md`、`data-center.md` §8）
+- **app 內自建使用者／角色表**——身分與權限沿用平台（SKILL.md 規則 23）；
+  遷入專案的 users 表走 `project_deconstruction_template.md` 的認證映射
 
 ### 兩軌的關鍵差異
 
@@ -456,9 +505,9 @@ const myRecords = allRecords.filter(
 | 建立方式 | Builder 後台加入引用 | `POST /data-center/tables`（需 `system.admin`） |
 | 怎麼盤點 | `GET /refs/apps/{app_id}`（**不是** `db.json`，那個恆為 `{}`） | `GET /data-center/tables`（租戶級，不在 VFS） |
 
-### SaaS 表常見結構
+### 預設表常見結構
 
-SaaS 表通常包含以下標準欄位：
+預設表通常包含以下標準欄位：
 
 | 欄位 | 型別 | 說明 |
 |------|------|------|
@@ -475,7 +524,7 @@ SaaS 表通常包含以下標準欄位：
 
 ## 20. Data Reference 探索 API
 
-用於在開發規劃階段（Phase 1.5）探索所有可用的 SaaS 表，決定哪些表適合作為 Data Reference。
+用於在開發規劃階段（Phase 1.5）探索所有可用的預設表，決定哪些表適合作為 Data Reference。
 
 ### 20.1 查詢可用資料表清單
 
@@ -572,14 +621,14 @@ Authorization: Bearer {access_token}
 Phase 1.5 實作計畫時：
 
 1. GET /api/v1/refs/available-tables
-   → 取得所有可用 SaaS 表清單
+   → 取得所有可用預設表清單
 
 2. 對每個候選表 GET /api/v1/refs/tables/{name}/columns
    → 確認欄位結構、是否有 custom_data (JSONB)
 
-3. 決定資料架構：哪些需求用 SaaS 表、哪些用自建表（見 §19）
+3. 決定資料架構：哪些需求用預設表、哪些用自建表（見 §19）
 
-4. 在 AI GO Builder 後台將選定的 SaaS 表加入 Data Reference
+4. 在 AI GO Builder 後台將選定的預設表加入 Data Reference
 
 5. 用 GET /api/v1/refs/apps/{app_id} 確認引用已包含所需的表
 ```
@@ -603,8 +652,8 @@ TypeScript（前端）和 Python（後端 Server Action）是 AI GO 精選的開
 ### 為什麼資料存取走 API，不直連資料庫
 
 - **避免結構混亂**：直接連線資料庫且 schema 可疊加時，非技術的 AI Coder 容易重複建立類似的表或欄位，造成資料結構混亂
-- **通用結構先行**：AI GO 預先定義了中小企業通用的資料庫結構（SaaS 表），涵蓋專案、客戶、銷售、會計等常見業務場景
-- **擴充彈性**：同時保有自建表的自訂擴充能力（租戶級真實資料表），以及 SaaS 表的 `custom_data`（JSONB）欄位
+- **通用結構先行**：AI GO 預先定義了中小企業通用的資料庫結構（預設表），涵蓋專案、客戶、銷售、會計等常見業務場景
+- **擴充彈性**：同時保有自建表的自訂擴充能力（租戶級真實資料表），以及預設表的 `custom_data`（JSONB）欄位
 - **安全與一致性**：中間統一走 API 與反向代理，確保多租戶隔離、權限控制、資料驗證等安全機制
 
 ### 現有系統遷移
@@ -614,7 +663,7 @@ TypeScript（前端）和 Python（後端 Server Action）是 AI GO 精選的開
 1. **解釋語言選擇理由**：說明上述 TypeScript + Python 的精選特性
 2. **建議建立新專案重構**：在 AI GO 上建立全新 Custom App 專案，以 AI GO 架構重新設計
 3. **原專案不更動**：用戶的本地原始專案保持不變，AI GO 專案獨立開發
-4. **業務邏輯遷移**：引導用戶將現有系統的業務邏輯和資料結構，對應到 AI GO 的 SaaS 表 + 自建表雙軌架構
+4. **業務邏輯遷移**：引導用戶將現有系統的業務邏輯和資料結構，對應到 AI GO 的預設表 + 自建表雙軌架構
 
 ## 22. 外部 Schema 映射指引
 
@@ -624,10 +673,12 @@ TypeScript（前端）和 Python（後端 Server Action）是 AI GO 精選的開
 
 ```
 1. 列出外部系統的所有資料表與欄位
-2. 盤點兩邊：GET /data-center/tables（既有自建表）＋ Refs API（可用 SaaS 表，見 §20）
+2. 盤點兩邊：GET /data-center/tables（既有自建表）＋ Refs API（可用預設表，見 §20）
 3. 逐表比對：
-   租戶已有語意相同的自建表？    → 重用
-   要與 ERP/SaaS 功能連動？      → SaaS 表原生欄位；無原生對應 → custom_data JSONB
+   租戶已有語意相同的自建表？    → 重用；欄位不足 → 加實體欄位（data-center.md §7）
+   要與平台既有功能連動？      → 預設表原生欄位；無原生對應 →
+                                   正式欄位用延伸欄位（data-center.md §10）、
+                                   app 私有標記用 custom_data JSONB
    租戶自有的新業務實體？        → 自建表（遷入案例主力）
 4. 處理外鍵 / 關聯
 5. 產出映射表（模板見 resources/migration_mapping_template.md）
@@ -639,9 +690,9 @@ TypeScript（前端）和 Python（後端 Server Action）是 AI GO 精選的開
 
 | 判斷條件 | 結果 | 說明 |
 |---------|------|------|
-| 指向同一群實體 + 未來需統一檢視 | **合併** | 進同一張 SaaS 表，各 App 用 `app_domain` 標籤區分來源 |
+| 指向同一群實體 + 未來需統一檢視 | **合併** | 進同一張預設表，各 App 用 `app_domain` 標籤區分來源 |
 | 指向同一群實體 + 各自獨立運作 | **合併** | 但各 App 只過濾自己 `app_domain` 的資料 |
-| 指向不同群實體（如不同市場的客戶） | **分離** | 各自建自建表，或（走 SaaS 表時）用不同 `app_domain` 隔離 |
+| 指向不同群實體（如不同市場的客戶） | **分離** | 各自建自建表，或（走預設表時）用不同 `app_domain` 隔離 |
 | 欄位結構差異過大（>50% 不同） | **分離** | 硬塞進同一張表會造成 custom_data 過於複雜 |
 
 決策樹：
@@ -649,7 +700,7 @@ TypeScript（前端）和 Python（後端 Server Action）是 AI GO 精選的開
 ```
 多個外部系統都有語意相同的表
   ├─ 是同一群實體？
-  │   ├─ 是 → 合併進同一張 SaaS 表 / 自建表
+  │   ├─ 是 → 合併進同一張預設表 / 自建表
   │   │       ├─ 欄位聯集 → 共有欄位用原生欄位，各自特有欄位放 custom_data
   │   │       └─ 去重策略 → 以 email / 名稱為 key，衝突時由用戶決定保留哪邊
   │   └─ 否 → 分離
@@ -665,12 +716,12 @@ TypeScript（前端）和 Python（後端 Server Action）是 AI GO 精選的開
 | 外部 FK 類型 | AI GO 處理方式 |
 |-------------|---------------|
 | `tasks.project_id → projects.id`（兩表都遷自建表） | 自建表的 `relation` 欄位指向自建表 → **建真正的資料庫外鍵**，刪除被引用列會被 DB 擋下（409） |
-| 自建表 → ERP／SaaS 表 | `relation` 指向 ERP 表 = **軟關聯不建 FK**（跨 schema），只在寫入時驗證目標存在 |
-| `orders.customer_id → customers.id`（兩表都用 SaaS 表） | 直接用 SaaS 表的 `customer_id` 欄位；無原生 FK 約束 |
+| 自建表 → 預設表 | `relation` 指向預設表 = **軟關聯不建 FK**（跨 schema），只在寫入時驗證目標存在 |
+| `orders.customer_id → customers.id`（兩表都用預設表） | 直接用預設表的 `customer_id` 欄位；無原生 FK 約束 |
 | 多對多（junction table） | 建一張自建表存放關聯（兩個 relation 欄位），或在 `custom_data` 存 ID 陣列 |
 
-> **重要**：只有「自建表 → 自建表」的 relation 有真 FK。其餘情況（SaaS 表之間、
-> 自建表 → ERP 表）的參照完整性需由 Server Action / 前端程式碼維護，
+> **重要**：只有「自建表 → 自建表」的 relation 有真 FK。其餘情況（預設表之間、
+> 自建表 → 預設表）的參照完整性需由 Server Action / 前端程式碼維護，
 > AI GO 不會自動做 cascading delete。
 
 ### 22.4 多系統遷入時的 custom_data 命名空間
@@ -678,7 +729,7 @@ TypeScript（前端）和 Python（後端 Server Action）是 AI GO 精選的開
 > **僅適用 Data Reference 那一軌。** 自建表有自己的實體欄位，不需要命名空間前綴，
 > 也不該帶 `app_domain`（見 `CONTEXT.md`）。
 
-當多個 App 共用同一張 SaaS 表時，建議在 `custom_data` 中使用 `app_domain` 作為命名空間前綴：
+當多個 App 共用同一張預設表時，建議在 `custom_data` 中使用 `app_domain` 作為命名空間前綴：
 
 ```json
 {
@@ -719,7 +770,7 @@ TypeScript（前端）和 Python（後端 Server Action）是 AI GO 精選的開
 
 ```python
 def execute(ctx):
-    """批次匯入外部資料到 SaaS 表（Data Reference）或自建表"""
+    """批次匯入外部資料到預設表（Data Reference）或自建表"""
     records = ctx.params.get("records", [])
     table = ctx.params.get("table", "")
     target = ctx.params.get("target", "saas")      # "saas" | "custom_table"
@@ -729,7 +780,7 @@ def execute(ctx):
 
     for record in records:
         try:
-            # app_domain 只標在 SaaS 表；自建表不需要也不該帶
+            # app_domain 只標在預設表；自建表不需要也不該帶
             if target == "saas" and app_domain:
                 record.setdefault("custom_data", {})
                 record["custom_data"]["app_domain"] = app_domain
@@ -786,22 +837,72 @@ def execute(ctx):
 ✓ 總筆數比對：外部系統 N 筆 → AI GO N 筆
 ✓ 關鍵欄位抽驗：隨機抽 5~10 筆，比對名稱/金額/日期等關鍵欄位
 ✓ 關聯完整性：子表的 FK 欄位都能對應到主表的有效記錄
-✓ app_domain 標籤：所有 SaaS 表記錄都帶有正確的 app_domain（自建表不檢查此項）
+✓ app_domain 標籤：所有預設表記錄都帶有正確的 app_domain（自建表不檢查此項）
 ✓ custom_data 結構：JSONB 欄位的 key 符合映射表定義
 ✓ 無殘留測試資料：遷移過程中的測試記錄已清除
 ```
 
+### 23.6 資料抽取路徑（★ 資料怎麼離開來源系統）
+
+§23.2 的匯入 action 假設 records 已經在 `ctx.params` 裡——**「誰去源頭拉資料」要先定案**。
+依來源型態選路徑：
+
+| 來源 | 抽取路徑 |
+|------|---------|
+| **MySQL / Postgres 直連**（含 Supabase 的 DB 連線字串） | **只能在本地做**：本地腳本用 DB driver 讀出 → 打平台 API 寫入（見下）。`ctx.http.call` 只講 HTTP，講不了 MySQL/Postgres 線協定；runner 又是 default-deny egress——**不存在「Server Action 直連源 DB」這條路**，不要往那個方向設計 |
+| **Supabase REST**（PostgREST） | 本地腳本打 REST 抓取（最簡單）；或 Server Action `ctx.http.call` + egress 白名單 `<project>.supabase.co`（§25）——只有「遷移後仍要持續同步」才值得建 egress，一次性遷移用本地路徑就好 |
+| **Google Sheet** | 匯出 CSV 本地解析（量小）；或 Sheets API 走 egress（要持續同步時） |
+| **CSV / Excel 匯出檔** | 本地解析 → 打平台 API 寫入 |
+
+**本地腳本的寫入端（兩軌各有路）**：
+
+- **自建表**：`scripts/aigo_data_center.py` 的 `insert_record()`
+  （`POST /api/v1/data-center/...`，逐筆）——量小直接用
+- **預設表、或需要匯入邏輯**（補 `app_domain`、ID 映射、型別轉換）：
+  先佈一支 §23.2 的匯入 action，本地腳本分批呼叫
+  `POST /api/v1/actions/apps/{app_id}/run/{action_name}`，records 放 params。
+  base_url 一律走租戶空間（核心規則 29），token 用 `aigo_auth.get_token()`
+
+**大量資料（數千筆以上）的節奏**：
+
+- Server Action 有執行時間上限（`event-triggers.md` §1.6）——**分批的迴圈放在本地腳本**，
+  每批 100~500 筆呼叫一次 action；不要設計成「一發 action 自己拉完全部」，
+  超時中斷後你不知道停在哪
+- 本地腳本記錄斷點（已成功的批次序號 / 最後一筆外部 ID），失敗可續傳
+- 匯入 action 對「同一批重送」要冪等（以外部 ID 查重），否則斷點續傳會重複建資料
+
+一次性遷移結束後，把只為遷移建立的 egress 外部服務與金鑰**清掉**，不要留白名單。
+
+### 23.7 外部型別 → 自建表型別降級對照
+
+自建表只有 9 種型別（`data-center.md` §3），外部 DB 的型別按此表降級：
+
+| 外部型別 | 自建表型別 | 注意 |
+|---------|-----------|------|
+| VARCHAR / TEXT / CHAR / UUID | `text` | |
+| INT / BIGINT / FLOAT / NUMERIC | `number` | 金額等高精度欄位遷移後**必做抽驗比對**；不容許任何精度損失時改 `text` 保存原字串 |
+| BOOLEAN / TINYINT(1) | `boolean` | |
+| DATE | `date` | |
+| TIMESTAMP / DATETIME | `datetime` | 時區語意先確認（平台側行為見 SKILL.md 規則 28） |
+| ENUM / CHECK IN (...) | `select` | 正好對應——必須提供選項集，值受 CHECK 約束 |
+| JSON / JSONB | `json` | |
+| ARRAY | `json` | 存成 JSON 陣列 |
+| 外鍵欄位 | `relation` | 目標是自建表 → 真 FK；目標是預設表 → 軟關聯（§22.3） |
+| 圖片 / 附件 URL | `image` 或 `text` | `image` 存 storage key（`data-center.md` §6）——外部檔案要先下載、重新上傳 Storage、再存 key；不遷檔案就用 `text` 暫存外部 URL，並向用戶說明原站關閉後連結會失效 |
+| 自增 ID | 不遷 | UUID 自動生成，走 §23.3 的 ID 映射 |
+| 複合唯一鍵 / 跨欄 CHECK / DEFAULT 運算 | 無對應 | 約束上移：匯入與後續寫入都經同一支 Server Action，在 action 內檢查 |
+
 ## 24. 簽核工作流攔截（Approval）
 
-租戶管理者可對 SaaS 表設定簽核流程。**流程一旦命中，你的寫入不會照你以為的方式發生**——
-這不是錯誤、不能重試，是平台的前置守衛（pre-guard）。**只影響 Data Reference（SaaS 表）那一軌；
+租戶管理者可對預設表設定簽核流程。**流程一旦命中，你的寫入不會照你以為的方式發生**——
+這不是錯誤、不能重試，是平台的前置守衛（pre-guard）。**只影響 Data Reference（預設表）那一軌；
 自建表與 CustomObject 不在簽核範圍。**
 
 ### 24.1 誰會被攔
 
 | 呼叫端 | 受管制操作 | 攔截行為 |
 |--------|-----------|---------|
-| 前端 `db.ts` | `insert` / `update` / `remove`（SaaS 表） | insert = insert-then-flag；update/delete = pre-guard |
+| 前端 `db.ts` | `insert` / `update` / `remove`（預設表） | insert = insert-then-flag；update/delete = pre-guard |
 | Server Action `ctx.db` | 同上 | 同上；pre-guard 以例外呈現 |
 | Server Action `ctx.erp` | `confirm_sale_order`、`confirm_purchase_order`、`post_move`、`confirm_payment`、`validate_picking`、`confirm_payroll_run` | pre-guard，拋例外 |
 

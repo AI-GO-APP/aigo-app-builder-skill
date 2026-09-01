@@ -20,7 +20,7 @@
 
 **所有 API 在指涉既有表／欄位時一律用實體名。** 改顯示名不影響任何既有引用。
 
-⚠️ **實體名有保留名單（2026-08 擴大）**：除了 ERP 表名與 SQL 保留字，
+⚠️ **實體名有保留名單（2026-08 擴大）**：除了預設表名與 SQL 保留字，
 現在還包含**平台地板表名**（`users`／`tenants`／`audit_logs`／`api_keys`／
 `countries` 等共 76 張）。撞名在建表當下就回 **409**（「與平台保留表名衝突」），
 **沒有事後補救管道**——顯示名取「使用者」這類會生成保留實體名的名稱前，
@@ -40,7 +40,7 @@
 
 | 操作 | 需要權限 |
 |------|---------|
-| 建表／改表／加欄／改欄（含 ERP 延伸欄位建改） | **`datacenter.schema_write`**（2026-08 起；`system.admin` 直通） |
+| 建表／改表／加欄／改欄（含預設表延伸欄位建改，→ §10） | **`datacenter.schema_write`**（2026-08 起；`system.admin` 直通） |
 | 刪表／刪欄／刪延伸欄位 | **`system.admin`**（刻意不下放） |
 | 讀結構（列表／讀 schema） | `builder.access` 或 `datacenter.schema_write`（任一即可） |
 | 記錄 CRUD（查／增／改／刪） | `builder.access` |
@@ -87,7 +87,7 @@
 - **→ 自建表**：參數 `target_table_id`＝目標表的 **UUID**（從 `GET /tables` 的 `id` 取，
   **不是實體名**）。建**真正的資料庫外鍵**，刪除仍被引用的列會被 DB 擋下
   （409，`detail.dependents` 列出依賴者）。
-- **→ ERP 表**：參數 `target_erp_key`＝ERP 表 key。軟關聯，**不建外鍵**（跨 schema 邊界），
+- **→ 預設表**：參數 `target_erp_key`＝預設表 key（API 參數沿用 erp 命名）。軟關聯，**不建外鍵**（跨 schema 邊界），
   目標值在寫入時驗證存在性。
 
 兩者**恰擇其一**——都給或都不給皆為錯誤。建立後不可變（PATCH 改欄不收這兩個參數）。
@@ -109,7 +109,7 @@
   `field_quota_exceeded`「已達欄位數上限（N 欄，目前 M 欄）」。
 - ⚠️ **單次 `POST /tables` 最多帶 50 個欄位**（schema 層上限），這與每表欄位配額是兩回事：
   付費租戶想一次建 60 欄會拿到 **422 而不是 409**，必須先建表再逐次 `POST /tables/{key}/fields`。
-- ERP 延伸欄位（EAV）沿用同一組欄數配額。
+- 延伸欄位（EAV）沿用同一組欄數配額。
 - 超限回 **409**（不是靜默截斷）。
 
 ---
@@ -257,3 +257,53 @@ def execute(ctx):
 
 > 平台方向是未來讓 UUID 欄升級成關聯選單，此端點是前置建設；
 > 落地前不要嘗試 `target_erp_key='users'` 之類的寫法。
+
+---
+
+## 10. ERP 延伸欄位（EAV）：幫預設表加正式欄位（2026-08 起）
+
+> 端點與行為核對自平台原始碼（`backend/app/api/data_center_ext.py`、
+> `services/data_center/ext_fields.py`）。**2026-09-01 prod 唯讀實測**：
+> `GET /ext-fields/{erpKey}` 回 200 `[]`、`POST /ext-values/{erpKey}:batch-get`
+> 對不存在的 row 回 200 `{}`（「缺值不回填」同步證實）——**功能已上線**。
+> 建欄／改欄／刪欄與寫值屬寫入面，未實測；拿到非預期回應先懷疑部署落差。
+
+### 定位：Data Reference 軌的第三種擴充機制
+
+預設表**本體 schema 不可改**（平台定義，沒有任何 API 能對它 ALTER TABLE）。
+要讓預設表「更符合使用者的資料結構需求」，有三個選項，**不是只有 custom_data**：
+
+| 需求 | 選 | 理由 |
+|------|-----|------|
+| 原生欄位語意能對上 | **原生欄位** | 永遠優先 |
+| 租戶級的正式欄位：要有型別、要在資料中心 UI 對全租戶可見可管理 | **延伸欄位**（本節） | 有型別驗證、有欄位定義、跨 app 一致 |
+| app 私有標記（`app_domain` 必在此）、鬆散或暫時性的擴充 | `custom_data` JSONB | 免定義成本，但無型別、僅該 app 自己認得 |
+
+讀寫頻繁且 app 是該資料的主要使用者時，回頭重新考慮：這個實體也許該整個走自建表。
+
+### 是 overlay，不是實體欄位（★ 讀寫契約，最容易踩）
+
+延伸欄位的定義與值存在**獨立的 EAV 表**，預設表本體零改動。後果：
+
+- **`ctx.db.query`／`db.ts` 的查詢結果不會包含延伸欄位值**——讀 = 主列查詢
+  ＋另打 `:batch-get` 自己合成；寫 = 原生欄位走既有路徑、延伸欄位另打 PATCH
+- 「缺值不回填」：batch-get 只回傳實際存在的值，**不代入 `default_value`**
+- relation 型別一律**軟關聯無 FK**；required／unique 由應用層保證，DB 不擋
+- Custom App SDK（`api.ts`／`ctx.db`）**沒有封裝**——app 執行期要用得自己打 REST；
+  需要在 app 內大量讀寫延伸欄位時，優先重新評估改走自建表
+
+### 端點速查（前綴 `/api/v1/data-center`）
+
+| 動作 | 方法與路徑 | 權限 |
+|------|-----------|------|
+| 列出定義 | GET `/ext-fields/{erpKey}` | `builder.access` 或 `datacenter.schema_write` |
+| 建欄 | POST `/ext-fields/{erpKey}` | `datacenter.schema_write`（`system.admin` 直通） |
+| 改欄 | PATCH `/ext-fields/{erpKey}/{fieldKey}` | `datacenter.schema_write` |
+| 刪欄（兩段式：impact → confirm） | GET `.../{fieldKey}/impact` → DELETE | **`system.admin`**（帶走該欄所有值，刻意不下放） |
+| 批取值 | POST `/ext-values/{erpKey}:batch-get`（body `row_ids` ≤ **200**） | `builder.access` |
+| 寫值 | PATCH `/ext-values/{erpKey}/{rowId}` | `builder.access` |
+
+- `{erpKey}` 是預設表的表 key（平台內部命名帶 erp 字樣，見 CONTEXT.md 稱謂對照）；`{fieldKey}` 是延伸欄位實體名
+- 型別與自建表**同一套 9 型別**（§3），select 選項集驗證也同一套
+- 配額沿用每表欄數配額（§4）
+- 管結構的人不自動獲得看資料的權——定義面與值面的權限是分開的
