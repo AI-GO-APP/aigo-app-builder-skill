@@ -4,6 +4,18 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.11.1
+
+### Hosted App CLI 入口（保有入口、指令面另外管理）
+
+`hosted-apps.md` 新增 §3.3：`aigo` CLI 安裝一行指令與穩定契約——
+鑑權優先序（`AIGO_DEPLOY_TOKEN` env ＞ profile ＞ session）、`--slug` 語意
+（命中既有 slug＝redeploy，打錯會**多建一個 app 吃配額**）、exit code 語意、
+以及「CLI base origin 預設 apex 是它自己的契約，不要拿核心規則 29 糾正它」。
+
+**指令面以 `aigo --help` 為權威，skill 不複製**——CLI 獨立發版（binary-only，
+原始碼私有），快照必過期；此決策對齊平台 ADR 0016（CLI 文件只留 pointer）。
+
 ## 1.11.0
 
 ### 平台同步（至 2026-09-01）：Hosted App 產品線納入 + Custom App 面更新
