@@ -7,10 +7,14 @@ report_issue.py — 平台問題回報（直達 AI GO 開發團隊的 Scrum Boar
 
 用法：
     uv run python scripts/report_issue.py submit "一句話標題" \
-        --expected "預期行為" --actual "實際結果" --steps "重現步驟"
+        --expected "預期行為" --actual "實際結果" --steps "重現步驟" \
+        --image 截圖1.png --image 截圖2.png
     uv run python scripts/report_issue.py submit "標題" --body-file report.md
     uv run python scripts/report_issue.py list
     uv run python scripts/report_issue.py show <ticket_id>
+
+截圖（--image，可重複最多 10 張；png/jpg/webp/gif 單張 ≤8MB）會上傳並
+內嵌在開發團隊的卡片裡——UI 問題附截圖能大幅縮短來回。
 
 回報內容規範（BDD，詳見 references/issue-reporting.md）：
 寫「行為」不寫「解法」——預期 vs 實際 + 重現步驟；不要提技術建議或實作方式。
@@ -34,6 +38,16 @@ from aigo_auth import load_env_file, resolve_base_url  # noqa: E402
 # 回報系統（獨立部署的 ticket widget，與 AI GO 平台無關；平台掛掉時仍可回報）
 DEFAULT_API = "https://urfit-ticket-widget.agent99apps.workers.dev"
 ACCOUNT_DOMAIN = "ticket.urfit.com.tw"  # 不收信網域，僅作帳號識別
+
+MAX_IMAGES = 10
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
+IMAGE_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
 
 
 def _api_base() -> str:
@@ -138,6 +152,33 @@ def _compose_body(args: argparse.Namespace) -> str:
     return (args.body or "").strip()
 
 
+def _upload_images(client: httpx.Client, token: str, paths: list) -> list:
+    """逐張上傳截圖，回傳附件 key 清單。任何一張失敗就整筆中止（不建缺圖的卡）。"""
+    if len(paths) > MAX_IMAGES:
+        raise RuntimeError(f"❌ 截圖最多 {MAX_IMAGES} 張（收到 {len(paths)} 張）")
+    keys = []
+    for i, raw in enumerate(paths, 1):
+        p = Path(raw)
+        ctype = IMAGE_TYPES.get(p.suffix.lower())
+        if not p.is_file():
+            raise RuntimeError(f"❌ 找不到截圖：{p}")
+        if not ctype:
+            raise RuntimeError(f"❌ 不支援的圖片格式：{p.name}（僅收 png/jpg/webp/gif）")
+        data = p.read_bytes()
+        if len(data) > MAX_IMAGE_BYTES:
+            raise RuntimeError(f"❌ {p.name} 超過單張 8MB 上限")
+        print(f"⬆️  上傳截圖 {i}/{len(paths)}：{p.name}")
+        resp = client.post(
+            f"{_api_base()}/api/uploads",
+            content=data,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": ctype},
+        )
+        if resp.status_code != 201:
+            raise RuntimeError(f"❌ 截圖上傳失敗（HTTP {resp.status_code}）：{resp.text[:200]}")
+        keys.append(resp.json()["key"])
+    return keys
+
+
 def cmd_submit(args: argparse.Namespace) -> int:
     body = _compose_body(args)
     if not body:
@@ -148,14 +189,16 @@ def cmd_submit(args: argparse.Namespace) -> int:
         print("    不要寫技術建議或實作方式（見 references/issue-reporting.md）。仍照送。")
 
     creds = derive_credentials(args.project)
-    with httpx.Client(timeout=30) as client:
+    with httpx.Client(timeout=60) as client:
         token = authenticate(client, creds)
+        attachments = _upload_images(client, token, args.image or [])
         resp = _post(client, f"{_api_base()}/api/tickets", {
             "title": args.title.strip()[:80],
             "content": body[:4000],
             "source": "agent",
             "site_key": creds["tenant"],
             "client_msg_id": str(uuid.uuid4()),
+            "attachments": attachments,
         }, token)
     if resp.status_code != 201:
         print(f"❌ 回報失敗（HTTP {resp.status_code}）：{resp.text[:200]}")
@@ -208,6 +251,8 @@ def cmd_show(args: argparse.Namespace) -> int:
     for m in data.get("messages", []):
         print(f"\n[{role_label.get(m['role'], m['role'])}] {m['sent_at'][:16]}")
         print(m["content"])
+        for url in m.get("attachments") or []:
+            print(f"🖼  {url}")
     return 0
 
 
@@ -224,6 +269,8 @@ def main() -> int:
     p_submit.add_argument("--context", help="環境／補充（app_id、時間、request_id…）")
     p_submit.add_argument("--body", help="自由格式內文（仍應含預期 vs 實際）")
     p_submit.add_argument("--body-file", help="從檔案讀內文")
+    p_submit.add_argument("--image", action="append",
+                          help="附加截圖（可重複，最多 10 張；png/jpg/webp/gif ≤8MB）")
     p_submit.set_defaults(func=cmd_submit)
 
     p_list = sub.add_parser("list", help="列出自己回報過的問題與目前狀態")

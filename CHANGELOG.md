@@ -4,6 +4,19 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.13.0
+
+### 問題回報支援附加截圖（--image）
+
+`report_issue.py submit` 新增 `--image <路徑>`（可重複，最多 10 張；
+png/jpg/webp/gif 單張 ≤8MB）：先上傳到回報系統的物件儲存，再隨卡片建立，
+**截圖會直接內嵌在開發團隊的 Notion 卡片裡**——UI／畫面類問題附圖能大幅
+縮短來回。`show` 會列出訊息附帶的圖片網址。
+
+- 任何一張上傳失敗即整筆中止（不建缺圖的卡）
+- 隱私提醒：上傳前先確認畫面上沒有機密（token、個資、客戶名單）
+- `references/issue-reporting.md`、SKILL.md「問題回報」節同步
+
 ## 1.12.0
 
 ### 新功能：API 建立 App，不必先走 UI 拿 UUID（實測通過）

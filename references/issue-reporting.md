@@ -52,6 +52,11 @@ uv run python scripts/report_issue.py submit "一句話標題" \
   --expected "預期行為" --actual "實際結果（含錯誤原文）" \
   --steps "重現步驟" --context "租戶/app_id/時間"
 
+# UI／畫面問題請附截圖（--image 可重複，最多 10 張；png/jpg/webp/gif 單張 ≤8MB）
+# 圖片會內嵌在開發團隊的卡片裡
+uv run python scripts/report_issue.py submit "標題" \
+  --expected "…" --actual "…" --image 截圖1.png --image 截圖2.png
+
 # 內文較長時寫進檔案
 uv run python scripts/report_issue.py submit "標題" --body-file report.md
 
@@ -74,5 +79,7 @@ uv run python scripts/report_issue.py show <ticket_id>
 - 回報內容（含你貼的錯誤訊息）會進入開發團隊的 Notion 看板，
   回報者信箱（AIGO_EMAIL）與租戶 slug 會顯示在卡片上。**不要貼機密**
   （金鑰、個資、客戶資料）——錯誤訊息含敏感值時先遮蔽。
+- 截圖同理：**上傳前先確認畫面上沒有機密**（token、個資、客戶名單）。
+  圖片存於回報系統的物件儲存，以不可猜測的網址供卡片內嵌顯示。
 - 認證端點有每 IP 每分鐘 30 次的速率限制，腳本會自動退避重試。
 - 回報系統網址可用環境變數 `URFIT_TICKET_API` 覆寫（預設為官方部署）。

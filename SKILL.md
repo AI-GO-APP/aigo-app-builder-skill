@@ -669,7 +669,8 @@ if (file) downloadFile(file);
 
 ```bash
 uv run python scripts/report_issue.py submit "一句話標題" \
-  --expected "預期行為" --actual "實際結果（含錯誤原文）" --steps "重現步驟"
+  --expected "預期行為" --actual "實際結果（含錯誤原文）" --steps "重現步驟" \
+  --image 截圖.png   # UI 問題附截圖（可重複，最多 10 張），會內嵌在卡片裡
 ```
 
 - 憑證重用 `~/.aigo/.env`，零設定；在 AI IDE 內直接執行，不開任何 UI、
