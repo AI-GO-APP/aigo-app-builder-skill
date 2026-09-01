@@ -69,8 +69,33 @@ POST {deployd_upload_url}  (原始碼 tarball + upload_token)
 - **restart**（`POST /{id}/restart`）不重建映像
 - **設定變更（env／持久碟）立即生效**，不重建、不耗建置資源
 - 重複部署**網址不變**（slug 不變）
-- CLI（Rust `aigo`：`aigo hosted deploy|list|logs`）在**獨立 repo**——
-  本 skill 未核對其指令面，教用戶時以 REST 為準
+- 部署建議走 CLI（§3.3）；REST 流程留給 CLI 裝不了的環境
+
+### 3.3 CLI（`aigo`，建議的部署路徑）
+
+安裝（macOS Apple Silicon／Linux x86_64／Windows 要在 **Git Bash** 下跑；
+Intel Mac 尚無 build）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AI-GO-APP/aigo-cli-releases/main/install.sh | bash
+```
+
+裝到 `~/.local/bin`（不在 PATH 就自己加）。binary-only 發佈，原始碼私有。
+
+**★ 指令面以 `aigo --help` 為權威，本檔不複製**——CLI 獨立發版，
+快照必過期。agent 用之前先跑 `--help`。以下只寫 `--help` 講不了的穩定契約：
+
+- **鑑權優先序**：env `AIGO_DEPLOY_TOKEN` ＞ `aigo login --token` 存的 profile
+  ＞ 瀏覽器 session。Deploy Token 從詳情頁「設定」tab 發行（raw 只給一次）；
+  token 值用 stdin 餵 `aigo login --token`，別放指令列參數（進 shell history）
+- **⚠️ `--slug` 語意**：命中既有 slug＝**redeploy**，否則**註冊新 app**（吃配額名額）；
+  未給則取目錄名 normalize。打錯 slug 不會報錯、會多一個 app——部署前先 `aigo hosted list` 核對
+- **專案目錄＝cwd**（沒有 `--path`）；打包自動排除 `.git`／`node_modules`
+- **⚠️ base origin 預設就是 `https://ai-go.app`（apex）**，租戶身分由 Deploy Token 承載
+  ——這是 hosted CLI 自己的契約，**不要拿核心規則 29（租戶空間網址）去「糾正」它**
+- **exit code**：`0` 成功／`1` 業務失敗（401、配額 429、建置 failed、superseded——
+  重試前先修因）／`2` 用法錯／`3` 連不上 backend（可重試）
+- 尚未接 CLI 的操作（刪除、網域、檔案／終端等 §11 標 ❌ 的面）→ Dashboard 或 REST
 
 ## 4. 環境變數（詳情頁「環境變數」tab；`PUT /{id}/runtime-settings`）
 
