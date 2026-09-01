@@ -138,7 +138,7 @@ curl -fsSL https://raw.githubusercontent.com/AI-GO-APP/aigo-cli-releases/main/in
   不出現在任何 API 回應
 - 容器內：`Authorization: Bearer $AIGO_API_TOKEN` 打 `$AIGO_PLATFORM_API_URL/api/v1/open/...`
 - ⚠️ `AIGO_PLATFORM_API_URL` 是**叢集內部位址**——本機開發要改打公開租戶網域
-- ⚠️ **ERP 表預設零授權**：新 app 打任何 `/open/proxy/{table}` 都是 403，
+- ⚠️ **預設表零授權起步**：新 app 打任何 `/open/proxy/{table}` 都是 403，
   要先在詳情頁「資料存取」tab 加引用並發布；資料中心自建表預設是整租戶可用
 - 憑證三動詞（session-only，**互不替代**）：`POST /{id}/credential/provision`（補建，冪等）
   ／`rotate`（輪替，新舊重疊 30 分鐘）／`revoke`（立即失效）
@@ -169,14 +169,14 @@ curl -fsSL https://raw.githubusercontent.com/AI-GO-APP/aigo-cli-releases/main/in
 ### 7.1 遷入既有服務時：資料一律遷入平台，原 DB 退場
 
 > 遷移評估（`migration-workflow.md` §2.1）判走 Hosted App 後，**預期行為只有一種**：
-> 業務資料遷入 AI GO 的表（預設 SaaS 表引用＋自建表），app 改用 Open Proxy 存取，
+> 業務資料遷入 AI GO 的表（預設表引用＋自建表），app 改用 Open Proxy 存取，
 > **原 DB 退場、不再使用**。「Hosted = 整套搬」指的是**程式**，不是資料。
 
 **預期路徑（唯一的常態）：資料遷入平台 + Open Proxy**
 
 - **落點依雙軌分流**（與 Custom App 同一套規則，SKILL.md 規則 18）：
-  要與 ERP／SaaS 功能連動的資料 → 在「資料存取」tab 加**預設（SaaS）表引用**
-  （ERP 表預設零授權，要先加引用並發布，§5）；租戶自有的新業務實體 → **自建表**
+  要與平台既有功能連動的資料 → 在「資料存取」tab 加**預設表引用**
+  （預設表零授權起步，要先加引用並發布，§5）；租戶自有的新業務實體 → **自建表**
   （資料中心自建表預設整租戶可用，§5）
 - **映射先行**：逐表逐欄做完 Schema 映射（`custom-app-dev-guide.md` §22、
   映射表模板）並經用戶確認，**才可執行匯入**——Hosted 線不因「程式整套搬」而免掉這一步

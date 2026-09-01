@@ -18,11 +18,12 @@ AI GO Custom App 採用 **TypeScript（前端）+ Python（後端）** 的精選
 開發可靠的公司內部系統。
 
 資料存取統一走 API，不直連資料庫——避免非技術 AI Coder 重複建立類似的表或欄位。
-AI GO 預先定義了中小企業通用的資料庫結構（SaaS 表），同時保有**自建表**的擴充彈性。
+AI GO 預先定義了中小企業通用的資料庫結構（預設表），同時保有**自建表**的擴充彈性。
 
 > 詳見 `references/custom-app-dev-guide.md` §21 架構設計理念。
-> **術語先讀 `CONTEXT.md`**——「自建表 / CustomObject / Data Reference / app_domain」
-> 四個詞容易混用，混了就會寫錯 code。
+> **術語先讀 `CONTEXT.md`**——表只有**預設表／自建表**兩大類；
+> 「CustomObject / Data Reference / 延伸欄位 / app_domain」是機制詞不是第三類表。
+> 六個詞容易混用，混了就會寫錯 code。（舊文件的「SaaS 表」＝預設表，已停用）
 
 ## Phase -1：Skill 自我更新檢查（每次觸發時執行）
 
@@ -78,7 +79,7 @@ python scripts/check_update.py     # macOS / Linux 用 python3
    - **盤點 Data Reference**（★ 重要）：用 `GET /api/v1/refs/apps/{app_id}`，
      **不要讀 `src/db.json`**——它是執行期注入檔，VFS 裡實測恆為 `{}`，
      即使引用全部註冊成功也一樣（見 `references/platform-behaviors.md` §6）
-     - 列出所有 SaaS 表名稱和欄位結構
+     - 列出所有預設表名稱和欄位結構
      - 標記哪些表有 `custom_data`（JSONB）欄位
      - 列出每張表的權限（read/create/update/delete）
      - 統計現有資料筆數和 `app_domain` 分布
@@ -246,8 +247,8 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
 3. **資料架構設計**（★ 必須遵循雙軌分流策略，見 Phase 3 規則 18）
    - **盤點兩邊**（順序不可省）：
      - `GET /api/v1/data-center/tables` — 租戶既有自建表（Phase 0 已做，此處覆核）
-     - `GET /api/v1/refs/available-tables` — 可引用的 SaaS 表清單
-     - 對候選 SaaS 表呼叫 `GET /api/v1/refs/tables/{name}/columns` 查欄位結構
+     - `GET /api/v1/refs/available-tables` — 可引用的預設表清單
+     - 對候選預設表呼叫 `GET /api/v1/refs/tables/{name}/columns` 查欄位結構
        ⚠️ **查到的表沒有 `tenant_id` 是正常的**，不代表不安全，也不要自補過濾——見規則 25
    - 列出所有需要的資料表，逐表判定走哪一軌（判定標準見規則 18）
    - **重用優先於新建**：既有自建表語意相同就重用，不要新建；
@@ -256,7 +257,7 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
    - 走 Data Reference 的表：說明如何用 `custom_data` JSONB 擴充、`app_domain` 標籤值
    - 走自建表且需要新建的：產出**建表規格表**
      `| 表顯示名 | 欄位顯示名 | 型別 | 必填 | 唯一 | relation 目標 |`
-   - 若決定使用的 SaaS 表尚未被引用（以 `GET /api/v1/refs/apps/{app_id}` 為準，不是 db.json），
+   - 若決定使用的預設表尚未被引用（以 `GET /api/v1/refs/apps/{app_id}` 為準，不是 db.json），
      引導用戶到 Builder 後台加入 Data Reference
 
 4. **頁面架構**
@@ -295,7 +296,7 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
 
 5. **app_domain 標籤設計**
    - 確定此 App 的 `app_domain` 值（snake_case，如 `patent_os`、`crm_leads`）
-   - 說明標籤用途：所有寫入 SaaS 表的資料都會帶上此標籤
+   - 說明標籤用途：所有寫入預設表的資料都會帶上此標籤
 
 6. **現有系統遷移評估**（若適用）
 
@@ -354,16 +355,20 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
 
     | 資料性質 | 走哪一軌 | 理由 |
     |---------|---------|------|
-    | 要與 ERP／SaaS 既有功能連動（看板、專案、發票、客戶…） | **Data Reference** + `custom_data` + `app_domain` | 與平台功能共用同一份資料 |
+    | 要與平台既有功能連動（看板、專案、發票、客戶…） | **Data Reference**（原生欄位優先） | 與平台功能共用同一份資料 |
+    | 預設表缺「租戶級正式欄位」 | Data Reference 的**延伸欄位**（EAV） | 有型別、全租戶可見；讀寫走獨立端點（`data-center.md` §10） |
     | 租戶自有的新業務實體（外部系統遷入的表最常見） | **自建表** | 租戶級真實資料表，跨 app 共用 |
-    | 臨時、單一 app 私有、不值得建表 | SaaS 表的 `custom_data` JSONB | 免建表成本 |
+    | app 私有標記（`app_domain`）、臨時、鬆散、不值得定義欄位 | 預設表的 `custom_data` JSONB | 免定義成本 |
+
+    完整決策樹（表級 → 欄位級，直接開發與遷入同一棵）見
+    `references/custom-app-dev-guide.md` **§19（SSOT）**——與本表出入時以 §19 為準。
 
     - **自建表不是「最後手段」**——它是租戶級的真實 Postgres 表，200 張配額（付費檔），
       是遷入案例的主力承載體。
     - **既有表欄位不夠 ≠ 換軌或塞 json**：自建表可直接**加實體欄位**
-      （`data-center.md` §7）；SaaS 表本體不可改，但可加**延伸欄位**
+      （`data-center.md` §7）；預設表本體不可改，但可加**延伸欄位**
       （租戶級正式欄位，EAV，`data-center.md` §10）——`custom_data` 不是
-      SaaS 表唯一的擴充點，它留給 app 私有標記（`app_domain`）與鬆散暫時性擴充。
+      預設表唯一的擴充點，它留給 app 私有標記（`app_domain`）與鬆散暫時性擴充。
     - **建表前必須先 `GET /api/v1/data-center/tables` 盤點**（Phase 0 步驟 6）。
       語意相同的表已存在就重用，不要新建——自建表跨 app 共用，重複建表 = 資料分裂。
     - 建表需 `system.admin`。收到 **403 不重試、不繞路**：輸出可照抄的建表規格，
@@ -376,10 +381,10 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
     - 詳見 `references/data-center.md`
 
 19. **app_domain 標籤規範**（★ 強制，但**只限 Data Reference 那一軌**）
-    - **適用範圍**：只有寫入 SaaS 表（Data Reference）的資料需要 `app_domain`。
+    - **適用範圍**：只有寫入預設表（Data Reference）的資料需要 `app_domain`。
       **自建表不需要也不應該帶 `app_domain`**——自建表沒有 `custom_data` 欄位，
       而且「跨 app 共用」正是它的設計目的，用標籤隔離是反模式。
-    - 所有寫入 SaaS 表的資料，都必須在 `custom_data` JSONB 中包含 `app_domain` 欄位
+    - 所有寫入預設表的資料，都必須在 `custom_data` JSONB 中包含 `app_domain` 欄位
     - `app_domain` 值記錄在 `.aigo/config.json` 中，在 Phase 1.5 決定
     - 格式：snake_case，如 `patent_os`、`crm_leads`、`inventory_mgr`
     - 寫入範例：
@@ -434,7 +439,7 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
     - External App / 匿名渲染下 roles 與 permissions **恆為空陣列**，
       UI 要有合理的降級路徑（不要因為空陣列就整頁空白）
     - 詳見 `references/custom-app-dev-guide.md` §6「User Context」與 §7
-24. **SaaS 表寫入可能被簽核攔截**（★ 強制，只限 Data Reference 那一軌）
+24. **預設表寫入可能被簽核攔截**（★ 強制，只限 Data Reference 那一軌）
     - 租戶對該表設了簽核流程時：**insert 照樣寫入但回傳帶 `approval_status: "pending"`**；
       **update / remove 與 `ctx.erp.*` 完全不執行**，payload 暫存、Server Action 收到例外
     - `pending` **既不是成功也不是失敗**：UI 要顯示「已送簽核」，
@@ -443,7 +448,7 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
     - 要免寫後端就讓核准自動改狀態欄位；要做簽核 UI 用 `src/approval.ts` / `ctx.approval`
     - 詳見 `references/custom-app-dev-guide.md` §24
 25. **表沒有 `tenant_id` 不等於沒保護**（★ 強制）
-    - 查欄位時看到某張 SaaS 表**沒有** `tenant_id`（如 `msg_messages`、`announcement_reads`、
+    - 查欄位時看到某張預設表**沒有** `tenant_id`（如 `msg_messages`、`announcement_reads`、
       `ir_sequences`、`account_accounts`）**不是 bug**，租戶隔離也沒失效——
       邊界另有欄位別名（`company_id`）、父表歸屬（`EXISTS` 繞父表）、全域表（刻意不過濾）三種形態
     - **不要自己補 `WHERE tenant_id = ...`**：邊界由 DB Proxy 注入，
@@ -496,7 +501,7 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
 ```python
 def execute(ctx):
     # ctx.params — 前端傳入的參數（webhook / cron 事件也走這裡）
-    # ── Data Reference（SaaS 表）
+    # ── Data Reference（預設表）
     # ctx.db.query(table, limit=N) / ctx.db.insert(table, data)
     # ctx.db.update(table, row_id, data) / ctx.db.remove(table, row_id)
     # ── 自建表
@@ -596,7 +601,7 @@ if (file) downloadFile(file);
 | ❌ Publish 一致性失敗 | 重新 sync → compile → publish |
 
 > 任何一項失敗 → 先查 `references/troubleshooting.md` 對症狀，再動手改。
-> ⚠️ CRUD 驗證打 SaaS 表時，回傳 `approval_status: "pending"` 或「需要簽核審批」例外
+> ⚠️ CRUD 驗證打預設表時，回傳 `approval_status: "pending"` 或「需要簽核審批」例外
 > **不算驗證失敗**——那是租戶簽核流程攔截（核心規則 24），不要當成 bug 去改程式。
 
 ### 4.4 發布
@@ -697,7 +702,7 @@ uv run python scripts/report_issue.py submit "一句話標題" \
 
 | 檔案 | 內容 |
 |------|------|
-| `CONTEXT.md` | ★ 術語表——自建表／CustomObject／Data Reference／app_domain |
+| `CONTEXT.md` | ★ 術語表——預設表／自建表兩大類＋四個機制詞（含稱謂對照：舊稱 SaaS 表已停用） |
 | `references/custom-app-dev-guide.md` | 核心 API 規格與架構理念 |
 | `references/data-center.md` | 自建表完整規格（型別、配額、權限、SDK）＋ ERP 延伸欄位（§10） |
 | `references/event-triggers.md` | Webhook 與 App 排程（冪等要求、宣告、限制） |

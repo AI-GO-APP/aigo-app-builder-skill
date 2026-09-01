@@ -4,6 +4,41 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.15.0
+
+### 資料承載體總決策 SSOT（dev-guide §19 重寫）＋ 延伸欄位 prod 實測
+
+分流指引原本散在規則 18／§19／§22.1／migration-workflow §2.4 各處，各自演化有
+drift 風險。本版收斂為單一權威：
+
+- **§19 改寫為「資料承載體總決策（SSOT）」**：一棵決策樹（表級 → 欄位級）涵蓋
+  四種承載體——SaaS 原生欄位／延伸欄位（EAV）／`custom_data`／自建表（重用加欄或新建）
+  ——並明訂「**直接開發與現有應用遷入用同一棵樹**，遷入不放寬任何判定」；
+  新增入口情景對照（直接開發／Custom 遷入／Hosted 遷入——分流結果相同，
+  Hosted 只是存取改走 Open Proxy）與禁止項（CustomObject、app 內自建使用者表）
+- 其他決策點全部改為 §19 的投影並標注「出入時以 §19 為準」：
+  SKILL.md 規則 18 的表擴成四行（補延伸欄位與 custom_data 定位）、
+  migration-workflow §2.4 開頭指回同一棵樹
+- **CONTEXT.md 術語表四個詞 → 五個詞**：新增「延伸欄位」條目
+  （不是實體欄位也不是 custom_data；⚠️ ERP 既有 CRUD 不回傳其值）
+- **延伸欄位 prod 唯讀實測通過**（2026-09-01）：`GET /ext-fields/{erpKey}` 200 `[]`、
+  `batch-get` 對不存在 row 回 200 `{}`（「缺值不回填」同步證實）——
+  §10 的「未實測」註記升級為實測結果，寫入面仍標注未驗證
+
+### 稱謂盤點：「SaaS 表」全面停用，改用官方分類「預設表」
+
+平台的表官方只有**預設表／自建表**兩大類；「SaaS 表」是本 skill 自創行話、
+「ERP 表」是平台 code 內部命名，兩者都不該對用戶使用。全庫（9 檔、70+ 處）統一：
+
+- 「SaaS 表」「ERP／SaaS 表」→ **預設表**；描述功能連動的「ERP／SaaS 功能」→
+  「平台既有功能」；prose 的「ERP 表」→ 預設表（API 參數 `erp_table_key`／`{erpKey}`
+  等技術識別名**保留原樣**）
+- CONTEXT.md 升級：開頭明訂「表只有兩大類」，新增「預設表」條目與**稱謂對照表**
+  （正式稱謂 vs 平台內部 erp 命名 vs Builder UI「現有資料表」vs 已停用舊稱 SaaS 表）；
+  延伸欄位條目一併修訂
+- 六個術語：預設表／自建表（兩大類）＋ CustomObject／Data Reference／延伸欄位／
+  app_domain（機制詞，不是第三類表）
+
 ## 1.14.0
 
 ### 遷入情景補強：前+後+DB 整套專案搬入 AI GO 的完整引導
