@@ -70,6 +70,32 @@ queryAdvanced(table, {
 })
 ```
 
+### 1.5 兩個資料平面的過濾契約不同（★ 同名 `filters`、兩套鍵名，寫錯不一定報錯）
+
+> 2026-09-02 實測（租戶 tli1956；proxy 面經 Custom App `/proxy/{app}/...` 與 Hosted 容器內
+> `/open/proxy/...` 兩路確認）＋原始碼核對（`app_data_proxy._build_filter_clause`、
+> `data_center/query_builder._build_filters`）。
+
+| | 自建表 records 平面 | 預設表 proxy 平面 |
+|---|---|---|
+| 端點 | `GET /data-center/tables/{key}/records`（`ctx.db.query_table`／`queryTable`；Hosted 容器內加 `/open`） | `POST /proxy/{app}/{table}/query`（`queryAdvanced`；Hosted 容器內 `/open/proxy/{table}/query`） |
+| 過濾位置 | query string `filters=[…]` | body `filters: […]` |
+| 項目鍵名 | `field` / `op` / `value` | **`column`** / `op` / `value` |
+| 合法運算子 | `eq` `contains` `gte` `lte`（依欄位型別再限縮：text 只有 eq/contains） | `eq` `ne` `gt` `gte` `lt` `lte` `like` `ilike` **`in`** `is_null` `is_not_null` |
+| **`in`** | ❌ | ✅ |
+| OR | ❌ | ❌ |
+| 不合法運算子 | **422 列出合法集合** | 400「不支援的運算子」 |
+| 錯鍵名 | 422「需要 field/op/value 三個鍵」 | 400「不合法的欄位名稱: 」（欄位名是空字串） |
+| **不合法過濾形狀** | 422 | **200 回整表（靜默）**——`where`、`filter`、`conditions`、`{k: v}` 任何形狀都不生效 |
+| 回傳 | `{items, total, page, page_size}` | 裸陣列、上限 500、無 total（§1.1） |
+| 排序 | 單欄 `sort` | 多欄 `order_by`，必帶唯一鍵（§1.2） |
+
+- **最危險的一格是 proxy 的靜默整表**：「找 contacted 階段」查成「整表第一列」不會有任何訊號，
+  下游就在錯的列上寫資料。proxy 查詢寫完先用一個必然不存在的值打一次，回整表就是形狀錯
+- `not_in`、`neq`、`!=`、`equals`、`contains`、`between` 在 proxy 面都是 400——`contains` 是 records 面的字
+- records 面 `gte`／`lte` 對 `date`／`datetime` 的字串值：主線已修（`_encode_filter_value`），
+  prod 是否跟上未驗證，撞到 500 `DataError` 先懷疑部署落差
+
 ---
 
 ## 2. 寫入 TIMESTAMP 欄位：不可帶時區（★ 帶 `Z` 一律 500）

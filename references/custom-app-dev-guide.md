@@ -506,7 +506,9 @@ SKILL.md 規則 18、§22 遷移映射、`migration-workflow.md` §2.4 的分流
 | 租戶已有語意相同的自建表 | **重用該自建表** | 自建表跨 app 共用，重複建 = 資料分裂 |
 | 重用的自建表缺欄位 | **加實體欄位** | `data-center.md` §7；不要另建表或塞 json |
 | 租戶自有的新業務實體（外部系統遷入的主力） | **自建表** | 真實資料表、真外鍵、200 張配額 |
-| 需要真正的關聯完整性（刪除被引用列要被擋） | **自建表** | relation → 自建表會建真 FK |
+| 需要真正的關聯完整性（刪除被引用列要被擋） | **自建表** | relation → 自建表會建真 FK（但**沒有 cascade**，`data-center.md` §3） |
+| 需要唯一約束／冪等寫入／併發防線 | **自建表 unique 欄** | 預設表**沒有**唯一約束可用；需要冪等的預設表寫入要先在自建表搶錨點（§23.9） |
+| 自建表要指回預設表實體（遷入案的 `user_id` 等） | **`text` 存 UUID** | relation → 預設表只有部分表可用、無法事先查（`data-center.md` §3）；規劃時一律當不支援 |
 | 預設表缺「租戶級正式欄位」 | **延伸欄位** | EAV overlay；讀寫走獨立端點（`data-center.md` §10） |
 | app 私有標記、臨時、鬆散、不值得定義欄位 | **預設表 `custom_data`** | 免定義成本；`app_domain` 恆在此 |
 
@@ -614,6 +616,44 @@ Authorization: Bearer {access_token}
 | `type` | 資料型別（UUID, VARCHAR, TEXT, INTEGER, BOOLEAN, NUMERIC, JSONB, DATE, TIMESTAMP 等） |
 | `nullable` | 是否可為 NULL |
 | `is_system` | 是否為系統欄位（id, tenant_id, created_at, updated_at 等，不可手動寫入） |
+
+> ⚠️ **這四個鍵就是全部——帶 CHECK 約束的欄位其合法值域從這裡看不到**（2026-09-02 實測）。
+> 照 `type: VARCHAR` 填語意合理的值（`customer_type: "person"`）會直接 **500**
+> `CheckViolationError`，回應是資料庫例外原文，不指出欄位也不列合法值。
+> 值域來源有兩個，規劃匯入 payload 時**先查再寫**，不要對正式租戶試寫：
+>
+> 1. **Meta API** `GET /api/v1/data-center/meta/tables/{key}`（登入即可）——回傳 `FieldDef`，
+>    select 型欄位帶 `options`（主線 53 個欄位有標註，含 `customers.customer_type`）。
+>    ⚠️ 核自原始碼，**prod 是否已部署未驗證**，404 依部署落差原則處理
+> 2. 下表——從平台原始碼 `backend/app/models` 的 `CheckConstraint` 整理（2026-09-01 main），
+>    Meta API 打不到時用這張
+
+#### 20.2.1 常用預設表的 CHECK 值域（核自原始碼；`customer_type` 兩值已 prod 實測 201）
+
+| 表 | 欄位 | 合法值 |
+|---|---|---|
+| `customers` | `customer_type`（必填） | `company`（配 `is_company=true`）／`individual` |
+| `customers` | `status` | `active`／`suspended` |
+| `sale_orders` | `state` | `draft`／`sent`／`sale`／`done`／`cancel` |
+| `sale_orders`、`sale_order_lines` | `invoice_status`（可空） | `no`／`to_invoice`／`invoiced` |
+| `sale_order_lines` | `display_type`（可空） | `line_section`／`line_note` |
+| `product_templates` | `type` | `consu`／`service`／`combo` |
+| `product_templates` | `invoice_policy`（可空） | `order`／`delivery` |
+| `product_templates` | `service_type`（可空） | `manual`／`timesheet` |
+| `product_templates` | `expense_policy`（可空） | `no`／`cost`／`sales_price` |
+| `account_payments` | `payment_type` | `inbound`／`outbound` |
+| `account_payments` | `partner_type`（可空） | `customer`／`supplier` |
+| `account_payments` | `state` | `draft`／`posted`／`cancel`／`reconciled` |
+| `crm_leads` | `type` | `lead`／`opportunity` |
+| `crm_leads` | `priority` | `'0'`／`'1'`／`'2'`／`'3'`（字串） |
+| `crm_activities` | `activity_type` | `email`／`call`／`meeting`／`todo` |
+| `crm_activities` | `state` | `planned`／`done`／`overdue`／`cancelled` |
+| `hr_leaves` | `state` | `draft`／`confirm`／`refuse`／`validate1`／`validate`／`cancel` |
+| `hr_expenses` | `state` | `draft`／`reported`／`approved`／`done`／`refused` |
+| `hr_expense_sheets` | `state` | `draft`／`submit`／`approve`／`post`／`done`／`cancel` |
+
+不在表上的欄位：先打 Meta API；再不行，把該欄留空或填 `draft` 一類最保守的值先建列，
+值域確認後再 PATCH——**不要**在正式租戶用試寫法窮舉。
 
 > 上面的回應範例是 `customers` 這類「自帶 `tenant_id`」的表。**不是每張表都有 `tenant_id`**，
 > 缺了也不代表沒保護——見 §20.3。
@@ -941,7 +981,9 @@ def execute(ctx):
 | ENUM / CHECK IN (...) | `select` | 正好對應——必須提供選項集，值受 CHECK 約束 |
 | JSON / JSONB | `json` | |
 | ARRAY | `json` | 存成 JSON 陣列 |
-| 外鍵欄位 | `relation` | 目標是自建表 → 真 FK；目標是預設表 → 軟關聯（§22.3） |
+| 外鍵欄位 → 自建表 | `relation` | 真 FK，但**沒有 cascade**——原本 `onDelete: cascade` 的鏈要由葉到根手刪（`data-center.md` §3） |
+| 外鍵欄位 → 預設表 | **`text`**（存 UUID） | `relation` + `target_erp_key` 只有部分表可解析、無法事先查（`data-center.md` §3）；規劃時一律當不支援，建表規格標「可升級」 |
+| 複合主鍵／`ON CONFLICT`／partial unique index／業務 slug 主鍵 | `legacy_id`（`text`, unique） | 全部改成「決定性字串塞進唯一欄」＋ 409 當 compare-and-set，見 §23.9 |
 | 圖片 / 附件 URL | `image` 或 `text` | `image` 存 storage key（`data-center.md` §6）——外部檔案要先下載、重新上傳 Storage、再存 key；不遷檔案就用 `text` 暫存外部 URL，並向用戶說明原站關閉後連結會失效 |
 | 自增 ID | 不遷 | UUID 自動生成，走 §23.3 的 ID 映射 |
 | 複合唯一鍵 / 跨欄 CHECK / DEFAULT 運算 | 無對應 | 約束上移：匯入與後續寫入都經同一支 Server Action，在 action 內檢查 |
@@ -969,6 +1011,50 @@ def execute(ctx):
 - 延伸欄位定義（建欄）需 `datacenter.schema_write`：匯入前先確認欄位已建好
   （`GET /ext-fields/{erpKey}`），缺欄請有權限者先建，匯入腳本不要動結構
 - 匯入順序不可反過來：延伸值掛在 row id 上，主列不存在時寫值必失敗
+
+### 23.9 沒有交易、沒有 JOIN、沒有條件式 UPDATE 時怎麼寫（★ 遷入案的資料層改寫指引）
+
+> 2026-09-02 一個 56 表、Tier 3（金流／預約／訂閱）系統遷入 AI GO 時收斂的做法，
+> 45 張表、35 支資料模組上實作並線上端到端驗證。Custom App（`ctx.db`）與 Hosted App
+> （Open Proxy）同適用。這些不是平台缺陷，是**能力邊界**——遷入案第一個撞到的就是它們。
+
+**唯一的伺服器端原語：自建表單欄 unique 的 409**（`data-center.md` §3）。封裝成
+`claim(table, data) → {won: true, row} | {won: false}`，呼叫端把 `won` 當控制流、不當例外。
+預設表**沒有**這個原語（`customers.ref` 無唯一約束），需要冪等的預設表寫入先在自建表搶錨點：
+
+```
+1. claim(user_identity_map, legacy_id = 外部 member_id)     ← 唯一的併發防線
+     201 → 由我建 customers 列，回寫 customer_id 到錨點
+     409 → 讀錨點列拿 customer_id
+2. 錨點在、customer_id 為空（前次中途失敗）→ 補完
+```
+
+| 原本的 SQL 機制 | 對應寫法 |
+|---|---|
+| 複合主鍵 `(a, b)` | `legacy_id = "{a}:{b}"` |
+| `INSERT … ON CONFLICT DO NOTHING` | 逐列 INSERT，201 = 新增、409 = 已存在 |
+| `INSERT … ON CONFLICT DO UPDATE`（upsert） | INSERT，409 則查既有列再 PATCH |
+| partial unique index（同人同時段只能一筆 confirmed） | `legacy_id = "{slot}:{user}"`，取消時改寫或刪列 |
+| 業務 slug 主鍵（`courses.id = 'chinese-a1'`） | slug 存 `legacy_id`，對外 id 一律回 `legacy_id` |
+| 批次建立去重（原靠 advisory lock） | 自然鍵寫進目標表的 unique 欄（`"batch:{kind}|{date}|{start}"`），409 = 略過 |
+| 條件式 `UPDATE … WHERE state=?`（樂觀鎖） | 沒有。目標表加 `version` 數字欄＋一張 `xxx_versions` 自建表，`legacy_id = "{id}:v{n+1}"`：讀當前 → claim 版本列（409 = 有人同時改）→ PATCH 目標列含新 version。寫入方把 version 放進自己的唯一鍵，寫完重讀比對，不同就自刪 |
+| advisory lock | 租約鎖表 `app_locks{legacy_id U, expires_at}`：acquire = claim；409 時讀既有列，過期就刪掉重試一次；仍拿不到回「忙碌」讓呼叫端重送 |
+| 計數器（座位數、點數餘額） | **每格一列**：`slot_seat_claims."{slot}#v{ver}#{seat}"`（seat 0..capacity-1，隨機起點掃）、`credit_ledger."{grant}#{seq}"`。超賣在結構上不可能；`booked_count` 變成認領後重算的衍生值；取消 = 刪列 |
+| 交易（webhook 履約多步驟） | **決定性唯一鍵＋inbox 兩階段**：先 claim `webhook_events{legacy_id=event_id, status='received'}`（409 且既有列 done → 直接 ACK；409 且仍 received → 上次中途失敗，重跑）；每個副作用各自用可重算的 legacy_id claim（`orders="session:{id}"`、`unlocks="{user}:{type}:{item}"`），全部做完才 PATCH done。沒有 rollback，但任一步崩潰都可重送重跑而不重複發權益；要讓上游重送就把 inbox 列刪掉 |
+
+**JOIN 的替代**（兩平面的過濾契約見 `platform-behaviors.md` §1.5）：
+
+| 情境 | 做法 |
+|---|---|
+| 自建表 → 預設表（`bookings.user_id` → `customers`） | 撈完自建表列，對預設表 proxy 用 **`in`** 一次取回 |
+| 預設表 → 自建表 | records 面沒有 `in`：改自建表側 `eq` 逐筆，或**寫入時反正規化**到自建表 |
+| 自建表 ↔ 自建表 | **從過濾條件最強的一側出發**（kind／日期區間／`contains`），再逐筆點查另一側；量級限「單一使用者／單一目標」時可接受 |
+| 小表 | 整表撈回程序內 join；**一個請求範圍內**用 Loader（`Map<table, Promise<rows[]>>`）避免同表重撈。**不做跨請求快取**——Hosted App 可能兩個副本，無法互相失效，後台寫完立刻讀回會看到舊資料 |
+| 聚合（`count(*)`／`GROUP BY`） | 讀分頁信封的 `total`，每個分組一次請求；量大改物化。三支 `GROUP BY` 改寫後是每位成員 3 次 `total`（3N 請求）：數十可接受，破百就該在寫入端反正規化組織 id——**反正規化在這個平台不是最佳化，是必需** |
+| 模糊搜尋 | 預設表 `ilike`；自建表 `contains`（每欄一次，沒有 OR，「姓名或 email」= 兩次請求後合併）；跨表撈回後用戶端 `includes` |
+
+一次預約實測約 4–6 次請求。兩套資料層實作（原 DB／AI GO）並存逐模組切換時，
+route 用 `instanceof` 判斷的業務錯誤類別必須是**同一個物件**，各自宣告會讓 4xx 全變 500。
 
 ## 24. 簽核工作流攔截（Approval）
 
