@@ -61,8 +61,14 @@ git clone https://github.com/AI-GO-APP/aigo-app-builder-skill.git .claude/skills
 
 Skill 內含版本標記（`VERSION`）與更新檢查腳本（`scripts/check_update.py`），
 比對本地與 GitHub 上的 `VERSION`，有新版才提示。腳本零相依（只用 Python 標準函式庫、
-不經 uv），離線或逾時一律靜默略過，預設 24 小時內只檢查一次
-（狀態存在 `~/.aigo/update_check.json`）。
+不經 uv），離線或逾時一律靜默略過。節流 3 小時：遠端版本抓一次後快取
+（狀態存在 `~/.aigo/update_check.json`），同一組版本差 3 小時內只提示一次；
+**版本比對每次都做**，不受節流影響。
+
+**多安裝同步**：本機每份安裝執行檢查時會把自身路徑登記進共用狀態檔，
+累積成安裝清單。任一安裝偵測到新版時會列出其他落後的已註冊安裝，並提供
+`--apply-all` 一次更新所有 git 安裝（複製式安裝只列指令不代動）。
+限制：只認得「至少跑過一次檢查」的安裝——從未在任何 session 觸發過的副本無從發現。
 
 **任何 agent 都適用（預設）**：`SKILL.md` 的 Phase -1 會在每次 Skill 觸發時執行檢查，
 有新版時由 AI 告知你並詢問是否更新。缺點是 `SKILL.md` 已載入 context，更新後需重新讀取
@@ -79,14 +85,15 @@ Skill 內含版本標記（`VERSION`）與更新檢查腳本（`scripts/check_up
 手動檢查與更新：
 
 ```bash
-python scripts/check_update.py --force   # 忽略節流立即檢查（macOS/Linux 用 python3）
-python scripts/check_update.py --json    # 機器可讀輸出
-python scripts/check_update.py --apply   # git 安裝：就地 pull --ff-only
+python scripts/check_update.py --force      # 忽略節流立即檢查（macOS/Linux 用 python3）
+python scripts/check_update.py --json       # 機器可讀輸出
+python scripts/check_update.py --apply      # git 安裝：就地 pull --ff-only（僅本安裝）
+python scripts/check_update.py --apply-all  # 更新註冊表裡所有落後的 git 安裝
 ```
 
-`--apply` 只在 skill 目錄是 git repo 時才會實際更新；用 `npx skills add` 安裝的複製式安裝
+`--apply`／`--apply-all` 只對 git 安裝實際更新；用 `npx skills add` 安裝的複製式安裝
 會印出 `npx skills update` 讓你自己執行。任一情況都**不會**覆寫你的本地修改
-（`--ff-only` 遇到分岔會直接失敗）。
+（`--ff-only` 遇到分岔或髒工作區會直接失敗）。
 
 > 維護者注意：改動 Skill 內容後要同步 bump `VERSION` 並在 `CHANGELOG.md` 補一節，
 > 否則使用者端不會收到更新提示。
