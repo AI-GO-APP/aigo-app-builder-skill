@@ -258,8 +258,10 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
      租戶資料 → Custom App，繼續本流程
    - **判斷（遷入情景，既有系統／整套專案要搬進來）→ 一律先走
      `references/migration-workflow.md` §2.0 的 stack 盤點＋§2.1 的三向決策**：
-     stack 形狀給預設走向（純前端 → 1..n Custom App；有後端且可改寫成
-     Server Action → 仍 Custom App；有後端且整搬 → 1..n Hosted App），
+     stack 形狀×面向給預設走向（純前端的**應用介面** → 1..n Custom App；
+     純前端的**公開 web 資產**（官網／電商 storefront，要自有網域與 SEO）→
+     Hosted App；有後端且可改寫成 Server Action → 仍 Custom App；
+     有後端且整搬 → 1..n Hosted App），
      再問「原系統的登入使用者是誰」定 internal / external——
      **access_mode 建立後不可改，選錯要砍掉重建**，這一步不能靠預設值帶過
    - ⚠️ **「Hosted = 整套搬」指的是程式，不是資料**：不論哪條產品線，

@@ -327,6 +327,11 @@ POST /api/v1/members
 
 ## 15. 匿名存取 API（/pub/* 端點）
 
+> **定位**：`/pub` 適合 external app 的**少數公開頁**（對外表單、查詢頁、
+> 分享檢視），**不適合承載整個公開站**——官網、電商 storefront 這類
+> 「公開 web 資產」需要自有網域與 SEO，該走 Hosted App
+> （`migration-workflow.md` §2.1 問題二的面向分流）。
+
 啟用條件：`allow_anonymous_access=true` + `is_public_readable=true`
 
 - GET `/api/v1/pub/data/{slug}/objects`

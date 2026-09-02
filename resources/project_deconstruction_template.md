@@ -11,6 +11,7 @@
 | 系統名稱 | |
 | 技術棧（前端 / 後端 / DB） | |
 | stack 形狀結論（§2.0） | 純前端 / 有後端、可改寫 / 有後端、整搬 |
+| 前端面向（§2.0） | 應用介面 / 公開 web 資產（官網、電商 storefront） |
 | 產品線判斷結果（§2.1） | Custom App internal / Custom App external / Hosted App |
 | 對應 AI GO App | |
 
