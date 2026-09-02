@@ -14,6 +14,11 @@
   `runtime-settings` 回應**沒有** `env_availability`／`persistent_disk` 欄位
   ——env 執行期/建置期標記、持久碟、以及 §2.8 之後的多數新功能（網域、檔案／終端、
   記錄工具、複製、圖示）在 prod 生效與否**未逐項驗證**，使用前先打一次確認
+- ❌ **2026-09-02 追加實測仍 404**：`POST /{id}/restart`、`POST /{id}/redeploy`、
+  `POST /{id}/logs/interpret`（§11 表列為可用，主線原始碼確有，prod 未跟上）。
+  需要「讓新設定生效」時**等傳播**（§4），需要「重跑建置」時**重新上傳**（§3.2）
+- ✅ 2026-09-02 實測可用：`/open/data-center/*`（自建表記錄面，§5）、
+  `GET|POST /api/v1/refs/apps/{整合 id}`（預設表引用，§5）
 - **判讀原則**：對著本檔宣稱的端點拿到 404 或回應缺欄位，**先懷疑部署落差**，
   不是文件錯也不是你打錯——隔幾天再試或問平台
 
@@ -46,14 +51,36 @@
 | 規則 | 違反時的症狀 |
 |---|---|
 | **只能有單一 HTTP port**（Dockerfile 也只能一個 `EXPOSE`） | precheck 警告＋rollout 失敗 |
-| **監聽 `$PORT`（平台注入）且綁 `0.0.0.0`** | `connection refused`／readiness probe 失敗 |
+| **監聽 `$PORT`（平台注入）且綁 `0.0.0.0`**——★ 看的是**框架實際綁的介面**，不是有沒有讀 `$PORT`（見下） | `connection refused`／readiness probe 失敗／**ksvc ready 逾時但 runtime-logs 顯示已就緒** |
 | **單一前台行程**——不可 supervisord／pm2／compose 多服務／Procfile worker | precheck `daemon` Issue |
 | **必須提交 lockfile**（go.sum／pnpm-lock.yaml…） | `missing go.sum`／`ERR_PNPM_NO_LOCKFILE` |
-| 建置包絡 **2 CPU / 4 GiB**、預設 900 秒 | `OOMKilled`／`exit code 137`／timeout |
+| 建置包絡 **2 CPU / 4 GiB**、預設 900 秒——★ 建置工具會依 CPU 數開多個 worker 各占一份 heap，4 GiB 不寬裕 | `OOMKilled`／`exit code 137`／timeout；**容器級 OOM 時日誌可能全空**（§8） |
 | 不可是 monorepo／空目錄；無法辨識的目錄會 fallback 成 static 站 | precheck Issue／部署出來是靜態檔 |
 
 - 執行資源：單 app limits 約 **800m CPU / 1.6 GiB**；容器內可 root（隔離靠 gVisor）
 - 建置時可連的公網來源是**白名單**（npm/PyPI/Docker Hub 等）——私有 registry 會被擋
+
+**★ 綁定介面陷阱（2026-09-02 實測，Next.js 16 standalone）**：k8s 會把容器的
+`HOSTNAME` 設成 pod 名稱，而**以 `process.env.HOSTNAME` 決定 bind 位址的框架**
+（Next standalone 的 `server.js` 是其一）就只綁 pod IP、不綁 loopback——
+Knative queue-proxy 從 127.0.0.1 探測連不上。症狀是**競態不是必現**
+（同一份碼 1 次成功後連 3 次失敗），且平台錯誤訊息把方向指向「未聽 PORT」——
+PORT 其實有聽。判讀與處置：
+
+- runtime-logs 印出 `Local: http://<pod 名稱>:8080` 而不是 `0.0.0.0` → 就是這個問題；
+  pod `Running`、框架顯示 Ready、但整段生命週期**沒有任何請求進來** = 探針連不上，不是 app 掛
+- 處置：Dockerfile runner 階段加 `ENV HOSTNAME=0.0.0.0`（加上後連續 7 次部署穩定）；
+  手寫服務一律 `listen(port, "0.0.0.0")`
+- **後遺症**：綁 `0.0.0.0` 後 Next 從 request 推算的 origin 會變成 `https://0.0.0.0:8080`，
+  凡是用「本次請求 origin」組絕對網址的地方（OAuth `redirect_uri`、`redirect(origin + …)`、
+  金流 success/cancel URL、通知信連結）都會導錯。**對外網址一律由 env（如 `APP_URL`）指定，
+  不從 request 推算**——放進 §4 的遷入 env 清單
+
+**★ 建置記憶體陷阱（同日實測）**：Next 依 CPU 數開 static-generation worker，
+2 CPU 就兩份 heap；限制成單 worker（`experimental.cpus: 1`、`workerThreads: false`）
+並把 `NODE_OPTIONS=--max-old-space-size` 設在包絡的 **60–65%（4 GiB → 約 2560）**
+才穩定——**設太高反而變成無日誌的容器級 OOM**（V8 heap 之外還有原生記憶體與 worker；
+3072 在程式碼長大後就爆，降到 2560 即過）。其他框架依同一原理處理。
 
 ## 3. 部署
 
@@ -82,9 +109,15 @@ POST {deployd_upload_url}  (原始碼 tarball + upload_token)
 
 - **redeploy**（`POST /{id}/redeploy`）＝重跑**最後一次成功上傳**的原始碼，不需重傳；
   沒有可重跑的來源回 409
-- **restart**（`POST /{id}/restart`）不重建映像
-- **設定變更（env／持久碟）立即生效**，不重建、不耗建置資源
+- **restart**（`POST /{id}/restart`）不重建映像（⚠️ prod 2026-09-02 仍 404，見檔頭）
+- **設定變更（env／持久碟）不重建、不耗建置資源，但不是瞬間生效**：平台對現行版次重送
+  spec，新 revision 接手需**數分鐘**（實測 1–6 分鐘）。在延遲窗內驗證會誤判成「沒生效」，
+  接著做不必要的重建——先等，別急著重新上傳（§4 有判讀方式）
+- **無日誌失敗先原樣重送一次**：同一份 tarball 有「約 100 秒就 failed、日誌空、重送即好」
+  的偶發型（2026-09-02 實測 3 例）。第二次仍失敗再開始查自己的 Dockerfile（§8）
 - 重複部署**網址不變**（slug 不變）
+- **rollout 失敗期間對外仍是舊 revision**，平台不顯示「目前服務的是哪一版」——
+  驗證新版時在回應加 version marker，別把舊版行為當成新版的 bug（2026-09-02 曾因此誤判）
 - 部署建議走 CLI（§3.3）；REST 流程留給 CLI 裝不了的環境
 
 ### 3.3 CLI（`aigo`，建議的部署路徑）
@@ -129,6 +162,26 @@ curl -fsSL https://raw.githubusercontent.com/AI-GO-APP/aigo-cli-releases/main/in
 - 🚨 **`PUT /runtime-settings` 是全量替換不是 merge**：省略 `env_vars`＝清空、
   省略 `always_on`＝關、省略 `persistent_disk`＝卸掛——
   **四欄（env_vars／env_availability／always_on／persistent_disk）一律一起送**
+- **`apply_state` 的正確讀法**（核自原始碼 schema 註解＋2026-09-02 實測）：只在 **PUT 回應**帶回，
+  `GET` 恆為 `null`（不是退回去了）。`applied` 只表示「spec 已送達、現行版次已重送」，
+  **不保證容器已換版**——PUT 走 `wait_ready=false`。要確認是否傳播完成，唯一可靠方法是
+  **從 app 內讀一個無害變數**（例如加一顆 `APP_BUILD_MARKER`）；用「移除變數」測比新增乾淨
+
+### ★ 遷入既有系統時要重新提供的 env 清單
+
+Hosted App 容器**只帶平台注入的 `AIGO_*`**，原系統的 env 一顆都不會自動過來。
+沒帶到的典型症狀是「頁面能開、登入後每個操作都 401／導去奇怪網址」——看起來像資料層或
+認證層壞了，其實只是 env 缺席。遷入計畫要逐顆列出並在 runtime-settings 重設：
+
+| 類別 | 例 | 沒帶到的症狀 |
+|---|---|---|
+| **對外網址** | `APP_URL`／`NEXT_PUBLIC_SITE_URL` | OAuth redirect、金流回跳、信件連結導到 `https://0.0.0.0:8080/...`（§2 綁定介面陷阱） |
+| session／簽章密鑰 | `SESSION_SECRET`／`JWT_SECRET`／`NEXTAUTH_SECRET` | 登入後全 401，或每次部署都把使用者登出 |
+| 第三方憑證 | OAuth client id/secret、金流 key、郵件服務 key | 對應功能 4xx／5xx |
+| 功能開關 | 逐模組切換資料後端的旗標 | 走錯後端 |
+
+- 密鑰類一律標 `runtime`，**不要標 `build`**（會進映像與建置日誌，見上）
+- 原系統的 `DATABASE_URL` 一類**不要**搬——資料層改走 Open Proxy（§7.1），直連在網路層不通
 
 ### 平台注入的六顆（不佔上限）
 
@@ -141,8 +194,27 @@ curl -fsSL https://raw.githubusercontent.com/AI-GO-APP/aigo-cli-releases/main/in
   不出現在任何 API 回應
 - 容器內：`Authorization: Bearer $AIGO_API_TOKEN` 打 `$AIGO_PLATFORM_API_URL/api/v1/open/...`
 - ⚠️ `AIGO_PLATFORM_API_URL` 是**叢集內部位址**——本機開發要改打公開租戶網域
-- ⚠️ **預設表零授權起步**：新 app 打任何 `/open/proxy/{table}` 都是 403，
-  要先在詳情頁「資料存取」tab 加引用並發布；資料中心自建表預設是整租戶可用
+- ★ **兩個資料平面都要加 `/open` 前綴**（2026-09-02 容器內實測；`open_data_center` router
+  核自原始碼）——`data-center.md` §7 速查表的路徑是**登入使用者 token 的平面**，
+  用 `AIGO_API_TOKEN` 照抄必 **401 `Invalid authentication token`**（訊息會把你導向憑證方向，
+  其實是路徑）：
+
+  | 資料 | 容器內路徑 | 契約 |
+  |---|---|---|
+  | 自建表 | `GET/POST /api/v1/open/data-center/tables/{key}/records`、`PATCH/DELETE .../records/{id}` | 與 `data-center.md` §7 同一套：query string `filters`（鍵 `field/op/value`）、分頁信封 `{items,total,page,page_size}`、POST body **必須包 `{"data": {...}}`** |
+  | 預設表 | `POST /api/v1/open/proxy/{table}/query`、`POST /api/v1/open/proxy/{table}` | proxy 契約：body `filters`（鍵 **`column`**`/op/value`）、裸陣列上限 500 |
+
+  兩平面的過濾契約**鍵名與運算子集合不同**、對錯誤形狀的反應相反——對照表見
+  `platform-behaviors.md` §1.5，遷入案的資料層改寫前先讀
+- ⚠️ **預設表零授權起步**：新 app 打任何 `/open/proxy/{table}` 都是 403
+  「App 未被授權存取表 'x'」——訊息裡的「App」指的是**隨附整合**，不是 hosted app。
+  加引用有兩條路：詳情頁「資料存取」tab；或 API
+  `POST /api/v1/refs/apps/{attached_integration_id}`（body `{table_name, columns[], permissions[]}`，
+  key 是**整合 id**——拿 hosted app id 打會 404「App 不存在」；整合 id 從詳情頁「資料存取」tab
+  或 `GET /api/v1/refs/apps/{id}` 試探取得）。此端點**不在 `/hosted-apps` 前綴下**，
+  Deploy Token 打不到，要登入 session（帳號有 `hosted_apps.deploy` 即可，不必 `builder.access`）。
+  2026-09-02 實測 17 張預設表 201 後容器內 403 隨即轉 200，**不需重新部署**。
+  資料中心自建表預設是整租戶可用，不用加引用
 - 憑證三動詞（session-only，**互不替代**）：`POST /{id}/credential/provision`（補建，冪等）
   ／`rotate`（輪替，新舊重疊 30 分鐘）／`revoke`（立即失效）
 
@@ -220,6 +292,13 @@ Hosted App 讓其他 App 打 HTTP 過去——這是明文禁止的反模式，�
 
 - **建置日誌**：`GET /{id}/deployments/{dep_id}/logs?after={cursor}`——只有 cursor 增量，
   **沒有** severity／時間篩選（UI 上那兩顆是停用佔位，別宣稱有）
+- ★ **建置 failed 但日誌全空**（`{"lines": [], "source": "none"}`，`failure_reason` 只有
+  「builder 未留下 termination message」；2026-09-02 實測多次）：主線 watcher 已能區分
+  OOMKilled／exit 137／無 termination message 三種，prod 目前只回最泛的那句。處置順序——
+  ① **原樣重送一次**（有偶發型，重送即好）；② 仍失敗 → 往**建置記憶體**查（§2 建置記憶體陷阱：
+  限制 worker 數、heap 設包絡的 60–65%）；③ 還是不明 → 三段對照各部署一次定位失敗點：
+  最小 Node 服務（無建置）→ 真實 `package.json` 只跑 `npm ci` 不 build → 完整專案。
+  日誌為空時檔頭的「先懷疑部署落差」原則不適用——這是使用者側建置失敗，只是沒訊息
 - **執行期日誌**：`GET /{id}/runtime-logs?tail=&since=&until=&severity=`
   （tail 1–1000 預設 200；`reason: scaled_to_zero` 也是 HTTP 200，不是錯誤）
 - **AI 解讀**：`POST /{id}/logs/interpret`——`source=build` 必帶 `deployment_id`
@@ -252,6 +331,10 @@ POST /{id}/domains/{domain_id}/verify   → pending_dns → pending_cert → act
 | 409（redeploy） | 沒有可重跑的成功上傳 | 走完整上傳流程 |
 | 403（session-only 端點） | 用了 Deploy Token 打 §11 標 ❌ 的端點 | 換登入 session，**不是 bug** |
 | 部署 failed | 看建置日誌＋失敗 stage（build/plan/rollout…） | 對照 §2 應用形狀規則 |
+| 部署 failed、日誌空、「builder 未留下 termination message」 | 偶發型或容器級 OOM | 先原樣重送；再失敗查建置記憶體（§8） |
+| 「Knative Service 未能就緒…ksvc ready 逾時（2m0s）」但 runtime-logs 顯示 Ready | 框架綁到 pod 名稱不綁 loopback | `ENV HOSTNAME=0.0.0.0`（§2 綁定介面陷阱）；訊息裡的「未聽 PORT」是錯方向 |
+| 容器內打 `/api/v1/data-center/...` 回 401 `Invalid authentication token` | 路徑少了 `/open` 前綴 | 改 `/api/v1/open/data-center/...`（§5），不是憑證問題 |
+| `/open/proxy/{table}` 403「App 未被授權存取表」 | 整合尚未引用該預設表 | `POST /refs/apps/{整合 id}` 或 UI 加引用（§5），立即生效 |
 
 ## 11. API 端點速查（前綴 `/api/v1/hosted-apps`）
 
@@ -260,16 +343,18 @@ POST /{id}/domains/{domain_id}/verify   → pending_dns → pending_cert → act
 | `GET /`／`GET /{id}` | ✅ |
 | `POST /`（建立）——session-only（ADR 0019，§3.1；固定 403 訊息） | ❌ |
 | `POST /{id}/deployments`／`GET .../deployments*`／`.../logs` | ✅ |
-| `POST /{id}/restart`／`GET /{id}/runtime-logs`／`POST /{id}/logs/interpret` | ✅ |
+| `POST /{id}/restart`／`GET /{id}/runtime-logs`／`POST /{id}/logs/interpret`（⚠️ restart／interpret prod 2026-09-02 仍 404） | ✅ |
 | `GET|PUT /{id}/runtime-settings`／`GET /{id}/resource-usage` | ✅ |
 | `GET /{id}/preview`／`POST /{id}/preview/capture` | ✅ |
-| `POST /{id}/redeploy`／`clone`／`PATCH /{id}`（改名）／`DELETE /{id}` | ❌ |
+| `POST /{id}/redeploy`（⚠️ prod 2026-09-02 仍 404）／`clone`／`PATCH /{id}`（改名）／`DELETE /{id}` | ❌ |
 | `POST|DELETE /{id}/icon`／`PUT /{id}/access-settings` | ❌ |
 | `/{id}/credential/{provision|rotate|revoke}` | ❌ |
 | `/{id}/domains*`／`/{id}/ports*` | ❌ |
 | `/{id}/files*`／`/{id}/console/*`（含 WS 終端） | ❌ |
 
 另有：`/api/v1/hosted-app-gateways`（多 app 共用 hostname 的 path 路由）、
-`/api/v1/deploy-tokens`、`POST /api/v1/hosted-app-session/handoff`（交遞，Token 不可用）。
+`/api/v1/deploy-tokens`、`POST /api/v1/hosted-app-session/handoff`（交遞，Token 不可用）、
+`GET|POST /api/v1/refs/apps/{attached_integration_id}`（預設表引用，§5；不在前綴下，
+Deploy Token 的路徑白名單只認 `/hosted-apps` 前綴，**要登入 session**）。
 邀請成員直達 hosted app：`redirect_url` 白名單含 `/hosted-app-handoff/{slug}`
 （→ `custom-app-dev-guide.md` §14.1）。

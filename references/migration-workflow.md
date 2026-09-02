@@ -190,7 +190,15 @@
   - 租戶已有語意相同的自建表 → 直接重用；**欄位不足 → 加實體欄位**
     （`data-center.md` §7 加欄），不要因缺欄就新建表或把結構化欄位塞進 json
 - 欄位型別對不上時，查降級對照表（`custom-app-dev-guide.md` §23.7）
-- 處理外部表之間的外鍵 / 關聯（AI GO 需用 ID 欄位 + 程式邏輯維護參照完整性）
+- 處理外部表之間的外鍵 / 關聯（AI GO 需用 ID 欄位 + 程式邏輯維護參照完整性）：
+  - 指向**預設表**的外鍵（遷入案的 `user_id` → `customers` 等）**一律映射成 `text` 存 UUID**——
+    `relation → 預設表` 只有部分表可解析、無法事先查，在第三張表才撞到 422 會回頭重建
+    （`data-center.md` §3）
+  - 複合主鍵／`ON CONFLICT`／partial unique／advisory lock／`UPDATE … WHERE` 全部在映射表
+    改寫成 `legacy_id`(unique) + 409 的模式，JOIN 改成兩平面的過濾組合——
+    做法表見 `custom-app-dev-guide.md` §23.9，**在映射階段就決定**，不留到改寫程式時才發現
+  - 預設表的 CHECK 值域從 columns 端點看不到——映射表的「AI GO 欄位」欄先照
+    `custom-app-dev-guide.md` §20.2.1 的值域表對齊，不要對正式租戶試寫
 - 產出「外部 Schema ↔ AI GO 映射表」（模板見 `resources/migration_mapping_template.md`）
 - 若有 §1 的全景表，映射須與全景表的合併 / 分離決策一致
 - 詳見 `references/custom-app-dev-guide.md` §22

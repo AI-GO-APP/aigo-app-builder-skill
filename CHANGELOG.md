@@ -4,6 +4,42 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.21.0
+
+### Hosted App 遷入實戰回填：綁定介面、無日誌建置失敗、`/open` 雙平面、relation 限制、預設表值域
+
+來源：2026-09-02 一個 Next.js 16 ＋ 56 表 Tier 3 系統整套遷入 Hosted App 的實測
+（repo issue #25–#31），逐條對平台原始碼核對後收錄。平台側缺陷（500 而非 422、
+OOM 無日誌、rollout 失敗不顯示服務中版本）另回報平台，本版只寫症狀與繞法。
+
+- **hosted-apps §2**：「綁 0.0.0.0」看的是框架實際綁的介面——k8s 把 `HOSTNAME` 設成 pod 名，
+  Next standalone 一類以 `HOSTNAME` 決定 bind 的框架要 `ENV HOSTNAME=0.0.0.0`；
+  症狀是競態（ksvc ready 逾時但 runtime-logs 顯示 Ready、`Local:` 印 pod 名）；
+  後遺症是 request 推算的 origin 變 `https://0.0.0.0:8080`，對外網址一律走 env。
+  建置記憶體陷阱：限制 worker 數、heap 設包絡 60–65%，設太高反而無日誌 OOM
+- **hosted-apps §3.2／§4**：env 變更「立即生效」改為「不重建但需數分鐘傳播（實測 1–6 分鐘）」；
+  `apply_state` 只在 PUT 回、`applied` 不保證容器已換版；新增「遷入時要重新提供的 env 清單」
+  （對外網址、session 密鑰、第三方憑證）；無日誌失敗先原樣重送；rollout 失敗期間對外是舊 revision
+- **hosted-apps §5**：容器內兩個資料平面都要 `/open` 前綴（照 data-center §7 抄必 401）；
+  預設表引用可用 API `POST /refs/apps/{整合 id}`（不是 hosted app id；session-only），
+  403 訊息裡的「App」指隨附整合。§8 建置日誌全空的處置順序；§10／§11 補對照列與 prod 404 註記；
+  檔頭部署落差追加 restart／redeploy／interpret 2026-09-02 仍 404
+- **platform-behaviors 新增 §1.5**：自建表 records 與預設表 proxy 兩平面的過濾契約對照——
+  `field` vs `column`、運算子集合（只有 proxy 有 `in`）、錯誤反應相反
+  （records 422 列合法集合；proxy 對 `where` 等錯形狀 **200 回整表**）
+- **data-center §3**：relation → 預設表只有部分表可解析且無法事先查（prod 8 張只有 `sale_orders` 過），
+  規劃時一律當不支援、改 `text` 存 UUID；relation → 自建表無 cascade；`select.options` 純字串陣列；
+  單欄 unique 409 是唯一的伺服器端 CAS、預設表沒有。§7 補 `/open` 平面、POST body 必包 `{data}`、
+  `gte/lte` 依型別限縮
+- **dev-guide §20.2**：columns 端點四個鍵看不到 CHECK 值域，寫錯直接 500；補 Meta API
+  （`/data-center/meta/tables/{key}`，核自原始碼、prod 未驗證）與 **§20.2.1 常用預設表值域表**
+  （核自原始碼 `CheckConstraint`）。§19 選擇矩陣、§23.7 降級表同步
+- **dev-guide 新增 §23.9**：沒有交易／JOIN／條件式 UPDATE 時的改寫指引——`claim`＋409 模式表
+  （複合鍵、upsert、樂觀鎖、租約鎖、計數器每格一列、webhook inbox 兩階段）與 JOIN 替代表
+  （`in` 只在 proxy 面、反正規化是必需、不做跨請求快取）
+- **migration-workflow §2.4**：外鍵映射三條——指向預設表一律 `text`、約束改寫在映射階段決定、
+  值域先對表；**troubleshooting** 新增 13 列對照
+
 ## 1.20.1
 
 ### 移除 Hosted App 免費／付費與名額的前置描述——撞到上限再查表

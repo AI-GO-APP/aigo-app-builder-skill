@@ -53,6 +53,19 @@
 | 建表／加欄 409 | 撞配額（`table_quota_exceeded` / `field_quota_exceeded`，數值見 `data-center.md` §4）或實體名撞名；「**與平台保留表名衝突**」= 撞到平台地板表名（users/tenants/api_keys…），沒有補救管道，換個實體名（⚠️ 2026-09-01 實測此檢查 prod 尚未生效——沒被擋≠可以用，一律自律避開）→ `data-center.md` §1 |
 | 文件宣稱的端點回 404／回應缺欄位 | 先懷疑**部署落差**（prod 落後 monorepo main 約一週，2026-09-01 實測），不是文件錯也不是打錯路徑。隔幾天再試；受影響清單見 `hosted-apps.md` 檔頭與 `data-center.md` §9 |
 | 刪表／刪欄被擋 | 兩段式刪除：先取 `/impact`，確認值必須是**實體名**不是顯示名 |
+| **Hosted App rollout 卡「ksvc ready 逾時」，runtime-logs 卻顯示已 Ready** | 框架綁到 pod 名稱、不綁 loopback（`HOSTNAME` 被 k8s 設成 pod 名）。看 runtime-logs 的 `Local:` 是否印 pod 名稱；Dockerfile 加 `ENV HOSTNAME=0.0.0.0`。平台訊息「未聽 PORT」是錯方向；症狀時好時壞 → `hosted-apps.md` §2 |
+| **Hosted App 建置 failed、日誌全空、「builder 未留下 termination message」** | 先**原樣重送一次**（偶發型）；再失敗往建置記憶體查：限制建置 worker 數、`--max-old-space-size` 設包絡 60–65%（設太高反而無日誌 OOM）→ `hosted-apps.md` §8 |
+| Hosted App 剛部署的改動「沒生效」／新端點 404 | 先確認上一次 rollout 有沒有成功——失敗時對外仍是舊 revision，平台不顯示服務中的版本。回應加 version marker 再判斷 → `hosted-apps.md` §3.2 |
+| Hosted App 改了 env 容器讀不到 | 傳播需數分鐘（實測 1–6 分鐘），`apply_state` 不反映容器狀態。等，不要重建；用「移除變數」測最乾淨 → `hosted-apps.md` §4 |
+| Hosted App 登入後每個操作都 401／OAuth 導去 `https://0.0.0.0:8080` | 原系統 env 沒帶過來（session 密鑰、對外網址、第三方 key）。逐顆補進 runtime-settings → `hosted-apps.md` §4 遷入 env 清單 |
+| Hosted App 容器內打 `/api/v1/data-center/...` 回 401 `Invalid authentication token` | 少了 `/open` 前綴，不是憑證問題 → `hosted-apps.md` §5 |
+| `/open/proxy/{table}` 403「App 未被授權存取表」 | 「App」指隨附整合。`POST /api/v1/refs/apps/{整合 id}` 加引用（登入 session），立即生效 → `hosted-apps.md` §5 |
+| 預設表 proxy query 帶了 `where` 卻回整表 | `where`／`filter`／`conditions` 被**靜默忽略**，只有 `filters:[{column,op,value}]` 生效 → `platform-behaviors.md` §1.5 |
+| 自建表 records `filters` 回 422「不支援的運算子」 | records 平面只有 `eq/contains/gte/lte`，且 `gte/lte` 僅 number／date／datetime，text 只有 `eq/contains`；沒有 `in`、沒有 OR → `platform-behaviors.md` §1.5 |
+| 自建表 records POST 回 422 `not_null_violation` 但欄位明明有給 | body 沒包 `{"data": {...}}`，整包被忽略後報第一個必填欄位 → `data-center.md` §7 |
+| 建自建表 relation 回 422「無法解析 target_erp_key」 | 預設表目標只有部分可解析，無法事先查。改 `text` 存 UUID，唯一性用 `legacy_id`(unique) 承載 → `data-center.md` §3 |
+| 自建表 `select` 欄位建欄 422 `Input should be a valid string` | `options` 必須是**純字串陣列**，不收 `{label,value}` → `data-center.md` §3 |
+| 預設表寫入回 500 `CheckViolationError` | 欄位值不在 CHECK 值域內，columns 端點不回值域。查 `custom-app-dev-guide.md` §20.2 的值域表或 Meta API |
 | webhook 端點 404 | manifest 缺 `"webhook": true`，或**改完沒 republish** |
 | webhook 驗簽失敗 | 用了重新序列化的 body；必須用 `ctx.params["body"]` 原字串 |
 | 同一事件處理兩次 | 第三方登記了新舊兩條 URL，或 action 沒做冪等 |

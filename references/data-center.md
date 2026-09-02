@@ -94,8 +94,28 @@
   （409，`detail.dependents` 列出依賴者）。
 - **→ 預設表**：參數 `target_erp_key`＝預設表 key（API 參數沿用 erp 命名）。軟關聯，**不建外鍵**（跨 schema 邊界），
   目標值在寫入時驗證存在性。
+  ⚠️ **只有部分預設表能當目標，且無法事先查詢**（核自原始碼：目標是靠命名慣例解析的，
+  2026-08-31 主線 86 張只有 38 張可解析；2026-09-02 prod 實測 8 張常用表**只有 `sale_orders` 過**，
+  `customers`／`product_templates`／`sale_order_lines`／`crm_leads`／`hr_employees`／
+  `account_payments`／`product_products` 皆 422「無法解析 target_erp_key…本版尚不支援此表作為關聯目標」）。
+  `GET /refs/available-tables` 與 `/refs/tables/{t}/columns` 都看不出可否當目標。
+  **規劃時一律先假設不支援**：指向預設表的欄位建成 `text` 存平台 UUID（軟參照本來就不建 FK，
+  只損失寫入時的存在性驗證），只在建表規格裡標「可升級為 relation」。遷入案第三張表才撞到會很痛——
+  前兩張已建好
 
 兩者**恰擇其一**——都給或都不給皆為錯誤。建立後不可變（PATCH 改欄不收這兩個參數）。
+
+### relation／select／unique 的三個實測契約（2026-09-02）
+
+- **relation → 自建表沒有 cascade**：真 FK 只會擋刪除（409 `dependents`），沒有 `ON DELETE CASCADE`
+  的對應物。原系統靠 cascade 的鏈（課程→學期→班級→場次）要**由葉到根手刪**；
+  降級成 `text` 的軟參照更沒有 FK，也要手動清
+- **`select` 的 `options` 是純字串陣列**（schema `list[str]`）：傳 `{label, value}` 物件會 422
+  `Input should be a valid string`
+- **單欄 `is_unique` 重複寫入回 409 `unique_violation`**「欄位「x」的值重複，需唯一。」——
+  這是平台上**唯一可用的伺服器端 compare-and-set**；預設表**沒有**這個原語（`customers.ref`
+  實測無唯一約束，連 INSERT 兩次建出兩列）。需要冪等或併發防線的寫入，一律先在自建表
+  用 unique 欄搶錨點——模式見 `custom-app-dev-guide.md` §23.9
 
 ---
 
@@ -178,6 +198,19 @@ data-center/{租戶 UUID}/{表實體名}/{隨機 UUID}.{png|jpg|gif|webp}
 
 External app 的執行期走 `/api/v1/ext/data-center/...`——含 `GET /tables`（列出整租戶自建表
 及其欄位定義）與記錄 CRUD，但**沒有結構操作**。前端 SDK 依 `window.__IS_EXTERNAL__` 自動分流。
+**Hosted App 容器內**（`AIGO_API_TOKEN`）走 `/api/v1/open/data-center/...`——照上表路徑打會 401
+（`hosted-apps.md` §5）。
+
+records 平面的三個契約（自己寫 client 時最常踩；2026-09-02 實測＋原始碼核對）：
+
+- **POST records 的 body 必須包 `{"data": {...}}`**。裸物件不報格式錯，而是整包被忽略後回
+  422 `not_null_violation`「欄位「x」為必填」——訊息指向第一個必填欄位，容易誤以為欄位名對不上。
+  `PATCH .../records/{id}` 兩種形狀都收。`scripts/aigo_data_center.py` 的 `insert_record` 已包好
+- **`filters` 的運算子依欄位型別限縮**：`text` 只有 `eq`／`contains`；`number`／`date`／`datetime`
+  才有 `gte`／`lte`（對 text 用 → 422「欄位「x」（型別 text）不支援運算子 'gte'」）。
+  **沒有 `in`、`ne`、`is_null`，沒有 OR**——錯了會回 422 並列出合法集合。
+  需要範圍查詢的日期欄要建成 `date`／`datetime`（§23.7 降級表本就如此），別存 text
+- 與預設表 proxy 平面的完整對照（鍵名、運算子、錯誤反應都不同）→ `platform-behaviors.md` §1.5
 
 ### 前端 SDK（`src/api.ts`，Custom App 內）
 
