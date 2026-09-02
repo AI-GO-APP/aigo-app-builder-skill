@@ -99,7 +99,7 @@
 | 純前端 × 應用介面 | **1..n 個 Custom App**（前端重寫進 Builder；直連 BaaS 的資料層走 §2.4 映射進平台） |
 | 純前端 × 公開 web 資產（官網、電商 storefront） | **Hosted App**（zbpack 任意棧含靜態站、`hosted-apps.md` §9 綁自訂網域）——Custom App 的 `/runtime` 網址＋HashRouter 做不了 SEO 與自有網域，`/pub` 只適合少數公開頁，不承載整個公開站 |
 | 有後端、可改寫 | **Custom App**（後端邏輯改寫成 Server Action）；用戶明確不願重構 → 改判 Hosted App |
-| 有後端、整搬 | **1..n 個 Hosted App**（整套原始碼進容器；付費檔限定＋名額，見下方警示） |
+| 有後端、整搬 | **1..n 個 Hosted App**（整套原始碼進容器） |
 
 - stack 形狀給的是**預設值**，最終仍要向用戶確認——特別是「可改寫」與
   「整搬」的邊界：改寫工作量（§2.3 可移植性核對）攤開後用戶不買單，就改判整搬。
@@ -127,8 +127,6 @@
   （`custom-app-dev-guide.md` §26.1）
 - **`internal` 不能開匿名存取**（回 400）——「內部工具但想給訪客看一頁」
   這種需求要在此刻攤開講清楚（`CONTEXT.md`）
-- **Hosted App 是付費檔限定**（免費檔回 403 `hosted_app_requires_paid_plan`），
-  且每租戶預設 5 個名額（`hosted-apps.md` §1、§10）
 - 拿不準 Custom vs Hosted → 把 `hosted-apps.md` §1 的差異表給用戶選；
   拿不準 internal vs external → 直接問「這系統現在是誰在登入」
 

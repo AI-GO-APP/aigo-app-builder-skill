@@ -4,6 +4,19 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.20.1
+
+### 移除 Hosted App 免費／付費與名額的前置描述——撞到上限再查表
+
+分流與指引不再要求使用者先理解 Hosted App 的方案分級與配額：
+
+- migration-workflow §2.1：整搬行與警示區的「付費檔限定＋每租戶 5 名額」移除
+- hosted-apps §1 的「付費檔限定」bullet、CLI `--slug` 的「吃配額名額」、
+  §7.1 禁令段的「占用名額」附帶理由——移除
+- **§10 錯誤碼對照表保留不動**（403 `hosted_app_requires_paid_plan`、
+  429 `hosted_app_quota_exceeded`）：撞到時查表得到完整解釋與處置，
+  這正是「撞到上限再說」的承接點
+
 ## 1.20.0
 
 ### 遷入分流第三軸：「公開 web 資產 vs 應用介面」——官網不再被錯導向 Custom App
