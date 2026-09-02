@@ -40,7 +40,6 @@
 - 詳情頁：`/dashboard/ai-apps/hosted/{id}?tab=...`，九分頁
   （`overview│deploy│logs│files│terminal│domain│env│data│settings`）
 - 權限：**`hosted_apps.deploy`**——權限不足時整塊 UI **不渲染**（不是報錯）
-- **付費檔限定**：免費檔註冊 app 回 403 `hosted_app_requires_paid_plan`（升級才解，重試無用）
 
 ## 2. 應用形狀硬規則（★ 失敗率最高的來源，動手前逐條核）
 
@@ -105,7 +104,7 @@ curl -fsSL https://raw.githubusercontent.com/AI-GO-APP/aigo-cli-releases/main/in
 - **鑑權優先序**：env `AIGO_DEPLOY_TOKEN` ＞ `aigo login --token` 存的 profile
   ＞ 瀏覽器 session。Deploy Token 從詳情頁「設定」tab 發行（raw 只給一次）；
   token 值用 stdin 餵 `aigo login --token`，別放指令列參數（進 shell history）
-- **⚠️ `--slug` 語意**：命中既有 slug＝**redeploy**，否則**註冊新 app**（吃配額名額）；
+- **⚠️ `--slug` 語意**：命中既有 slug＝**redeploy**，否則**註冊新 app**；
   未給則取目錄名 normalize。打錯 slug 不會報錯、會多一個 app——部署前先 `aigo hosted list` 核對
 - **專案目錄＝cwd**（沒有 `--path`）；打包自動排除 `.git`／`node_modules`
 - **⚠️ base origin 預設就是 `https://ai-go.app`（apex）**，租戶身分由 Deploy Token 承載
@@ -202,8 +201,8 @@ Postgres 5432、MySQL 3306、Redis 6379 一律不通——連線字串直連原 
 **★ 也不可把 DB 立成一個 Hosted App**（SKILL.md 規則 32）：同租戶命名空間內
 app 互通，技術上可以把 PostgREST／Hasura 這類「REST 包裝的 DB」部署成
 Hosted App 讓其他 App 打 HTTP 過去——這是明文禁止的反模式，不是巧妙的過渡方案。
-它讓業務資料脫離平台的表：進不了平台功能、繞過簽核與權限閘、平台不備援，
-還占用 Hosted App 名額。遇到用戶提出這個構想，指回上方預期路徑
+它讓業務資料脫離平台的表：進不了平台功能、繞過簽核與權限閘、平台不備援。
+遇到用戶提出這個構想，指回上方預期路徑
 （資料遷入平台的表＋Open Proxy）。
 
 **兩個標註後才可用的例外**（都不是與預期路徑並列的選項，用了要在計畫中明寫）：
