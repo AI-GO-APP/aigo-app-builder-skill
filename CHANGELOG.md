@@ -4,6 +4,32 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.19.0
+
+### 資料搬入機制補洞：簽核×匯入（G1）＋延伸欄位匯入（G2）＋檔案遷移憑證路（G3）
+
+機制盤查（2026-09-02）發現的執行期缺口，本版補齊：
+
+- **§23.1 新增「匯入前必查」**：目標預設表掛簽核流程時，批次匯入＝逐筆開
+  簽核單，且 pending 不可重試、無旁路。處置順序：請管理員暫停流程→匯入→恢復；
+  量小接受逐筆 pending；否則回 §19 重新分流。§23.5 驗證清單同步補
+  「簽核流程已恢復」項
+- **新增 §23.8 延伸欄位的匯入**：映射分到 EAV 軌的欄位，匯入 action 寫不進
+  （ctx.db 無封裝）——先匯主列拿 row id，再由本地腳本逐列
+  `PATCH /ext-values/{erpKey}/{rowId}`；無批次寫入端點，PATCH 冪等；
+  驗證用 `:batch-get`（空 `{}` ＝沒寫進去，不是預設值）；
+  上千列×多欄位＝分流錯誤訊號，回頭評估自建表。
+  寫入端點 2026-09-02 形狀探測證實已上線（422 欄位驗證）；完整寫值流程仍未實測
+- **新增 §12.1 檔案遷移的憑證路**（prod 實測 2026-09-02）：
+  `POST /api/v1/storage/upload` 落 `files/{tenant}/…` 命名空間、app 讀不到
+  （原始碼核對，結構性不互通）——**不要**拿它遷 app 檔案；
+  external app 走 custom-app-auth 取 token 打 `/ext/storage`（全自動可行）；
+  internal app 現況無全自動路（app-scoped-token 端點已部署、旗標未啟用
+  ——實測 501），替代為 app 內匯入頁或短效 `__APP_TOKEN__` 一次性使用；
+  Hosted App 無平台 storage 介面，已回報平台
+- migration-workflow §2.5 閘門補簽核檢查與延伸欄位寫入計畫兩項；
+  data-center §10 與解構模板同步
+
 ## 1.18.1
 
 ### hosted-apps 修正：建立 Hosted App 是 session-only，Deploy Token 建不了

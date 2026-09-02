@@ -24,7 +24,7 @@
 | 後端 API endpoints | | 讀寫租戶資料 → 前端 SDK 直呼（`db.ts`／`api.ts`）；含業務邏輯、機敏分流、需要伺服器身分 → Server Action | dev-guide §6／§7 |
 | 背景排程（cron、queue worker） | | App 排程（綁 action；有執行時間上限與 tier 限制，長任務要切批次） | event-triggers.md §2 |
 | 接收外部 webhook | | `actions/manifest.json` 宣告 `"webhook": true` 的 action；必須冪等 + 驗簽 | event-triggers.md §0–1 |
-| 檔案上傳／儲存（S3、Supabase Storage…） | | Storage API（單檔 100MB）；歷史檔案要「原系統下載 → 重新上傳 → 資料列裡的 URL/path 改寫」，這是資料遷移的一部分，別漏 | dev-guide §12 |
+| 檔案上傳／儲存（S3、Supabase Storage…） | | Storage API（單檔 100MB）；歷史檔案要「原系統下載 → 重新上傳 → 資料列裡的 URL/path 改寫」，這是資料遷移的一部分，別漏。⚠️ 本地上傳的憑證路依 access_mode 不同（internal 現況無全自動路） | dev-guide §12.1 |
 | 呼叫第三方 API | | `ctx.http.call(slug, ...)` + Builder「外部服務」同名 slug 白名單；**計畫階段就要建** | dev-guide §25 |
 | 環境變數／金鑰 | | `ctx.secrets`（Builder「服務」tab 設定）；不進 code、不進 config | SKILL.md 規則、dev-guide §25 |
 | 寄信／通知 | | `ctx` 沒有寄信能力——走第三方郵件服務（同「第三方 API」列） | dev-guide §25 |

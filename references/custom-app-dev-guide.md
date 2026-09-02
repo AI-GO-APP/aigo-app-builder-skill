@@ -241,6 +241,31 @@ action 路徑約定不變：`actions/**.py` 是可呼叫 action（`action_name` 
 - DELETE `/api/v1/ext/storage/file?path={path}`
 
 需 Custom App Token (`window.__APP_TOKEN__`)。單檔 100MB 上限。
+檔案落在 `{tenant_id}/{custom_app_id}/…` 前綴下，讀寫都被鎖在本 app 前綴內；
+簽章 URL 有效 1 小時，**存 path 不存 URL**（同 `data-center.md` §6 的 key 原則）。
+
+### 12.1 遷移情景：從本地把歷史檔案搬進 Storage（★ 憑證是關鍵）
+
+- ⚠️ **`POST /api/v1/storage/upload`（登入 session＋`files.access`）不能用來遷
+  app 檔案**——它把 key 落在 `files/{tenant}/…` 命名空間，與 `/ext/storage` 的
+  `{tenant}/{app}/…` 錯開，**app 執行期讀不到**（原始碼核對，結構性不互通）。
+- 可行路依 access_mode 分：
+  - **external app**：本地腳本先走 custom-app-auth 登入（§14）取得
+    custom_app_user token，再打 `/ext/storage/upload`——全自動可行
+  - **internal app**：目前**沒有全自動本地路**。
+    `POST /api/v1/app-scoped-token/{app_id}`（平台 JWT 換 app 憑證）端點已部署
+    但旗標未啟用（2026-09-02 prod 實測回 501「app-scoped token 未啟用」，
+    啟用後即為正解）。現況替代：
+    ① 在 app 內佈一頁一次性「檔案匯入」UI，由用戶在瀏覽器內批次上傳
+    （runtime 有 `__APP_TOKEN__`）；
+    ② 用戶從已開啟的 app 頁面取出短效 `__APP_TOKEN__` 交本地腳本一次性使用
+    （token 短效、用完即棄、不落檔不進 log）
+- 上傳完成後把回傳的 `path` 寫回資料列（取代原系統的檔案 URL），
+  顯示面每次用 `GET /ext/storage/url` 換短效 URL
+- 圖片欄位（自建表 `image` 型別）**不走本節**——它有自己的上傳端點與 10MB 限制
+  （`data-center.md` §6）
+- Hosted App **完全沒有**平台 storage 介面（Open Proxy 無 storage 面）——
+  已回報平台（2026-09-02），現況處置見 `hosted-apps.md` §7.1 與規則 32
 
 ## 13. Runtime 全域變數
 
@@ -766,6 +791,26 @@ TypeScript（前端）和 Python（後端 Server Action）是 AI GO 精選的開
 | 中（200~2000 筆） | 任意 | Server Action 批次匯入 |
 | 多（> 2000 筆） | 任意 | Server Action 分批匯入（每批 100 筆），加入錯誤處理與斷點續傳 |
 
+**★ 匯入前必查：目標預設表有沒有掛簽核流程（§24）**——這一步漏掉的代價是
+「匯 2000 筆歷史資料＝開 2000 張簽核單」，而且規則 24 明訂 pending **不可重試**，
+匯入腳本的錯誤重送邏輯會把災難翻倍（重複建記錄＋重複開單）。只影響
+Data Reference 軌；自建表不在簽核範圍，不受此限。
+
+- **查法**：請租戶管理員在簽核設定確認目標表；§24.1 列了常設流程的表
+  （`sale_orders`、`purchase_orders`、`account_moves`…）——匯入目標命中清單時
+  一律當作「有掛」處理，直到管理員確認沒有
+- **命中時的處置**（規則 24：`db.ts`／`ctx.db`／`ctx.erp` 同一套守衛，**沒有旁路**，
+  不要嘗試換路徑寫入）：
+  1. **首選：請管理員暫停該表的簽核流程 → 匯入 → 恢復**。計畫中明寫暫停窗口，
+     匯完立即恢復並向用戶確認
+  2. 量小（數十筆內）且流程不可暫停 → 接受逐筆 pending，請簽核人批次核准；
+     匯入腳本把 `approval_status: "pending"` 視為**已送出**（不成功不失敗），
+     絕不重試
+  3. 流程不可暫停且量大 → 回頭重新分流：這批資料是否真的必須進該預設表
+     （§19 決策樹重走一次，考慮自建表）
+- update／remove 型的資料修正（如遷移後補值）被 pre-guard 攔下時同理——
+  payload 已暫存進簽核單，重打只會再開一張單
+
 ### 23.2 Server Action 批次匯入範例
 
 ```python
@@ -839,6 +884,8 @@ def execute(ctx):
 ✓ 關聯完整性：子表的 FK 欄位都能對應到主表的有效記錄
 ✓ app_domain 標籤：所有預設表記錄都帶有正確的 app_domain（自建表不檢查此項）
 ✓ custom_data 結構：JSONB 欄位的 key 符合映射表定義
+✓ 延伸欄位值：抽驗列用 :batch-get 取回比對（§23.8；缺值不回填，空 {} ≠ 寫入成功）
+✓ 簽核流程已恢復：匯入前暫停的簽核流程已請管理員恢復（§23.1 匯入前必查）
 ✓ 無殘留測試資料：遷移過程中的測試記錄已清除
 ```
 
@@ -862,6 +909,8 @@ def execute(ctx):
   先佈一支 §23.2 的匯入 action，本地腳本分批呼叫
   `POST /api/v1/actions/apps/{app_id}/run/{action_name}`，records 放 params。
   base_url 一律走租戶空間（核心規則 29），token 用 `aigo_auth.get_token()`
+- **延伸欄位值**：匯入 action 寫不了（`ctx.db` 無封裝）——本地腳本直打
+  REST 逐列寫，見 §23.8
 
 **大量資料（數千筆以上）的節奏**：
 
@@ -891,6 +940,30 @@ def execute(ctx):
 | 圖片 / 附件 URL | `image` 或 `text` | `image` 存 storage key（`data-center.md` §6）——外部檔案要先下載、重新上傳 Storage、再存 key；不遷檔案就用 `text` 暫存外部 URL，並向用戶說明原站關閉後連結會失效 |
 | 自增 ID | 不遷 | UUID 自動生成，走 §23.3 的 ID 映射 |
 | 複合唯一鍵 / 跨欄 CHECK / DEFAULT 運算 | 無對應 | 約束上移：匯入與後續寫入都經同一支 Server Action，在 action 內檢查 |
+
+### 23.8 延伸欄位的匯入（映射表把欄位分到 EAV 軌時）
+
+§19 決策樹把外部欄位分流到**延伸欄位**時，§23.2 的匯入 action 寫不進去——
+延伸欄位讀寫走獨立端點，`ctx.db`／`db.ts` 都沒有封裝（`data-center.md` §10）。
+機制如下（端點契約核自平台原始碼；讀面 2026-09-01 實測、寫入端點 2026-09-02
+形狀探測證實已上線並驗證欄位定義——完整寫值流程仍未實測）：
+
+1. **先匯主列**：原生欄位＋`custom_data` 照 §23.2 走匯入 action，
+   從回傳的 `id_mapping` 拿到每列的 AI GO row id
+2. **再寫延伸值**：**本地腳本**逐列
+   `PATCH /api/v1/data-center/ext-values/{erpKey}/{rowId}`（`builder.access`），
+   body 帶該列的延伸欄位值——**沒有批次寫入端點**（`:batch-get` 只管讀），
+   每列一發；PATCH 覆寫語意天然冪等，斷點續傳不會重複
+3. **驗證**：抽驗列用 `POST /ext-values/{erpKey}:batch-get`（`row_ids` ≤ 200）
+   取回比對。⚠️ 「缺值不回填」——回傳空 `{}` 代表**沒寫進去**，不是預設值，
+   別把空回應當成功
+4. **量的紅線**：逐列 PATCH 意味 N 列＝N 個請求。上千列且欄位多時，
+   先回頭重新評估這個實體是否該整個走自建表（§10 的建議同源）——
+   「大量讀寫延伸欄位」本身就是分流錯誤的訊號
+
+- 延伸欄位定義（建欄）需 `datacenter.schema_write`：匯入前先確認欄位已建好
+  （`GET /ext-fields/{erpKey}`），缺欄請有權限者先建，匯入腳本不要動結構
+- 匯入順序不可反過來：延伸值掛在 row id 上，主列不存在時寫值必失敗
 
 ## 24. 簽核工作流攔截（Approval）
 

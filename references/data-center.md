@@ -334,7 +334,9 @@ def execute(ctx):
 > `services/data_center/ext_fields.py`）。**2026-09-01 prod 唯讀實測**：
 > `GET /ext-fields/{erpKey}` 回 200 `[]`、`POST /ext-values/{erpKey}:batch-get`
 > 對不存在的 row 回 200 `{}`（「缺值不回填」同步證實）——**功能已上線**。
-> 建欄／改欄／刪欄與寫值屬寫入面，未實測；拿到非預期回應先懷疑部署落差。
+> **2026-09-02 寫值端點形狀探測**：`PATCH /ext-values/...` 對未定義欄位回
+> 422 `invalid_field`——寫入端點已上線且做欄位定義驗證。
+> 建欄／改欄／刪欄與完整寫值流程仍未實測；拿到非預期回應先懷疑部署落差。
 
 ### 定位：Data Reference 軌的第三種擴充機制
 
@@ -372,6 +374,8 @@ def execute(ctx):
 | 寫值 | PATCH `/ext-values/{erpKey}/{rowId}` | `builder.access` |
 
 - `{erpKey}` 是預設表的表 key（平台內部命名帶 erp 字樣，見 CONTEXT.md 稱謂對照）；`{fieldKey}` 是延伸欄位實體名
+- 遷入情景要把外部資料批次寫進延伸欄位 → 匯入機制與量的紅線見
+  `custom-app-dev-guide.md` §23.8（逐列 PATCH、無批次寫入端點）
 - 型別與自建表**同一套 9 型別**（§3），select 選項集驗證也同一套
 - 配額沿用每表欄數配額（§4）
 - 管結構的人不自動獲得看資料的權——定義面與值面的權限是分開的
