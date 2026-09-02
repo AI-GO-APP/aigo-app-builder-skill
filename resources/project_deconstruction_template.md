@@ -10,6 +10,7 @@
 |------|---|
 | 系統名稱 | |
 | 技術棧（前端 / 後端 / DB） | |
+| stack 形狀結論（§2.0） | 純前端 / 有後端、可改寫 / 有後端、整搬 |
 | 產品線判斷結果（§2.1） | Custom App internal / Custom App external / Hosted App |
 | 對應 AI GO App | |
 
@@ -40,6 +41,9 @@
 >
 > 另要盤 `hosted-apps.md` §2 的應用形狀硬規則、§4 環境變數。
 > 盤點時把原專案所有「開 DB 連線／下 SQL」的位置列成清單，這份清單就是改寫工作量的依據。
+> ⚠️ **DB 與 storage 不得自立成 Hosted App**（含 PostgREST 類 REST 包裝，
+> SKILL.md 規則 32）——原專案若有 docker-compose 帶 db／redis service，
+> 那些 service **不在**「整套搬」的範圍內，資料一律遷入平台的表與 Storage。
 
 ## 使用者／認證表（★ 不要當一般資料表遷）
 

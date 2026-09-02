@@ -195,6 +195,13 @@ curl -fsSL https://raw.githubusercontent.com/AI-GO-APP/aigo-cli-releases/main/in
 Postgres 5432、MySQL 3306、Redis 6379 一律不通——連線字串直連原 DB 這條路
 **在網路層就不存在**，不是 driver 或防火牆設定問題。
 
+**★ 也不可把 DB 立成一個 Hosted App**（SKILL.md 規則 32）：同租戶命名空間內
+app 互通，技術上可以把 PostgREST／Hasura 這類「REST 包裝的 DB」部署成
+Hosted App 讓其他 App 打 HTTP 過去——這是明文禁止的反模式，不是巧妙的過渡方案。
+它讓業務資料脫離平台的表：進不了平台功能、繞過簽核與權限閘、平台不備援，
+還占用 Hosted App 名額。遇到用戶提出這個構想，指回上方預期路徑
+（資料遷入平台的表＋Open Proxy）。
+
 **兩個標註後才可用的例外**（都不是與預期路徑並列的選項，用了要在計畫中明寫）：
 
 | 例外 | 允許條件 | 硬前提與陷阱 |

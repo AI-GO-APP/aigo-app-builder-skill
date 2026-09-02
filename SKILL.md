@@ -57,6 +57,20 @@ python scripts/check_update.py     # macOS / Linux 用 python3
     不要往其他方向深掘。
 - **絕不自動覆寫**：使用者可能改過本地檔案；未取得同意前不要執行更新指令。
 
+## 源頭意圖分流（進入流程前先判讀）
+
+任何工作開始前，先分清用戶的意圖是哪一種——兩條路的起手完全不同：
+
+| 意圖 | 走法 |
+|------|------|
+| **開發新 App**（從零做新功能） | 直接走主流程（Phase 0 →） |
+| **現有 App 遷入**（有既存系統／repo／DB 要搬進 AI GO） | **先讀 `references/migration-workflow.md`，從 §2.0 的 stack 盤點做起**（架構師視角：先盤前端／後端／資料的結構，再分流產品線），之後才回主流程 |
+
+**遷入意圖的偵測訊號**（出現任一就主動確認，不要等用戶自己說「遷移」）：
+用戶提到現有系統、既有網站、某個 repo、Supabase／Google Sheet／MySQL 等資料來源、
+「搬過來」「轉移」「改用 AI GO」等字樣；或 Phase 0 時發現工作目錄是一個
+非 AI GO 結構的完整專案。判成遷入後，多系統（≥2 個）再疊加 Phase 1.25 的全局盤點。
+
 ## Phase 0：Review 現有 Code（★ 強制步驟）
 
 > **每次開始任何開發工作前，必須先執行此步驟。**
@@ -238,13 +252,15 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
    - 平台有兩條**平行**產品線：本 skill 教的 **Custom App**（Builder VFS + Shadow DOM，
      在平台內跑）與 **Hosted App**（任意技術棧原始碼 → 容器 → `{slug}.deploy.ai-go.app`，
      UI 繁中叫「自訂 App」——注意 code 裡的 `CustomApp` 反而指 Builder 產物）
-   - **判斷**：要遷入整套既有服務／需要自選後端框架、常駐進程、WebSocket、
-     自訂網域 → 建議 Hosted App（→ `references/hosted-apps.md`，開發流程完全不同，
+   - **判斷（新建情景）**：需要自選後端框架、常駐進程、WebSocket、自訂網域
+     → 建議 Hosted App（→ `references/hosted-apps.md`，開發流程完全不同，
      不走本 skill 的 Phase 2–4）；要在平台內做業務介面、直接用 `ctx`/SDK 存取
      租戶資料 → Custom App，繼續本流程
-   - **遷入情景（既有系統／整套專案要搬進來）→ 一律先走
-     `references/migration-workflow.md` §2.1 的三向決策**：除了 Custom vs Hosted，
-     還要先問「原系統的登入使用者是誰」定 internal / external——
+   - **判斷（遷入情景，既有系統／整套專案要搬進來）→ 一律先走
+     `references/migration-workflow.md` §2.0 的 stack 盤點＋§2.1 的三向決策**：
+     stack 形狀給預設走向（純前端 → 1..n Custom App；有後端且可改寫成
+     Server Action → 仍 Custom App；有後端且整搬 → 1..n Hosted App），
+     再問「原系統的登入使用者是誰」定 internal / external——
      **access_mode 建立後不可改，選錯要砍掉重建**，這一步不能靠預設值帶過
    - ⚠️ **「Hosted = 整套搬」指的是程式，不是資料**：不論哪條產品線，
      業務資料一律遷入 AI GO 的表（預設引用＋自建）、原 DB 退場——
@@ -524,6 +540,16 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
     - 前端 SDK 只有兩種情境可直呼：external app（自動分流 `/ext/data-center`，
       不受影響）、或受眾全員持有 `builder.access` 的開發工具型 app
     - 機制、存量修復流程、假修法排除清單見 `references/data-center.md` §7.5
+32. **禁止以 Hosted App 承載資料庫或 storage**（★ 強制，遷入情景最容易踩）
+    - **不得**把 DB 本身（Postgres／MySQL／Redis…）或「包了 REST 的 DB 服務」
+      （PostgREST、Hasura、自架 API-over-DB）部署成 Hosted App 供其他 App 存取——
+      同租戶 app 間網路互通讓這在技術上做得出來，但它是明文禁止的反模式：
+      資料進不了平台功能、繞過簽核與權限閘（規則 23／24）、平台不備援它
+    - table schema 一律落平台**預設表／自建表**（規則 18 雙軌分流、§19 SSOT）；
+      檔案一律 **Storage API**；Hosted App 自身的資料層一律改寫 **Open Proxy**
+      （`hosted-apps.md` §7.1——執行期出站只放 443，直連 DB 在網路層本就不存在）
+    - 僅有的兩個過渡例外（短期暫連原 DB 的 HTTPS 介面、`/data` 放非業務資料）
+      見 `hosted-apps.md` §7.1，用了必須在計畫中明寫遷移終點
 
 ### Server-Side Action 撰寫
 
@@ -735,7 +761,7 @@ uv run python scripts/report_issue.py submit "一句話標題" \
 | `references/custom-app-dev-guide.md` | 核心 API 規格與架構理念 |
 | `references/data-center.md` | 自建表完整規格（型別、配額、權限、SDK）＋ 延伸欄位（§10） |
 | `references/event-triggers.md` | Webhook 與 App 排程（冪等要求、宣告、限制） |
-| `references/migration-workflow.md` | **有現存系統要遷入時**：產品線／模式三向判斷（不可逆）、專案解構、Schema 映射、資料遷移 |
+| `references/migration-workflow.md` | **有現存系統要遷入時**：stack 盤點（§2.0，最先做）、產品線／模式三向判斷（不可逆）、專案解構、Schema 映射、資料遷移 |
 | `references/verification-details.md` | **要執行驗證時**：四項驗證的完整定義、Phase 5 里程碑 |
 | `references/troubleshooting.md` | **出錯時**：錯誤速查表 |
 | `references/issue-reporting.md` | **回報平台問題時**：BDD 撰寫規範、指令、進度追蹤 |

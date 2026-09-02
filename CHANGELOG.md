@@ -4,6 +4,26 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.18.0
+
+### 源頭意圖分流＋遷入線 stack 盤點先行＋規則 32（禁止 DB 自立 Hosted App）
+
+遷入判斷從「憑空問用戶」改為「架構師先盤 stack、形狀推導預設走向」：
+
+- **SKILL.md 新增「源頭意圖分流」入口段**：開發新 App vs 現有 App 遷入，
+  含遷入意圖的偵測訊號（提到既有 repo／DB／「搬過來」等就主動確認）；
+  遷入一律從 migration-workflow **§2.0 stack 盤點**（新）做起
+- **§2.1 問題二改吃 §2.0 的 stack 形狀結論**：純前端 → 1..n Custom App；
+  有後端、可改寫（無狀態 API）→ 仍 Custom App（後端改寫 Server Action）；
+  有後端、整搬（常駐／WebSocket／深度綁定）→ 1..n Hosted App。
+  形狀給預設值，最終仍向用戶確認；「使用者是誰」的模式判斷不變
+- **新核心規則 32**：禁止把 DB／storage（含 PostgREST 類 REST 包裝的 DB）
+  自立成 Hosted App 供其他 App 存取——同租戶 app 互通使它技術上可行，
+  但明文禁止；table schema 一律平台預設表／自建表、檔案一律 Storage API、
+  Hosted App 資料層一律 Open Proxy（hosted-apps.md §7.1 同步加禁令段）
+- 解構模板加「stack 形狀結論」欄與 compose db service 警示；
+  規則 32 的偵測職責放在 §2.0 盤點（aigo_review 只看 VFS，不加 code 偵測）
+
 ## 1.17.0
 
 ### 更新檢查改版：多安裝同步偵測＋節流 24 小時 → 3 小時
