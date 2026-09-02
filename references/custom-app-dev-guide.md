@@ -241,6 +241,31 @@ action 路徑約定不變：`actions/**.py` 是可呼叫 action（`action_name` 
 - DELETE `/api/v1/ext/storage/file?path={path}`
 
 需 Custom App Token (`window.__APP_TOKEN__`)。單檔 100MB 上限。
+檔案落在 `{tenant_id}/{custom_app_id}/…` 前綴下，讀寫都被鎖在本 app 前綴內；
+簽章 URL 有效 1 小時，**存 path 不存 URL**（同 `data-center.md` §6 的 key 原則）。
+
+### 12.1 遷移情景：從本地把歷史檔案搬進 Storage（★ 憑證是關鍵）
+
+- ⚠️ **`POST /api/v1/storage/upload`（登入 session＋`files.access`）不能用來遷
+  app 檔案**——它把 key 落在 `files/{tenant}/…` 命名空間，與 `/ext/storage` 的
+  `{tenant}/{app}/…` 錯開，**app 執行期讀不到**（原始碼核對，結構性不互通）。
+- 可行路依 access_mode 分：
+  - **external app**：本地腳本先走 custom-app-auth 登入（§14）取得
+    custom_app_user token，再打 `/ext/storage/upload`——全自動可行
+  - **internal app**：目前**沒有全自動本地路**。
+    `POST /api/v1/app-scoped-token/{app_id}`（平台 JWT 換 app 憑證）端點已部署
+    但旗標未啟用（2026-09-02 prod 實測回 501「app-scoped token 未啟用」，
+    啟用後即為正解）。現況替代：
+    ① 在 app 內佈一頁一次性「檔案匯入」UI，由用戶在瀏覽器內批次上傳
+    （runtime 有 `__APP_TOKEN__`）；
+    ② 用戶從已開啟的 app 頁面取出短效 `__APP_TOKEN__` 交本地腳本一次性使用
+    （token 短效、用完即棄、不落檔不進 log）
+- 上傳完成後把回傳的 `path` 寫回資料列（取代原系統的檔案 URL），
+  顯示面每次用 `GET /ext/storage/url` 換短效 URL
+- 圖片欄位（自建表 `image` 型別）**不走本節**——它有自己的上傳端點與 10MB 限制
+  （`data-center.md` §6）
+- Hosted App **完全沒有**平台 storage 介面（Open Proxy 無 storage 面）——
+  已回報平台（2026-09-02），現況處置見 `hosted-apps.md` §7.1 與規則 32
 
 ## 13. Runtime 全域變數
 
@@ -920,7 +945,8 @@ def execute(ctx):
 
 §19 決策樹把外部欄位分流到**延伸欄位**時，§23.2 的匯入 action 寫不進去——
 延伸欄位讀寫走獨立端點，`ctx.db`／`db.ts` 都沒有封裝（`data-center.md` §10）。
-機制如下（端點契約核自平台原始碼；**寫入面尚未 prod 實測**，讀面 2026-09-01 已實測）：
+機制如下（端點契約核自平台原始碼；讀面 2026-09-01 實測、寫入端點 2026-09-02
+形狀探測證實已上線並驗證欄位定義——完整寫值流程仍未實測）：
 
 1. **先匯主列**：原生欄位＋`custom_data` 照 §23.2 走匯入 action，
    從回傳的 `id_mapping` 拿到每列的 AI GO row id

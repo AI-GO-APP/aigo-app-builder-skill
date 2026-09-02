@@ -334,7 +334,9 @@ def execute(ctx):
 > `services/data_center/ext_fields.py`）。**2026-09-01 prod 唯讀實測**：
 > `GET /ext-fields/{erpKey}` 回 200 `[]`、`POST /ext-values/{erpKey}:batch-get`
 > 對不存在的 row 回 200 `{}`（「缺值不回填」同步證實）——**功能已上線**。
-> 建欄／改欄／刪欄與寫值屬寫入面，未實測；拿到非預期回應先懷疑部署落差。
+> **2026-09-02 寫值端點形狀探測**：`PATCH /ext-values/...` 對未定義欄位回
+> 422 `invalid_field`——寫入端點已上線且做欄位定義驗證。
+> 建欄／改欄／刪欄與完整寫值流程仍未實測；拿到非預期回應先懷疑部署落差。
 
 ### 定位：Data Reference 軌的第三種擴充機制
 
