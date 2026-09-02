@@ -4,6 +4,21 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.18.1
+
+### hosted-apps 修正：建立 Hosted App 是 session-only，Deploy Token 建不了
+
+§11 速查表原把 `POST /`（建立）與 `GET` 併列標 Deploy Token ✅——與平台
+原始碼矛盾（ADR 0019：`_create_app_user` 拒絕一切 opaque token 與 App 憑證，
+固定 403 訊息）。照舊表走會拿 Deploy Token 打建立端點吃 403 還以為遇到 bug。
+
+- §11 拆列：`GET /`／`GET /{id}` 留 ✅；`POST /`（建立）移入 ❌
+- §3.1 補「建立」進 session-only 清單，並新增 ADR 0019 設計理由
+  （per-app token 不能「開新門」）與登入要件（`hosted_apps.deploy`＋租戶子網域）
+- §3.2 流程圖標注：首步建立要登入 session，後續上傳／輪詢 Deploy Token 即可
+- 建立仍可純 API／CLI 完成（`POST /api/v1/hosted-apps`、`aigo hosted create`），
+  不必走後台 UI——修的是「用哪種憑證」，不是「能不能用 API」
+
 ## 1.18.0
 
 ### 源頭意圖分流＋遷入線 stack 盤點先行＋規則 32（禁止 DB 自立 Hosted App）
