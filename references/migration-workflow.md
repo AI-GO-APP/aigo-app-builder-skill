@@ -195,6 +195,11 @@
 > Custom App 線與 Hosted App 線都受此閘門約束。
 
 - 遷移範圍：全量 / 部分 / 僅結構不帶資料
+- **簽核流程檢查**（★ Data Reference 軌必查）：目標預設表掛簽核流程時，
+  批次匯入會逐筆開簽核單——匯入前依 `custom-app-dev-guide.md` §23.1 的
+  「匯入前必查」處置（首選：請管理員暫停流程 → 匯入 → 恢復）
+- **延伸欄位寫入計畫**（若映射有欄位分到 EAV 軌）：逐列 PATCH、無批次端點，
+  量大先重新評估分流——機制見 `custom-app-dev-guide.md` §23.8
 - **抽取路徑**：資料怎麼從來源離開（★ 先確認，MySQL/Postgres 直連只能在本地做）
   → `custom-app-dev-guide.md` §23.6
 - 遷移方式：本地腳本打平台 API / Server Action 批次匯入 / API 逐筆寫入
