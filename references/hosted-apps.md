@@ -62,13 +62,17 @@
 
 - **Deploy Token**（`POST /api/v1/deploy-tokens`，scope 固定 `hosted_apps.deploy`，
   raw 只在發行當下給一次；預設 90 天，UI 在詳情頁「設定」）——**只夠日常部署面**
-- 下表「Token ❌」的端點（改名／複製／刪除／網域／檔案／終端／憑證三動詞）
+- §11 表「Token ❌」的端點（**建立**／改名／複製／刪除／網域／檔案／終端／憑證三動詞）
   **一律要登入 session**——用 Deploy Token 打會 403，**不是 bug 不要重試**
+- **建立 app 是 session-only**（ADR 0019）：per-app token 綁的是既有 app，
+  建立當下 app 還不存在——讓它能建，這把鑰匙就同時是「開新門」的鑰匙。
+  Deploy Token 與 App 憑證打 `POST /` 回固定 403 訊息；
+  帳號需 `hosted_apps.deploy` 權限，登入走租戶子網域（SKILL.md 規則 29）
 
 ### 3.2 部署流程（API）
 
 ```
-POST /api/v1/hosted-apps  (create_deployment=true)
+POST /api/v1/hosted-apps  (create_deployment=true)   ← 登入 session（§3.1）；後續兩步 Deploy Token 即可
   → 回 dispatch bundle {upload_token, deployd_upload_url, build_deadline_seconds, ...}
 POST {deployd_upload_url}  (原始碼 tarball + upload_token)
   → 入建置佇列；排隊不吃建置時鐘
@@ -254,7 +258,8 @@ POST /{id}/domains/{domain_id}/verify   → pending_dns → pending_cert → act
 
 | 端點 | Deploy Token |
 |---|:-:|
-| `POST /`（建立）／`GET /`／`GET /{id}` | ✅ |
+| `GET /`／`GET /{id}` | ✅ |
+| `POST /`（建立）——session-only（ADR 0019，§3.1；固定 403 訊息） | ❌ |
 | `POST /{id}/deployments`／`GET .../deployments*`／`.../logs` | ✅ |
 | `POST /{id}/restart`／`GET /{id}/runtime-logs`／`POST /{id}/logs/interpret` | ✅ |
 | `GET|PUT /{id}/runtime-settings`／`GET /{id}/resource-usage` | ✅ |
