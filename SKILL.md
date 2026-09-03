@@ -77,7 +77,12 @@ python scripts/check_update.py     # macOS / Linux 用 python3
 
 ### 流程
 
-1. 確認 `.aigo/config.json` 中 `email` 和 `app_id` 已設定
+1. **找工作區、定目標**：先跑 `uv run --project scripts python scripts/aigo_auth.py status`
+   ——它會從目前目錄往上找最近的 `.aigo/config.json`（工作區＝一個租戶），印出生效的租戶、
+   身分來源、app 登錄表與警告。需要 app 的工作一律用 `aigo_auth.resolve_app()` 取目標
+   （`--app`／`AIGO_APP` → `default_app` → 登錄表唯一一筆 → 多筆未指定就**報錯列出 alias，不猜**），
+   **不要自己讀 config 抓 `app_id`**。登錄表為空是合法狀態（純資料中心工作不需要 app）——
+   只有要動 VFS／發布時才要求有 app。找不到工作區 → 進 Phase 1 建立
 2. 呼叫 `aigo_auth.get_token()` 取得 JWT——**不要向用戶要密碼**。
    該函式依序嘗試「未過期的 Token 快取 → refresh_token 換發 → 用憑證檔
    （`<專案>/.aigo/.env` → `~/.aigo/.env`）的帳密登入」，正常情況下完全無感。
@@ -160,19 +165,49 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
 - 腳本端已把規則寫死在 `aigo_auth.resolve_base_url()`：**沒有預設值**，
   填 apex 會直接被擋下並印出規則。不要在任何地方硬編 `https://ai-go.app`。
 
-### 配置檔 `.aigo/config.json`
+### 三層模型：裝置 → 工作區 → app（1.22.0 起）
+
+同一套機制從「1 租戶 1 app」平順長到「N 租戶 N app」，使用者不需要先自我歸類：
+
+| 層 | 落點 | 範圍 | 規則 |
+|---|---|---|---|
+| 裝置 | skill **一份**（user scope）；`~/.aigo/.env` 放預設帳密 | 每台機器 | 不 by app、不 by 租戶裝多份；`AIGO_TENANT` 可選，多租戶機器建議留空 |
+| 身分 | `<工作區>/.aigo/.env` 覆寫 → `~/.aigo/.env` | 每人每租戶 | 同 email 在不同租戶是不同帳號，租戶不同就在工作區覆寫 |
+| 工作區 | 含 `.aigo/config.json` 的目錄＝**一個租戶**，內含 0..n 個 app | 每個目錄 | 多一個租戶＝多一個目錄；多一個 app＝登錄表多一筆；token.json 跟工作區走 |
+
+### 配置檔 `.aigo/config.json`（schema 2）
 
 ```json
 {
+  "schema": 2,
   "base_url": "https://urfit.ai-go.app",
   "email": "",
-  "app_id": "",
-  "app_slug": "",
-  "app_name": "",
-  "access_mode": "internal",
-  "app_domain": ""
+  "default_app": "erp",
+  "apps": {
+    "erp":  {"kind": "custom", "id": "<uuid>", "slug": "", "name": "", "access_mode": "internal", "app_domain": "erp"},
+    "site": {"kind": "hosted", "id": "<uuid>", "slug": "", "name": "", "integration_id": "", "path": "../site-src"}
+  }
 }
 ```
+
+- `apps` 以 **alias** 當 key——alias 是對話與指令用的短名，UUID 只從表裡查；`apps` 可為空
+- 舊格式（頂層 `app_id`…）讀入時自動升級成 `apps.default` 一筆，檔案不動；
+  `aigo_auth.py config migrate` 才會改寫檔案
+- Hosted App 的 `integration_id` 是隨附整合 id，預設表引用的 API 用它當 key（`hosted-apps.md` §5）；
+  Deploy Token 放工作區 `.aigo/.env` 的 `AIGO_DEPLOY_TOKEN__<ALIAS 大寫>`，
+  `aigo_auth.py run <alias> -- aigo hosted deploy …` 會匯出成 `AIGO_DEPLOY_TOKEN` 再執行
+
+**選 app 的順序固定，不猜**（`resolve_app()`）：`--app`／`AIGO_APP`（alias、UUID 或前綴）
+→ `AIGO_APP_ID`（相容舊版）→ `default_app` → 登錄表唯一一筆 → 其餘報錯列出 alias。
+單 app 工作區永遠走到「唯一一筆」，感覺不到登錄表存在。
+
+| 指令 | 作用 |
+|---|---|
+| `aigo_auth.py setup-workspace <dir>` | 在租戶目錄建 `.aigo/config.json` 骨架＋工作區 `.env` 範本（拒絕 skill 安裝目錄） |
+| `aigo_auth.py app add <alias> --id <uuid>` | 登錄 app：打平台自動判定 custom／hosted 並回填 slug、name、access_mode／integration_id |
+| `aigo_auth.py app list`／`default <alias>`／`remove <alias>` | 登錄表維護 |
+| `aigo_auth.py status` | 唯一診斷入口：工作區、租戶與來源、身分與來源、app 表、token、警告（cwd 在 skill 目錄內、多份安裝、shell 覆寫與 config 不同） |
+| `aigo_auth.py run <alias> -- <cmd>` | 在該 app 環境下執行指令（Hosted CLI 用） |
 
 #### base_url 的三層來源（`resolve_base_url()`，特定性越高越優先）
 
@@ -191,8 +226,9 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
 
 ### 設定流程
 
-1. 檢查專案目錄下 `.aigo/config.json` 是否存在
-2. 不存在 → 建立骨架（可用 `scripts/aigo_auth.py` 的 `init_config()`；`base_url` 會留空）
+1. `aigo_auth.py status`——從目前目錄往上找工作區（`.aigo/config.json`）
+2. 找不到 → `aigo_auth.py setup-workspace <租戶目錄>` 建立骨架（`base_url` 會留空；
+   **不可放在 skill 安裝目錄內**，指令會擋）。同一台機器要開第二個租戶＝再開一個目錄
 3. 引導用戶：
    - 前往 AI GO 後台 `https://[tenant].ai-go.app/dashboard`
    - **記下網址列的租戶前綴**，填入 `.aigo/config.json` 的 `base_url`
@@ -205,20 +241,23 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
      **access_mode 由模板決定、建立後不可改**，回應的 `id` 就是 `app_id`。
      完整契約與「起手式帶示範檔案要先清」等注意事項見
      `references/custom-app-dev-guide.md` §26
-   - 填入 `.aigo/config.json` 的 `email` 和 `app_id`
+   - 填入 `.aigo/config.json` 的 `email`；app 用 `aigo_auth.py app add <alias> --id <uuid>` 登錄
+     （會自動回填 slug／name／access_mode；第一筆自動成為 `default_app`）。
+     一個工作區有多個 app 時每個都登錄一筆，操作時用 alias 指定
 4. 建立憑證檔（**整台機器只需做一次**）：
    ```bash
-   uv run python scripts/aigo_auth.py setup    # 產生 ~/.aigo/.env 範本（機器級）
+   uv run --project scripts python scripts/aigo_auth.py setup    # 產生 ~/.aigo/.env 範本（機器級）
    ```
    請用戶自己在 `~/.aigo/.env` 填入 `AIGO_EMAIL` / `AIGO_PASSWORD`，
-   然後 `uv run python scripts/aigo_auth.py login` 驗證。
-5. 隨時可用 `uv run python scripts/aigo_auth.py status` 確認**實際生效的租戶空間**與憑證狀態
-6. 驗證連線：`get_token()` → GET App → 自動回填 `slug`、`name`、`access_mode`
+   然後 `uv run --project scripts python scripts/aigo_auth.py login` 驗證。
+5. 隨時可用 `uv run --project scripts python scripts/aigo_auth.py status` 確認**實際生效的租戶空間**與憑證狀態
+6. 驗證連線：`get_token()` → `resolve_app()` → GET App，`assert_remote_matches()` 確認遠端與登錄表一致
 
 ### 憑證規則（★ 不可違反）
 
-- 帳密預設放**機器級**的 `~/.aigo/.env`；`<專案>/.aigo/.env` 可覆寫個別鍵
-  （例如該 app 的 `AIGO_APP_ID` / `AIGO_SLUG`），先找到的優先。兩者都在 `.gitignore` 涵蓋範圍內。
+- 帳密預設放**機器級**的 `~/.aigo/.env`；`<工作區>/.aigo/.env` 可覆寫個別鍵
+  （該租戶用另一組帳號、Hosted App 的 `AIGO_DEPLOY_TOKEN__<ALIAS>`），先找到的優先。
+  兩者都在 `.gitignore` 涵蓋範圍內。app 的 UUID 放 `config.json` 的登錄表，不放 `.env`
 - **絕不把憑證寫進 Skill 安裝目錄**（`.claude/skills/aigo-builder/` 等）：
   `npx skills update` 會刪掉整個 skill 資料夾再重建，放在裡面的 `.env` / `token.json`
   會直接消失且無從還原。執行任何 `aigo_auth.py` 指令前，先確認 CWD 是**用戶的 app 專案**，
@@ -273,6 +312,9 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
    - 若需求涵蓋 2 群以上不同功能與目的的情景，**必須建議用戶分別做成不同的 Custom App**
    - 例如：「客戶管理」和「財務報表」應為 2 個獨立 App
    - 每個 App 的 `app_domain` 標籤建議值
+   - **拆出來的每個 app（Custom 或 Hosted）都要進工作區登錄表**：建好後
+     `aigo_auth.py app add <alias> --id <uuid>`，alias 用計畫裡的短名；
+     之後對話與指令一律用 alias 指稱，UUID 不在對話裡傳遞
 
 3. **資料架構設計**（★ 必須遵循雙軌分流策略，見 Phase 3 規則 18）
    - **先盤受眾**（★ 決定資料存取層的寫法，見規則 31）：這個 app 會開給誰？
@@ -621,6 +663,9 @@ if (file) downloadFile(file);
 
 ### 4.1 標準部署流程
 
+0. **定目標並印出來**：`app = resolve_app(root, alias)` → `print(app.describe())`
+   → GET app 後 `assert_remote_matches(app, info)`。工作區有多個 app 而本次沒指定 →
+   `resolve_app` 會報錯列出 alias，**問用戶，不要猜**。`full_deploy()` 自己也會印目標行
 1. **同步 VFS**：讀取本地檔案 → PATCH `/api/v1/builder/apps/{id}/source/files`
    - 腳本：`scripts/aigo_sync.py` 的 `sync_to_cloud()`
    - ★ 內建二次驗證：PATCH 後自動 GET 確認 vfs_version 遞增 + 檔案確實寫入
@@ -744,7 +789,7 @@ if (file) downloadFile(file);
 被平台缺陷擋住流程——**直接回報給開發團隊**，不要繞道硬改：
 
 ```bash
-uv run python scripts/report_issue.py submit "一句話標題" \
+uv run --project scripts python scripts/report_issue.py submit "一句話標題" \
   --expected "預期行為" --actual "實際結果（含錯誤原文）" --steps "重現步驟" \
   --image 截圖.png   # UI 問題附截圖（可重複，最多 10 張），會內嵌在卡片裡
 ```

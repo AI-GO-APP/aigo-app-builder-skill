@@ -137,6 +137,10 @@ curl -fsSL https://raw.githubusercontent.com/AI-GO-APP/aigo-cli-releases/main/in
 - **鑑權優先序**：env `AIGO_DEPLOY_TOKEN` ＞ `aigo login --token` 存的 profile
   ＞ 瀏覽器 session。Deploy Token 從詳情頁「設定」tab 發行（raw 只給一次）；
   token 值用 stdin 餵 `aigo login --token`，別放指令列參數（進 shell history）
+- **多 app／多租戶裝置的建議做法（1.22.0）**：把 token 放工作區 `.aigo/.env` 的
+  `AIGO_DEPLOY_TOKEN__<ALIAS 大寫>`，用 `aigo_auth.py run <alias> -- aigo hosted deploy …`
+  執行——它會匯出成 `AIGO_DEPLOY_TOKEN`（優先序最高），CLI 的全域 profile 不會互相蓋；
+  app 本身先 `aigo_auth.py app add <alias> --id <hosted app uuid>` 登錄（SKILL.md Phase 1）
 - **⚠️ `--slug` 語意**：命中既有 slug＝**redeploy**，否則**註冊新 app**；
   未給則取目錄名 normalize。打錯 slug 不會報錯、會多一個 app——部署前先 `aigo hosted list` 核對
 - **專案目錄＝cwd**（沒有 `--path`）；打包自動排除 `.git`／`node_modules`

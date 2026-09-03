@@ -48,21 +48,21 @@
 
 ```bash
 # 提交（建議用結構化參數，會自動組成 BDD 格式）
-uv run python scripts/report_issue.py submit "一句話標題" \
+uv run --project scripts python scripts/report_issue.py submit "一句話標題" \
   --expected "預期行為" --actual "實際結果（含錯誤原文）" \
   --steps "重現步驟" --context "租戶/app_id/時間"
 
 # UI／畫面問題請附截圖（--image 可重複，最多 10 張；png/jpg/webp/gif 單張 ≤8MB）
 # 圖片會內嵌在開發團隊的卡片裡
-uv run python scripts/report_issue.py submit "標題" \
+uv run --project scripts python scripts/report_issue.py submit "標題" \
   --expected "…" --actual "…" --image 截圖1.png --image 截圖2.png
 
 # 內文較長時寫進檔案
-uv run python scripts/report_issue.py submit "標題" --body-file report.md
+uv run --project scripts python scripts/report_issue.py submit "標題" --body-file report.md
 
 # 追蹤：清單（含狀態）／單筆詳情（含官方回覆）
-uv run python scripts/report_issue.py list
-uv run python scripts/report_issue.py show <ticket_id>
+uv run --project scripts python scripts/report_issue.py list
+uv run --project scripts python scripts/report_issue.py show <ticket_id>
 ```
 
 狀態值域：`To be decided` →（團隊排程）→ `Backlog` / `In progress` /

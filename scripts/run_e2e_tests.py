@@ -37,15 +37,23 @@ except RuntimeError as e:
 
 EMAIL = os.environ.get("AIGO_EMAIL", "")
 PASSWORD = os.environ.get("AIGO_PASSWORD", "")
-APP_ID = os.environ.get("AIGO_APP_ID", "")
-SLUG = os.environ.get("AIGO_SLUG", "")
 
-if not EMAIL or not PASSWORD or not APP_ID:
-    print("❌ 缺少憑證：AIGO_EMAIL, AIGO_PASSWORD, AIGO_APP_ID")
+# 目標 app：工作區登錄表（--app／AIGO_APP → default_app → 唯一一筆），相容舊的 AIGO_APP_ID
+from aigo_auth import resolve_app
+try:
+    _target = resolve_app(os.environ.get("AIGO_PROJECT_ROOT", "."))
+except RuntimeError as e:
+    print(e)
+    sys.exit(1)
+APP_ID = _target.id
+SLUG = _target.slug or os.environ.get("AIGO_SLUG", "")
+print(_target.describe())
+
+if not EMAIL or not PASSWORD:
+    print("❌ 缺少憑證：AIGO_EMAIL, AIGO_PASSWORD")
     print("   建議做法（設定一次即可）：")
-    print("     uv run python scripts/aigo_auth.py setup   # 建立 ~/.aigo/.env 後填入帳密")
-    print("     AIGO_APP_ID / AIGO_SLUG 放該 app 專案的 .aigo/.env，並用 AIGO_PROJECT_ROOT 指過去")
-    print("   或臨時用環境變數：$env:AIGO_EMAIL='xxx'; $env:AIGO_PASSWORD='xxx'; $env:AIGO_APP_ID='xxx'")
+    print("     uv run --project scripts python scripts/aigo_auth.py setup   # 建立 ~/.aigo/.env 後填入帳密")
+    print("   或臨時用環境變數：$env:AIGO_EMAIL='xxx'; $env:AIGO_PASSWORD='xxx'")
     sys.exit(1)
 
 # === 測試框架 ===

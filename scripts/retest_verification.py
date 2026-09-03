@@ -18,12 +18,16 @@ except RuntimeError as e:
     print(e)
     sys.exit(1)
 
-APP_ID = os.environ.get("AIGO_APP_ID", "")
-SLUG = os.environ.get("AIGO_SLUG", "")
-
-if not APP_ID:
-    print("❌ 缺少 AIGO_APP_ID（寫進該 app 專案的 .aigo/.env，並用 AIGO_PROJECT_ROOT 指過去）")
+# 目標 app：工作區登錄表（--app／AIGO_APP → default_app → 唯一一筆），相容舊的 AIGO_APP_ID
+from aigo_auth import resolve_app
+try:
+    _target = resolve_app(os.environ.get("AIGO_PROJECT_ROOT", "."))
+except RuntimeError as e:
+    print(e)
     sys.exit(1)
+APP_ID = _target.id
+SLUG = _target.slug or os.environ.get("AIGO_SLUG", "")
+print(_target.describe())
 
 try:
     token = get_token(os.environ.get("AIGO_PROJECT_ROOT", "."))

@@ -349,6 +349,7 @@ def check(force: bool = False) -> dict:
         "update_command": _update_command(method),
         "apply_all_command": _apply_all_command(),
         "other_installs": _survey_other_installs(state, remote),
+        "install_count": len(_installs(state)),
         "changelog": changelog,
         "breaking": bool(changelog and any(m in changelog for m in BREAKING_MARKERS)),
     }
@@ -427,6 +428,11 @@ def main() -> int:
             for i in outdated_others:
                 print(f"  - {i['path']}（{i['local']}，{i['install_method']} 安裝）")
             print(f"一次更新本機所有 git 安裝：{result['apply_all_command']}")
+        if result.get("install_count", 1) > 1:
+            print(
+                f"ℹ️ 本機註冊了 {result['install_count']} 份 skill 安裝。"
+                "建議只留 user scope 一份（租戶與 app 都在各工作區的 .aigo/ 裡，不需要多份 skill）。"
+            )
         print("請先告知使用者版本落差並取得同意，不要逕自覆寫本地檔案。")
     return 0
 
