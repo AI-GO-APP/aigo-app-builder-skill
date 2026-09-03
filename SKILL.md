@@ -65,6 +65,11 @@ python scripts/check_update.py     # macOS / Linux 用 python3
 |------|------|
 | **開發新 App**（從零做新功能） | 直接走主流程（Phase 0 →） |
 | **現有 App 遷入**（有既存系統／repo／DB 要搬進 AI GO） | **先讀 `references/migration-workflow.md`，從 §2.0 的 stack 盤點做起**（架構師視角：先盤前端／後端／資料的結構，再分流產品線），之後才回主流程 |
+| **資料操作，不開發 app**（查、改、批次、匯出自己有權限的資料） | **走 `references/data-operations.md` 的短流程**：`aigo_auth.py status` → `aigo_data.py me` → `perm-check` → `openapi` 查路由 → `call`／`export`。不進 Phase 0 的 VFS review、不建 app、不走 proxy——用登入者自己的 token 與權限 |
+
+**資料操作意圖的偵測訊號**：用戶要「查一下／改一批／匯出／灌資料」而沒有提到畫面、功能、
+app；或問「我有沒有權限看某表」。這條線的權限是使用者在平台介面上的權限：預設表依模組
+角色（`sale.read` 等），自建表需 `builder.access`——先跟用戶說清楚再動手，寫入前必經用戶確認。
 
 **遷入意圖的偵測訊號**（出現任一就主動確認，不要等用戶自己說「遷移」）：
 用戶提到現有系統、既有網站、某個 repo、Supabase／Google Sheet／MySQL 等資料來源、
@@ -814,3 +819,4 @@ uv run --project scripts python scripts/report_issue.py submit "一句話標題"
 | `references/issue-reporting.md` | **回報平台問題時**：BDD 撰寫規範、指令、進度追蹤 |
 | `references/platform-behaviors.md` | **實測行為補遺**：DB Proxy 分頁與筆數上限、`custom_data` 不可伺服器端過濾、TIMESTAMP 格式、seed 表唯讀、`ctx.erp` 白名單、空渲染偵測、API 權限閘 |
 | `references/hosted-apps.md` | **Hosted App（「自訂 App」）產品線**：與 Custom App 的邊界、部署 API、env 規則、錯誤碼對照——Phase 1.5 判斷走這條線時讀 |
+| `references/data-operations.md` | **資料操作模式（不開發 app）**：四條使用者身分資料面與權限閘、模組 REST 慣例、匯出白名單、Meta 值域——源頭意圖判成「資料操作」時讀 |

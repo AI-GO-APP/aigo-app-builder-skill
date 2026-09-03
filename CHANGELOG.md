@@ -4,6 +4,28 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.23.0
+
+### 資料操作模式：不開發 app，以使用者身分直接讀寫 AI GO 資料
+
+用戶的目的是操作資料（查、改、批次、匯出）而不是做 app 時，原本只有自建表這一半能直接做，
+預設表寫入一定要繞經 app proxy 加 Data Reference。本版把「登入使用者身分」的四條資料面
+補齊並實測（2026-09-03 demo 租戶，讀寫刪往返）：
+
+- **新增 `references/data-operations.md`**：預設表走各模組 REST（`<module>.read/write/delete`，
+  與平台 UI 同一套 RBAC）；自建表 records（`builder.access` 一刀切、無表級 ACL）；
+  匯出白名單 6 張預設表（自建表不在範圍、`custom_table` 指舊 CustomObject）；
+  Meta API 值域（Meta key ≠ proxy 表名，客戶是 `crm_clients`）；固定流程與不做的事
+- **新增 `scripts/aigo_data.py`**：`me`（身分與 permissions）、`perm-check`（路徑前綴 → 權限推估，
+  `system.admin` 直通）、`openapi paths|op|schema`（路由權威是免登入的 `/api/v1/openapi.json`，
+  733 條路徑，不手抄；body schema 展開成欄位與必填）、`call`（通用呼叫，`--all` 依 openapi 分頁形狀
+  自動翻頁：`skip/limit` 與 `page/page_size` 模組間不一致；寫入前印租戶與身分並先 perm-check）、
+  `export`（建任務、輪詢、下載）、`meta tables|table`
+- **SKILL.md 源頭意圖分流加第三種意圖「資料操作，不開發 app」**：不進 Phase 0 VFS review、
+  不建 app、不走 proxy；偵測訊號與權限說明義務
+- 拆掉兩條「prod 待驗證」註記：Meta API 的 options（dev-guide §20.2）、records 面 date 範圍查詢
+  （platform-behaviors §1.5）——demo 實測皆可用
+
 ## 1.22.0
 
 ### 工作區 app 登錄表：一台裝置、一份 skill、N 租戶 N app，同一套機制

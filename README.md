@@ -134,6 +134,7 @@ aigo-builder/
 │   ├── event-triggers.md             # Webhook 與 App 排程
 │   ├── migration-workflow.md         # 有現存系統要遷入時
 │   ├── verification-details.md       # 要執行驗證時
+│   ├── data-operations.md            # 資料操作模式：不開發 app，以使用者身分直接讀寫資料
 │   └── troubleshooting.md            # 出錯時
 ├── resources/
 │   ├── vfs_template.json             # VFS 範本（單頁/多頁）
@@ -153,6 +154,7 @@ aigo-builder/
     ├── aigo_compile.py               # 編譯（呼叫雲端編譯 API）
     ├── aigo_publish.py               # 發布（發布 App、狀態檢查）
     ├── aigo_data_center.py           # 資料中心自建表（租戶級：結構 + 記錄 CRUD）
+    ├── aigo_data.py                  # 資料操作模式：me／perm-check／openapi 查路由／通用 call 翻頁／匯出／Meta 值域
     ├── aigo_runtime_verify.py        # Runtime 驗證（編譯產物／發布一致性／CRUD／Action）
     ├── aigo_e2e.py                   # E2E 整合流程
     ├── retest_verification.py        # 驗證重跑工具
