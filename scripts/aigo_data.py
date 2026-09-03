@@ -328,7 +328,7 @@ def export_create(s: Session, target: str, fmt: str = "json", filters: dict | No
     """建立匯出任務。`target` 是白名單預設表名（source_type=erp_table）或舊 CustomObject 的 UUID。
 
     ⚠️ 資料中心**自建表不在**匯出範圍（`custom_table` 指的是舊 CustomObject，
-    2026-09-03 demo 實測以自建表 id 送會 failed「custom object not in tenant」）——
+    2026-09-03 測試租戶實測以自建表 id 送會 failed「custom object not in tenant」）——
     自建表要整表取出用 `call GET /api/v1/data-center/tables/{key}/records --all`。
     """
     st = source_type or ("custom_table" if "-" in target and len(target) >= 32 else "erp_table")

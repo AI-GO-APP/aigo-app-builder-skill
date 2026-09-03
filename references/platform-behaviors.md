@@ -94,7 +94,7 @@ queryAdvanced(table, {
   下游就在錯的列上寫資料。proxy 查詢寫完先用一個必然不存在的值打一次，回整表就是形狀錯
 - `not_in`、`neq`、`!=`、`equals`、`contains`、`between` 在 proxy 面都是 400——`contains` 是 records 面的字
 - records 面 `gte`／`lte` 對 `date`／`datetime` 的字串值（如 `"2020-01-01"`）：
-  **2026-09-03 demo 租戶實測 200**，已可用；若在其他租戶撞到 500 `DataError` 先懷疑部署落差
+  **2026-09-03 測試租戶實測 200**，已可用；若在其他租戶撞到 500 `DataError` 先懷疑部署落差
 
 ---
 

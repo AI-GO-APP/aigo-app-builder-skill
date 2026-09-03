@@ -623,7 +623,7 @@ Authorization: Bearer {access_token}
 > 值域來源有兩個，規劃匯入 payload 時**先查再寫**，不要對正式租戶試寫：
 >
 > 1. **Meta API** `GET /api/v1/data-center/meta/tables/{key}`（登入即可）——回傳 `FieldDef`，
->    select 型欄位帶 `options`。**2026-09-03 demo 租戶實測已可用**（193 張：85 預設＋108 自建）：
+>    select 型欄位帶 `options`。**2026-09-03 測試租戶實測已可用**（193 張：85 預設＋108 自建）：
 >    `crm_clients` 回 `customer_type ∈ [company, individual]`、`sale_orders` 回 `state`／`tax_type`／
 >    `invoice_format` 的值域。⚠️ **Meta key ≠ proxy／refs 面的表名**（客戶在 Meta 是 `crm_clients`，
 >    proxy 面是 `customers`）——先 `aigo_data.py meta tables --grep` 找 key 再取

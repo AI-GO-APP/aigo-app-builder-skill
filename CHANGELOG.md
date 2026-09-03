@@ -10,7 +10,7 @@
 
 用戶的目的是操作資料（查、改、批次、匯出）而不是做 app 時，原本只有自建表這一半能直接做，
 預設表寫入一定要繞經 app proxy 加 Data Reference。本版把「登入使用者身分」的四條資料面
-補齊並實測（2026-09-03 demo 租戶，讀寫刪往返）：
+補齊並實測（2026-09-03 測試租戶，讀寫刪往返）：
 
 - **新增 `references/data-operations.md`**：預設表走各模組 REST（`<module>.read/write/delete`，
   與平台 UI 同一套 RBAC）；自建表 records（`builder.access` 一刀切、無表級 ACL）；
@@ -24,7 +24,7 @@
 - **SKILL.md 源頭意圖分流加第三種意圖「資料操作，不開發 app」**：不進 Phase 0 VFS review、
   不建 app、不走 proxy；偵測訊號與權限說明義務
 - 拆掉兩條「prod 待驗證」註記：Meta API 的 options（dev-guide §20.2）、records 面 date 範圍查詢
-  （platform-behaviors §1.5）——demo 實測皆可用
+  （platform-behaviors §1.5）——測試租戶實測皆可用
 
 ## 1.22.0
 
