@@ -377,7 +377,7 @@ Builder UI 對應「套件」面板（用面板儲存會清掉檔案裡的註解
 
 | 問題 | 解法 |
 |------|------|
-| 白屏 | 檢查 main.tsx 掛載和 App.css import |
+| 白屏 | 檢查 main.tsx 掛載和 App.css import；console 有 `Cannot access 'X' before initialization` → 自家碼的 TDZ，compile 不驗型別，發布前跑 `aigo_typecheck.py` → `troubleshooting.md` |
 | 路由不動 | HashRouter，非 BrowserRouter |
 | 無法捲動 | Layout height:100vh + overflow-y:auto |
 | CSS 變數無效 | :host, :root 雙選擇器 |

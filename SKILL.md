@@ -674,8 +674,16 @@ if (file) downloadFile(file);
 1. **同步 VFS**：讀取本地檔案 → PATCH `/api/v1/builder/apps/{id}/source/files`
    - 腳本：`scripts/aigo_sync.py` 的 `sync_to_cloud()`
    - ★ 內建二次驗證：PATCH 後自動 GET 確認 vfs_version 遞增 + 檔案確實寫入
+1.5. **語意檢查**（★ 前端有實質修改時必跑）：`uv run --project scripts python scripts/aigo_typecheck.py <專案目錄>`
+   - **compile 走 esbuild，只轉譯不驗型別**：`const` 宣告前被使用（TDZ）、找不到名稱、重複宣告
+     這類錯誤 compile 全綠、發布後 runtime 白畫面，且堆疊只有 minified 名稱與 esm.sh 的
+     React 呼叫鏈（`troubleshooting.md` 白畫面列）。這一步是唯一能在發布前抓到它們的閘
+   - 腳本只**阻擋會炸 runtime 的語意錯誤**（TS2448／2454／2451／2300／2304…），
+     缺型別套件的噪音只列不擋；本機沒有 Node 會印提示並略過——此時要**告知用戶**
+     這道閘沒跑，或請用戶在 Builder AI 用 `check_types` 補跑（平台有此工具但無 REST 端點）
 2. **編譯**：POST `/api/v1/compile/compile/{slug}?dev=true`
    - 腳本：`scripts/aigo_compile.py` 的 `compile_app()`
+   - ⚠️ `success: true` 且 `compile_errors: []` 只代表**轉譯成功**，不代表程式語意正確（見 1.5）
 3. **編譯失敗**：解析錯誤 → 嘗試自動修復 → 重新同步 → 重新編譯（最多 5 次）
 4. **編譯成功 → 進入驗證閘門**（Phase 4.2）
 
