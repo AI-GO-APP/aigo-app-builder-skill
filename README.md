@@ -152,6 +152,7 @@ aigo-builder/
     ├── aigo_scaffold.py              # 腳手架（VFS 下載到本地）
     ├── aigo_sync.py                  # 同步（差異比對、上傳）
     ├── aigo_compile.py               # 編譯（呼叫雲端編譯 API）
+    ├── aigo_typecheck.py             # 發布前語意檢查（tsc --noEmit）：esbuild compile 不驗型別，TDZ 等錯誤只在這裡抓得到
     ├── aigo_publish.py               # 發布（發布 App、狀態檢查）
     ├── aigo_data_center.py           # 資料中心自建表（租戶級：結構 + 記錄 CRUD）
     ├── aigo_data.py                  # 資料操作模式：me／perm-check／openapi 查路由／通用 call 翻頁／匯出／Meta 值域

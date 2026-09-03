@@ -4,6 +4,25 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.24.0
+
+### 發布前語意檢查：esbuild compile 不驗型別，TDZ 白畫面在發布前就攔下（issue #35）
+
+`const` 在宣告前被使用（TS2448）這類語意錯誤 compile 全綠、發布後 runtime 白畫面，
+console 只有 `Cannot access 'Ee' before initialization` 加 esm.sh scheduler 的堆疊——
+症狀指向平台，真因在自家 bundle。平台的 Builder AI 有 `check_types` 但無 REST 端點，本版在本機補同一道閘：
+
+- **新增 `scripts/aigo_typecheck.py`**：src 落臨時目錄＋esbuild loader 的資產宣告，`npx tsc --noEmit`
+  （tsconfig 對齊平台 typecheck.py）；只阻擋會炸 runtime 的語意錯誤（TS2448／2454／2451／2300／2304／2552／語法），
+  缺 @types 的噪音只列不擋；`--strict` 全擋；無 Node 略過並提示
+- **SKILL.md Phase 4 加步驟 1.5**（前端有實質修改時必跑）與 compile 綠燈的語意說明；
+  verification-details 加 ⓪ 語意檢查
+- **troubleshooting**：白畫面＋TDZ 堆疊的判讀條目（定位法、修法）；「查不到怎麼辦」加第 4 點
+  「懷疑平台全域故障前先做乾淨對照」（同 profile 多 app 交叉比對會被快取污染）
+- **issue-reporting**：新增「回報前先窮盡使用者側的可能」四步（乾淨對照、回到自己的產物、
+  確認平台既有路徑、乾淨環境可重現才回報）
+- dev-guide §17 白屏列同步
+
 ## 1.23.0
 
 ### 資料操作模式：不開發 app，以使用者身分直接讀寫 AI GO 資料

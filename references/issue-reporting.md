@@ -16,6 +16,17 @@
 **不要回報**：App 自己的 bug、troubleshooting 已有解的症狀、
 還沒讀完錯誤訊息就想丟出去的問題。
 
+**回報前先窮盡使用者側的可能**（★ 平台事故單發錯的代價很高）：
+
+1. **乾淨環境對照**：無痕視窗／新 profile 開同一支 app，或新建 hello-world app 對照。
+   同一 profile 連開多支 app 的交叉比對會被快取污染，「沒動過的 app 也壞了」不是證據
+   （`troubleshooting.md`「查不到怎麼辦」第 4 點）
+2. **回到自己的產物**：白畫面先看 console；`ReferenceError` 帶 minified 名稱＝自家 bundle，
+   跑 `aigo_typecheck.py`。compile 綠燈不是「程式正確」的證據
+3. **確認平台有沒有既有路徑**：想要的能力可能已存在於別的入口（例如型別檢查在 Builder AI 的
+   `check_types`、值域在 Meta API）——「API 沒提供」要先查 `references/` 與 openapi 再說
+4. 以上都排除、且症狀能在乾淨環境重現 → 才回報
+
 ## 怎麼寫（★ BDD：描述行為，不是開藥方）
 
 開發團隊需要的是**可重現的行為事實**。寫：

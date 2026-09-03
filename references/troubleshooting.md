@@ -9,7 +9,8 @@
 
 | 錯誤 | 解法 |
 |------|------|
-| 白屏 | 確認 `src/main.tsx` 正確掛載 React |
+| 白屏 | 確認 `src/main.tsx` 正確掛載 React；**先開 console**——有 `ReferenceError` 看下一列 |
+| **白畫面＋console `Uncaught ReferenceError: Cannot access 'Ee' before initialization`，堆疊首幀在 `esm.sh/scheduler…`** | **app 自己的 use-before-declaration（TDZ）**，不是平台或 esm.sh 壞了。compile 走 esbuild**只轉譯不驗型別**，`compile_errors: []` 照樣過；`'Ee'` 是自家 bundle 的 minified 變數名（每次編譯會變）。定位（兩種，都不必手動比對 bundle offset）：① **bundle 內含 inline source map（含 sourcesContent，2026-09-03 實測）**——devtools 開著 JS source maps，把 console 那則錯誤的堆疊展開，esm.sh 那幾幀下面就是 `src/App.tsx:行號` 的原始位置；② 本機跑 `aigo_typecheck.py`，TS2448 直接指到原始檔行號。修法：把宣告移到使用之前。**發布前跑 typecheck 就不會發生**（SKILL.md Phase 4 步驟 1.5） |
 | 路由不動 | 使用 `HashRouter`，不可用 `BrowserRouter` |
 | 頁面無法捲動 | Layout 需 `height: 100vh; overflow-y: auto` |
 | CSS 不生效 | 確認 `main.tsx` 中 `import "./App.css"` |
@@ -94,3 +95,8 @@
    **409**＝配額或衝突；**422**＝輸入不合法（欄位／型別／查詢契約）；
    **400**＝業務規則拒絕（tier 超限、草稿 app 建排程、暫停排程 run-now）
 3. 仍無解 → 回報用戶，附上完整請求與回應，**不要反覆重試**
+4. **懷疑「平台全域故障」之前，先做乾淨對照**：同一個瀏覽器 profile 連開多支 app 交叉比對時，
+   快取分區污染會讓「沒動過的 app」也呈現同樣的白畫面，強化全平台壞掉的錯覺。
+   可信的對照只有兩種——無痕視窗／新 profile 開同一支 app，或新建一支 hello-world app。
+   對照結果乾淨才可能是平台問題；否則回頭查自己的 bundle（上表白畫面列）。
+   2026-09-03 曾因此誤發兩張平台事故單

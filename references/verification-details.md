@@ -8,10 +8,18 @@
 
 使用 `scripts/aigo_runtime_verify.py` 執行。
 
+**⓪ 語意檢查**（★ 前端有實質修改時必跑；在 ① 之前）
+```
+uv run --project scripts python scripts/aigo_typecheck.py <專案目錄>
+  ✓ 沒有會炸 runtime 的語意錯誤（TS2448 宣告前使用／TS2304 找不到名稱／重複宣告…）
+  ℹ 缺 @types 的噪音只列不擋；無 Node 時略過並告知用戶
+```
+esbuild compile 不驗型別，這些錯誤只會在發布後以白畫面浮現（`troubleshooting.md`）。
+
 **① Compile 產物驗證**（★ 每次必跑）
 ```
 verify_compile_output(compile_result)
-  ✓ compile_success == true
+  ✓ compile_success == true      ← 只代表轉譯成功，語意正確與否看 ⓪
   ✓ html 含 <!DOCTYPE> 和 id="root"
   ✓ bundle_js 含 React（> 500 bytes）
   ✓ css 非空（> 50 bytes）
