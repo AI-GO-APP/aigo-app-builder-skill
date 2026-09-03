@@ -135,7 +135,9 @@ aigo-builder/
 │   ├── migration-workflow.md         # 有現存系統要遷入時
 │   ├── verification-details.md       # 要執行驗證時
 │   ├── data-operations.md            # 資料操作模式：不開發 app，以使用者身分直接讀寫資料
-│   └── troubleshooting.md            # 出錯時
+│   ├── troubleshooting.md            # 出錯時
+│   ├── pre-report-self-grill.md      # 回報平台問題前（必走）：預設平台正確、六輪自審
+│   └── issue-reporting.md            # 回報平台問題時：BDD 規範、指令
 ├── resources/
 │   ├── vfs_template.json             # VFS 範本（單頁/多頁）
 │   ├── migration_mapping_template.md # 外部 Schema ↔ AI GO 映射表模板

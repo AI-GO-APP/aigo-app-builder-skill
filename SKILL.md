@@ -798,12 +798,24 @@ if (file) downloadFile(file);
 
 ## 問題回報（平台問題 → 開發團隊）
 
+> ★ **預設平台必定正確；開發或使用失敗，預設是自己的 Agent 操作有誤。**
+> 回報前**必須**走完 `references/pre-report-self-grill.md` 的六輪自審：每個分支都要有
+> 指令＋輸出的證據排除「是我錯」，前沿為空、且純 API 可穩定重現（或 5xx／硬阻斷）
+> 才算平台問題。**不確定就不報**——把自審紀錄交給使用者決定；送出前仍要使用者確認。
+> `submit` 沒帶 `--ruled-out` 會被拒收，不建卡。
+
 遇到「平台自身」的問題——實測與文件不符、troubleshooting 查無此症或照表仍卡死、
-被平台缺陷擋住流程——**直接回報給開發團隊**，不要繞道硬改：
+被平台缺陷擋住流程——自審通過後**直接回報給開發團隊**，不要繞道硬改：
 
 ```bash
 uv run --project scripts python scripts/report_issue.py submit "一句話標題" \
   --expected "預期行為" --actual "實際結果（含錯誤原文）" --steps "重現步驟" \
+  --ruled-out "版本：…
+身分：…
+契約：…
+生命週期：…
+文件：…
+重現：…" \
   --image 截圖.png   # UI 問題附截圖（可重複，最多 10 張），會內嵌在卡片裡
 ```
 
@@ -811,6 +823,8 @@ uv run --project scripts python scripts/report_issue.py submit "一句話標題"
   不經平台（回報系統獨立部署，平台掛掉時照樣可報）
 - ★ 內容寫**行為**不寫解法：預期 vs 實際＋重現步驟；
   **不要**替用戶提出技術建議或實作方式——完整規範見 `references/issue-reporting.md`
+- ★ `--ruled-out` 是自審紀錄濃縮成的**已排除清單**（每行一項、至少三項），會附在卡片裡
+  讓開發團隊快速 triage；寫不出這段就代表還沒排除完
 - 追蹤進度與官方回覆：`report_issue.py list`／`show <ticket_id>`
 
 ## 參考文件
@@ -824,6 +838,7 @@ uv run --project scripts python scripts/report_issue.py submit "一句話標題"
 | `references/migration-workflow.md` | **有現存系統要遷入時**：stack 盤點（§2.0，最先做）、產品線／模式三向判斷（不可逆）、專案解構、Schema 映射、資料遷移 |
 | `references/verification-details.md` | **要執行驗證時**：四項驗證的完整定義、Phase 5 里程碑 |
 | `references/troubleshooting.md` | **出錯時**：錯誤速查表 |
+| `references/pre-report-self-grill.md` | **回報平台問題前（必走）**：預設平台正確、六輪自審排除樹、送出條件、已排除清單 |
 | `references/issue-reporting.md` | **回報平台問題時**：BDD 撰寫規範、指令、進度追蹤 |
 | `references/platform-behaviors.md` | **實測行為補遺**：DB Proxy 分頁與筆數上限、`custom_data` 不可伺服器端過濾、TIMESTAMP 格式、seed 表唯讀、`ctx.erp` 白名單、空渲染偵測、API 權限閘 |
 | `references/hosted-apps.md` | **Hosted App（「自訂 App」）產品線**：與 Custom App 的邊界、部署 API、env 規則、錯誤碼對照——Phase 1.5 判斷走這條線時讀 |
