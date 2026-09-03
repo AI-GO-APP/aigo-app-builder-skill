@@ -182,7 +182,7 @@ uv sync
 ## 憑證設定（每台機器只需一次）
 
 ```bash
-uv run python scripts/aigo_auth.py setup
+uv run --project scripts python scripts/aigo_auth.py setup
 ```
 
 會產生 **`~/.aigo/.env`**（家目錄，機器級）。用編輯器打開，填入你自己的帳密：
@@ -195,7 +195,7 @@ AIGO_PASSWORD=your-password
 驗證：
 
 ```bash
-uv run python scripts/aigo_auth.py login
+uv run --project scripts python scripts/aigo_auth.py login
 ```
 
 之後 Skill 內所有 API 呼叫都走 `aigo_auth.get_token()`——Token 快取在

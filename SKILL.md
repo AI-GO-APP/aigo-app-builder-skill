@@ -246,11 +246,11 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
      一個工作區有多個 app 時每個都登錄一筆，操作時用 alias 指定
 4. 建立憑證檔（**整台機器只需做一次**）：
    ```bash
-   uv run python scripts/aigo_auth.py setup    # 產生 ~/.aigo/.env 範本（機器級）
+   uv run --project scripts python scripts/aigo_auth.py setup    # 產生 ~/.aigo/.env 範本（機器級）
    ```
    請用戶自己在 `~/.aigo/.env` 填入 `AIGO_EMAIL` / `AIGO_PASSWORD`，
-   然後 `uv run python scripts/aigo_auth.py login` 驗證。
-5. 隨時可用 `uv run python scripts/aigo_auth.py status` 確認**實際生效的租戶空間**與憑證狀態
+   然後 `uv run --project scripts python scripts/aigo_auth.py login` 驗證。
+5. 隨時可用 `uv run --project scripts python scripts/aigo_auth.py status` 確認**實際生效的租戶空間**與憑證狀態
 6. 驗證連線：`get_token()` → `resolve_app()` → GET App，`assert_remote_matches()` 確認遠端與登錄表一致
 
 ### 憑證規則（★ 不可違反）
@@ -789,7 +789,7 @@ if (file) downloadFile(file);
 被平台缺陷擋住流程——**直接回報給開發團隊**，不要繞道硬改：
 
 ```bash
-uv run python scripts/report_issue.py submit "一句話標題" \
+uv run --project scripts python scripts/report_issue.py submit "一句話標題" \
   --expected "預期行為" --actual "實際結果（含錯誤原文）" --steps "重現步驟" \
   --image 截圖.png   # UI 問題附截圖（可重複，最多 10 張），會內嵌在卡片裡
 ```
