@@ -4,6 +4,35 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.22.0
+
+### 工作區 app 登錄表：一台裝置、一份 skill、N 租戶 N app，同一套機制
+
+原本 `.aigo/config.json` 一個專案綁一個 Custom App，在遷入分流出的 1..n app、
+Hosted＋Custom 混合案、跨 app 共用自建表、純資料 CRUD 這四種情境下都不成立。
+本版改成三層模型：裝置（skill 一份＋`~/.aigo/.env`）→ 工作區（一個目錄＝一個租戶）
+→ app 登錄表（0..n 筆，alias 當 key）。不分使用者類型，多一個租戶就多一個目錄、
+多一個 app 就多一筆。
+
+- **`config.json` schema 2**：`apps: {alias: {kind, id, slug, name, access_mode, app_domain,
+  integration_id, path}}` ＋ `default_app`。舊格式讀入時自動升級成 `apps.default` 並鏡射回
+  v1 鍵（既有呼叫端不用改）；`aigo_auth.py config migrate` 才改寫檔案並留 `.v1.bak`
+- **`resolve_app()` 是取目標 app 的唯一入口**：`--app`／`AIGO_APP`（alias、UUID 或前綴）→
+  `AIGO_APP_ID`（相容）→ `default_app` → 登錄表唯一一筆 → 多筆未指定**報錯列出 alias，不猜**。
+  回 `AppRef`，`.describe()` 給寫入前要印的目標行；`assert_remote_matches()` 比對遠端 id／name
+- **工作區往上找**：`find_workspace()` 從 cwd 往上找最近的 `.aigo/config.json`，
+  Hosted 原始碼子目錄下也找得到；token.json、工作區 `.env` 都跟工作區走
+- **CLI**：`setup-workspace <dir>`（拒絕 skill 安裝目錄）、`app add|list|default|remove`
+  （add 打平台自動判定 custom／hosted 並回填 slug／name／access_mode／integration_id）、
+  `run <alias> -- <cmd>`（把工作區 `.env` 的 `AIGO_DEPLOY_TOKEN__<ALIAS>` 匯出成 CLI 用的
+  `AIGO_DEPLOY_TOKEN`，多租戶裝置上 CLI 的全域 profile 不再互相蓋）、`config migrate`
+- **`status` 成為唯一診斷入口**：工作區、租戶與來源層、身分與來源檔、app 表（含預設標記與
+  deploy-token 有無）、token、三種警告（工作區在 skill 目錄內、本機多份安裝、shell 覆寫租戶與 config 不同）
+- `full_deploy()` 動手前印目標行；兩支測試跑器改走 `resolve_app`（`AIGO_APP_ID` 仍相容）；
+  `check_update.py` 註冊表超過一份安裝時提醒合併
+- 機器級 `.env` 範本改寫：`AIGO_TENANT` 標為可選，多租戶機器建議留空讓缺 config 的目錄明確報錯
+- SKILL.md Phase 0／1／1.5／4 與 README 同步：三層模型表、佈局圖、選 app 順序、指令表
+
 ## 1.21.0
 
 ### Hosted App 遷入實戰回填：綁定介面、無日誌建置失敗、`/open` 雙平面、relation 限制、預設表值域

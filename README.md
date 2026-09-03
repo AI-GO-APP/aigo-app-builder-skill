@@ -57,6 +57,26 @@ git clone https://github.com/AI-GO-APP/aigo-app-builder-skill.git .claude/skills
 
 </details>
 
+## 一台裝置怎麼整理：一份 skill、幾個租戶就幾個目錄、app 在目錄裡登錄
+
+skill 本身沒有任何租戶或 app 專屬內容，**不要 by app 或 by 租戶裝多份**（多份會漂移，
+更新時還會洗掉放在裡面的憑證）。租戶與 app 都在工作區的 `.aigo/` 裡：
+
+```
+~/.claude/skills/aigo-builder/        skill，只此一份（user scope）
+~/.aigo/.env                          預設帳密；AIGO_TENANT 可選（會存取多個租戶就留空）
+~/work/urfit-erp/.aigo/config.json    工作區＝一個租戶（base_url=urfit），apps 登錄表列該租戶的 app
+~/work/demo-lab/.aigo/config.json     另一個租戶；同目錄 .aigo/.env 可覆寫另一組帳密
+```
+
+- **多一個租戶＝多一個工作區目錄**（token 是租戶級，跟目錄走）
+- **多一個 app＝登錄表多一筆**：`aigo_auth.py app add <alias> --id <uuid>`，之後用 alias 指稱；
+  單 app 工作區不必指定，腳本自動選唯一那筆；多 app 未指定會**報錯列出 alias，不猜**
+- Hosted App 原始碼是獨立 repo 時仍不裝 skill 進去，登錄表的 `path` 指過去即可
+- 純資料中心工作（建表、CRUD）不需要 app，登錄表可為空
+- `project` scope 安裝只留給需要鎖 skill 版本的團隊 repo；本機超過一份時
+  `aigo_auth.py status` 與更新檢查都會提醒
+
 ## 保持更新
 
 Skill 內含版本標記（`VERSION`）與更新檢查腳本（`scripts/check_update.py`），
@@ -192,7 +212,7 @@ uv run python scripts/aigo_auth.py login
 | 順序 | 位置 | 用途 |
 |---|---|---|
 | 1 | 環境變數 `AIGO_EMAIL` / `AIGO_PASSWORD` … | 臨時覆寫、CI |
-| 2 | `<你的 app 專案>/.aigo/.env` | 專案專用（例如該專案用不同帳號，或放該 app 的 `AIGO_APP_ID` / `AIGO_SLUG`） |
+| 2 | `<工作區>/.aigo/.env` | 工作區專用（該租戶用不同帳號；Hosted App 的 `AIGO_DEPLOY_TOKEN__<ALIAS>`） |
 | 3 | `~/.aigo/.env` | 機器級預設，**建議放帳密** |
 
 先找到的優先；專案級只寫你要覆寫的鍵，其餘自動沿用機器級。
@@ -219,11 +239,13 @@ AIGO_TENANT=urfit
 | 順序 | 位置 | 定位 |
 |---|---|---|
 | 1 | shell 環境變數 `AIGO_BASE_URL` 或 `AIGO_TENANT` | 臨時覆寫、CI |
-| 2 | `<你的 app 專案>/.aigo/config.json` 的 `base_url` | 這個專案綁定的租戶 |
+| 2 | `<工作區>/.aigo/config.json` 的 `base_url`（從目前目錄往上找最近的） | 這個工作區綁定的租戶 |
 | 3 | `.env` 的 `AIGO_BASE_URL` 或 `AIGO_TENANT` | 機器級預設 |
 
 第 2 層會蓋過第 3 層——所以同一台機器可以一邊用 `AIGO_TENANT=urfit` 當預設，
-一邊讓某個 demo 租戶的專案在自己的 `config.json` 填 `"base_url": "https://demo.ai-go.app"`。
+一邊讓 demo 租戶的工作區在自己的 `config.json` 填 `"base_url": "https://demo.ai-go.app"`。
+會存取多個租戶的機器建議 `AIGO_TENANT` 留空：沒有 config 的目錄就會明確報錯，
+不會默默連到錯的租戶。
 
 > ⚠️ **打錯租戶的症狀是 401「帳號或密碼錯誤」**——平台為了防帳號列舉，
 > 讓「帳號不在這個租戶」與「密碼打錯」回完全相同的錯誤。看到 401 先跑
@@ -231,9 +253,13 @@ AIGO_TENANT=urfit
 
 | 指令 | 作用 |
 |---|---|
-| `aigo_auth.py setup` | 建立 `~/.aigo/.env` 範本（加專案路徑參數才寫進該專案，如 `setup ./my-app`） |
+| `aigo_auth.py setup` | 建立 `~/.aigo/.env` 範本（加工作區路徑才寫進該工作區，如 `setup ./urfit-erp`） |
+| `aigo_auth.py setup-workspace <dir>` | 在租戶目錄建立 `.aigo/config.json`（schema 2）與工作區 `.env` 範本；拒絕 skill 安裝目錄 |
 | `aigo_auth.py login` | 驗證憑證並快取 Token |
-| `aigo_auth.py status` | 檢查憑證與 Token 狀態（不顯示秘密值） |
+| `aigo_auth.py status` | 工作區、租戶與來源、身分與來源、app 登錄表、Token 與警告（不顯示秘密值） |
+| `aigo_auth.py app add <alias> --id <uuid>` | 登錄 app（自動判定 custom／hosted 並回填）；`app list`／`default`／`remove` |
+| `aigo_auth.py run <alias> -- <cmd>` | 在該 app 環境下執行指令；Hosted 的 Deploy Token 從工作區 `.env` 的 `AIGO_DEPLOY_TOKEN__<ALIAS>` 匯出 |
+| `aigo_auth.py config migrate` | 把舊格式 config.json 改寫成 schema 2（讀取時本來就自動升級，這只是落檔） |
 | `aigo_auth.py logout` | 清除 Token 快取 |
 
 > 密碼請直接填進 `.env`，**不要**放在指令列（會留在 shell 歷史紀錄），
@@ -247,22 +273,24 @@ AIGO_TENANT=urfit
 
 ### 執行 E2E 測試
 
-帳密沿用 `~/.aigo/.env`；`AIGO_APP_ID` / `AIGO_SLUG` 屬於個別 app，放在該 app 專案的
-`.aigo/.env`，跑測試時用 `AIGO_PROJECT_ROOT` 指過去：
+帳密沿用 `~/.aigo/.env`；目標 app 從工作區登錄表解析（多筆時用 `AIGO_APP=<alias>` 指定），
+用 `AIGO_PROJECT_ROOT` 指向工作區：
 
 ```bash
 cd scripts
-AIGO_PROJECT_ROOT=/path/to/your-app uv run run_e2e_tests.py
+AIGO_PROJECT_ROOT=/path/to/workspace AIGO_APP=erp uv run run_e2e_tests.py
 ```
 
-PowerShell 改成 `$env:AIGO_PROJECT_ROOT='C:\path\to\your-app'` 再執行。
-不指定時以目前目錄為專案根——**別讓它落在 skill 目錄裡**（見上方警告）。
+PowerShell 改成 `$env:AIGO_PROJECT_ROOT='C:\path\to\workspace'` 再執行。
+不指定時以目前目錄為工作區——**別讓它落在 skill 目錄裡**（見上方警告）。
+舊的 `AIGO_APP_ID`／`AIGO_SLUG` 仍可用（相容）。
 
 ## 注意事項
 
 - ⚠️ **密碼只存在 `~/.aigo/.env`**（或你自訂的專案 `.env`）：不寫入 `config.json`、原始碼或 commit，也不放在指令列
 - ⚠️ **憑證不要放進 Skill 安裝目錄**：`npx skills update` 會刪除整個 skill 資料夾重建
-- ⚠️ **`.aigo/` 已在 `.gitignore`**：本地產生的 `.aigo/config.json` 含有 Token，不會被提交
+- ⚠️ **`.aigo/` 已在 `.gitignore`**：`.env`（帳密、Deploy Token）與 `token.json` 都在裡面，不會被提交；
+  `config.json` 只有租戶網址與 app 登錄表，沒有秘密
 - ⚠️ **SDK 保護檔**：`src/api.ts`、`src/db.ts`、`src/action.ts` 等由平台注入，不可修改
 - ⚠️ **Shadow DOM 限制**：Custom App 運行在 Shadow DOM 中，不可使用 `document.querySelector`、全域 CSS 變數等
 

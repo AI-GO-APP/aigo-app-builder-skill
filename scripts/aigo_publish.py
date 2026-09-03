@@ -33,6 +33,12 @@ def full_deploy(base_url: str, token: str, app_id: str, slug: str, project_path:
 
     result: dict[str, Any] = {"sync": None, "compile": None, "publish": None}
 
+    # 0. 動手前印目標——打錯 app 的代價是把 VFS 同步到別人的 app（1.22.0）
+    from urllib.parse import urlsplit
+    from aigo_auth import get_app_info as _info
+    remote = _info(base_url, token, app_id)
+    print(f"→ 目標：{remote.get('name') or slug}  ({str(remote.get('id') or app_id)[:8]})  @ {urlsplit(base_url).hostname}")
+
     # 1. 同步
     local_files = read_local_files(project_path)
     _, version = get_remote_vfs(base_url, token, app_id)
