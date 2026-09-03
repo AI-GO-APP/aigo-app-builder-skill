@@ -8,8 +8,9 @@ report_issue.py — 平台問題回報（直達 AI GO 開發團隊的 Scrum Boar
 用法：
     uv run python scripts/report_issue.py submit "一句話標題" \
         --expected "預期行為" --actual "實際結果" --steps "重現步驟" \
+        --ruled-out "已排除清單（回報前自審紀錄，每行一項）" \
         --image 截圖1.png --image 截圖2.png
-    uv run python scripts/report_issue.py submit "標題" --body-file report.md
+    uv run python scripts/report_issue.py submit "標題" --body-file report.md   # 內文須含「已排除」段
     uv run python scripts/report_issue.py list
     uv run python scripts/report_issue.py show <ticket_id>
 
@@ -18,6 +19,10 @@ report_issue.py — 平台問題回報（直達 AI GO 開發團隊的 Scrum Boar
 
 回報內容規範（BDD，詳見 references/issue-reporting.md）：
 寫「行為」不寫「解法」——預期 vs 實際 + 重現步驟；不要提技術建議或實作方式。
+
+回報前自審閘門（references/pre-report-self-grill.md）：
+預設平台必定正確、失敗是自己操作有誤。`submit` 必須帶 `--ruled-out`（已排除清單，
+至少三項、每項有證據），或 `--body-file` 內文含「已排除」段落；缺少即拒收、不建卡。
 """
 
 import argparse
@@ -138,6 +143,51 @@ BDD_SECTIONS = [
     ("context", "環境／補充"),
 ]
 
+RULED_OUT_HEADING = "已排除（回報前自審）"
+RULED_OUT_MARKER = "已排除"      # --body-file 內文至少要有這個字樣的段落
+RULED_OUT_MIN_ITEMS = 3          # 六輪自審濃縮後不可能少於三項；少於此數視同沒排除
+
+SELF_GRILL_SUMMARY = """\
+❌ 拒收：缺「已排除清單」。預設平台必定正確、失敗是自己操作有誤——
+   回報前必須走完 references/pre-report-self-grill.md 的六輪自審：
+     0 讀完錯誤原文、症狀唯一化
+     1 版本與部署落差（skill 版本、prod 落後 main、文件既有 ⚠️ 註記）
+     2 身分與環境（租戶網址、401/403、權限層級、產品線與模式、乾淨環境對照）
+     3 請求契約（{"data"} 包裝、實體名、filters 契約、型別格式、路徑、既有路徑）
+     4 生命週期（發布快照、簽核攔截、409/423、非同步延遲、平台刻意設計、自己的 bundle）
+     5 文件核對（troubleshooting、對應章節、CONTEXT 術語；文件沒寫 ≠ 平台錯）
+     6 最小重現（去除 app 程式碼直打 API、穩定重現、最小 payload、對照組）
+   每題附指令＋輸出節錄，濃縮成清單後用 --ruled-out（或 --ruled-out-file）送出，
+   至少 %d 項。寫不出來就代表還沒排除完——不要報，先把自審紀錄交給使用者。
+""" % RULED_OUT_MIN_ITEMS
+
+
+def _ruled_out_text(args: argparse.Namespace) -> str:
+    """--ruled-out / --ruled-out-file 的內容；沒給回空字串。"""
+    if getattr(args, "ruled_out_file", None):
+        return Path(args.ruled_out_file).read_text(encoding="utf-8").strip()
+    return (getattr(args, "ruled_out", None) or "").strip()
+
+
+def _ruled_out_items(text: str) -> list:
+    return [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+
+def _check_self_grill(args: argparse.Namespace, body: str) -> str:
+    """回報前自審閘門。通過回傳已排除清單原文（可能為空，代表已在 body 內）；不通過拋 RuntimeError。"""
+    ruled = _ruled_out_text(args)
+    if ruled:
+        items = _ruled_out_items(ruled)
+        if len(items) < RULED_OUT_MIN_ITEMS:
+            raise RuntimeError(
+                f"❌ 拒收：--ruled-out 只有 {len(items)} 項（至少 {RULED_OUT_MIN_ITEMS} 項，每行一項）。\n"
+                "   六輪自審濃縮後不可能只有這幾項——請補齊版本／身分／契約／生命週期／文件／重現的證據。"
+            )
+        return ruled
+    if RULED_OUT_MARKER in body:
+        return ""
+    raise RuntimeError(SELF_GRILL_SUMMARY)
+
 
 def _compose_body(args: argparse.Namespace) -> str:
     if args.body_file:
@@ -187,6 +237,11 @@ def cmd_submit(args: argparse.Namespace) -> int:
     if not ("預期" in body and "實際" in body):
         print("⚠️  內文缺「預期行為 vs 實際結果」——請盡量用 BDD 描述行為，")
         print("    不要寫技術建議或實作方式（見 references/issue-reporting.md）。仍照送。")
+
+    # ★ 回報前自審閘門：沒有已排除清單就不建卡（references/pre-report-self-grill.md）
+    ruled = _check_self_grill(args, body)
+    if ruled:
+        body = f"{body}\n\n## {RULED_OUT_HEADING}\n{ruled}"
 
     creds = derive_credentials(args.project)
     with httpx.Client(timeout=60) as client:
@@ -271,6 +326,10 @@ def main() -> int:
     p_submit.add_argument("--body-file", help="從檔案讀內文")
     p_submit.add_argument("--image", action="append",
                           help="附加截圖（可重複，最多 10 張；png/jpg/webp/gif ≤8MB）")
+    p_submit.add_argument("--ruled-out",
+                          help=f"★ 已排除清單（回報前自審紀錄，每行一項、至少 {RULED_OUT_MIN_ITEMS} 項）；"
+                               "缺少即拒收，見 references/pre-report-self-grill.md")
+    p_submit.add_argument("--ruled-out-file", help="從檔案讀已排除清單")
     p_submit.set_defaults(func=cmd_submit)
 
     p_list = sub.add_parser("list", help="列出自己回報過的問題與目前狀態")
