@@ -199,7 +199,7 @@ uv run --project scripts python scripts/aigo_auth.py login
 ```
 
 之後 Skill 內所有 API 呼叫都走 `aigo_auth.get_token()`——Token 快取在
-`<你的 app 專案>/.aigo/token.json`，過期自動換新，**不會再問你密碼**。
+`<工作區>/.aigo/token.json`，過期自動換新，**不會再問你密碼**。
 
 > ⚠️ **不要把憑證放進 Skill 安裝目錄**（`.claude/skills/aigo-builder/` 之類）。
 > `npx skills update` 會**刪除整個 skill 資料夾再重新複製**，放在裡面的
@@ -215,7 +215,7 @@ uv run --project scripts python scripts/aigo_auth.py login
 | 2 | `<工作區>/.aigo/.env` | 工作區專用（該租戶用不同帳號；Hosted App 的 `AIGO_DEPLOY_TOKEN__<ALIAS>`） |
 | 3 | `~/.aigo/.env` | 機器級預設，**建議放帳密** |
 
-先找到的優先；專案級只寫你要覆寫的鍵，其餘自動沿用機器級。
+先找到的優先；工作區級只寫你要覆寫的鍵，其餘自動沿用機器級。
 
 ### 租戶空間網址（★ 必填，無預設值）
 
