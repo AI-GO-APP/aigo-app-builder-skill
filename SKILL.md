@@ -60,13 +60,13 @@ python scripts/check_update.py     # macOS / Linux 用 python3
 
 ## 源頭意圖分流（進入流程前先判讀）
 
-任何工作開始前，先分清用戶的意圖是哪一種——兩條路的起手完全不同：
+任何工作開始前，先分清用戶的意圖是哪一種——三條線的起手完全不同：
 
 | 意圖 | 走法 |
 |------|------|
 | **開發新 App**（從零做新功能） | 走主流程（Phase 0 →），**但建 app 之前必先完成 Phase 1.5 §1.0 的需求盤點**（四問＋Custom App 能力邊界核對，對稱遷入線的 §2.0）——用戶開場的一句話是題目不是需求；產品線判斷（Custom／Hosted／混合）與 internal／external 在 Phase 1.5 定案後才建 app |
 | **現有 App 遷入**（有既存系統／repo／DB 要搬進 AI GO） | **先讀 `references/migration-workflow.md`，從 §2.0 的 stack 盤點做起**（架構師視角：先盤前端／後端／資料的結構，再分流產品線），之後才回主流程 |
-| **資料操作，不開發 app**（查、改、批次、匯出自己有權限的資料） | **走 `references/data-operations.md` 的短流程**：`aigo_auth.py status` → `aigo_data.py me` → `perm-check` → `openapi` 查路由 → `call`／`export`。不進 Phase 0 的 VFS review、不建 app、不走 proxy——用登入者自己的 token 與權限 |
+| **資料操作，不開發 app**（查、改、批次、匯出自己有權限的資料） | **走 `references/data-operations.md` 的短流程**：`aigo_auth.py status` → `aigo_data.py me` → `perm-check` → `openapi` 查路由 → `call`／`export`。不進 Phase 0 的 VFS review、不建 app、不走 proxy——用登入者自己的 token 與權限。**寫入前必過該檔 §3.5 的寫入閘門**——這條線打的是唯一一份正式資料，沒有沙箱也沒有還原路徑 |
 
 **資料操作意圖的偵測訊號**：用戶要「查一下／改一批／匯出／灌資料」而沒有提到畫面、功能、
 app；或問「我有沒有權限看某表」。這條線的權限是使用者在平台介面上的權限：預設表依模組
@@ -811,6 +811,12 @@ if (file) downloadFile(file);
 
 里程碑交付：
   上述全部 + External Auth + 匿名存取（如適用）
+
+Hosted App 線（不走 Phase 2–4）：
+  deploy/redeploy → ✅ hosted-apps.md §3.4 部署後驗證閘門（未通過不得對外交付）
+
+資料操作線（不開發 app）：
+  寫入前 → ✅ data-operations.md §3.5 寫入閘門（估影響面 → 備份 → 試一筆 → 用戶確認）
 ```
 
 ## 錯誤處理
@@ -890,5 +896,5 @@ uv run --project scripts python scripts/report_issue.py submit "一句話標題"
 | `references/pre-report-self-grill.md` | **回報平台問題前（必走）**：預設平台正確、六輪自審排除樹、送出條件、已排除清單 |
 | `references/issue-reporting.md` | **回報平台問題時**：BDD 撰寫規範、指令、進度追蹤 |
 | `references/platform-behaviors.md` | **實測行為補遺**：DB Proxy 分頁與筆數上限、`custom_data` 不可伺服器端過濾、TIMESTAMP 格式、seed 表唯讀、`ctx.erp` 白名單、空渲染偵測、API 權限閘 |
-| `references/hosted-apps.md` | **Hosted App（「自訂 App」）產品線**：與 Custom App 的邊界、部署 API、env 規則、錯誤碼對照——Phase 1.5 判斷走這條線或混合方案時讀 |
-| `references/data-operations.md` | **資料操作模式（不開發 app）**：四條使用者身分資料面與權限閘、模組 REST 慣例、匯出白名單、Meta 值域——源頭意圖判成「資料操作」時讀 |
+| `references/hosted-apps.md` | **Hosted App（「自訂 App」）產品線**：與 Custom App 的邊界、應用形狀硬規則、部署 API、**部署後驗證閘門（§3.4＝Phase 4.2 的等價物）**、env 規則、錯誤碼對照——Phase 1.5 判斷走這條線或混合方案時讀 |
+| `references/data-operations.md` | **資料操作模式（不開發 app）**：四條使用者身分資料面與權限閘、**寫入閘門（§3.5，正式資料不可逆）**、模組 REST 慣例、匯出白名單、Meta 值域、出錯與回報出口（§7）——源頭意圖判成「資料操作」時讀 |

@@ -2,6 +2,7 @@
 
 > **這不是 Custom App 的部署模式，是一條平行產品線**（平台文件明文「勿混稱」）。
 > 本 skill 的主流程（Phase 2–4）不適用於 Hosted App；Phase 1.5 判斷走這條線時讀本檔。
+> **Phase 4.2 驗證閘門的等價物是 §3.4——部署後必過，未通過不得對外交付。**
 > 內容核對自平台原始碼與文件（2026-09-01），部分端點已實測（見下）。
 
 ### ⚠️ 部署落差（2026-09-01 對 prod 實測）
@@ -149,6 +150,34 @@ curl -fsSL https://raw.githubusercontent.com/AI-GO-APP/aigo-cli-releases/main/in
 - **exit code**：`0` 成功／`1` 業務失敗（401、配額 429、建置 failed、superseded——
   重試前先修因）／`2` 用法錯／`3` 連不上 backend（可重試）
 - 尚未接 CLI 的操作（刪除、網域、檔案／終端等 §11 標 ❌ 的面）→ Dashboard 或 REST
+
+### 3.4 部署後驗證閘門（★ 未通過不得對外交付）
+
+Custom App 線每次變更都要過 SKILL.md Phase 4.2 的驗證閘門；Hosted App 不走 Phase 2–4，
+**本節是它的等價物**。`deployment` 變成 `active` 只代表**建置與 rollout 成功**，
+不代表對外服務的就是你這一版——rollout 失敗時對外仍是舊 revision，而平台**不顯示
+目前服務中的版本**（§3.2）。沒有 version marker 就沒有「新版已生效」的證據。
+
+| 變更範圍 | 先等 | 必驗項目 |
+|---|---|---|
+| **只改 env／持久碟** | **1–6 分鐘**傳播（§4）；延遲窗內驗證會誤判成沒生效 | ① `GET /{id}/runtime-settings` 讀回確認值 ② 實測**依賴那顆 env 的路徑**（登入、OAuth 導向、第三方呼叫），不是只看設定頁 |
+| **程式碼變更**（deploy／redeploy） | 建置完成 | ① `deployments/{id}` 狀態 `active`（不是 `queued`／`building`／`failed`／`superseded`）② **version marker**：回應帶得到本次版本識別 ③ 主要路由各打一次拿 200 ④ `runtime-logs` **看得到請求進來**——pod `Running`、框架顯示 Ready 卻整段沒有請求 = 探針連不上（§2 綁定介面陷阱） |
+| **首次部署／遷入既有系統** | 同上 | 上列全部 ＋ §4「遷入 env 清單」逐顆核 ＋ 持久化落點（§7：容器檔案不持久，資料要落平台）＋ 取平台資料的路徑（§5：容器內要 `/open` 前綴、隨附整合要加引用） |
+| **自訂網域** | DNS／憑證 | `POST /{id}/domains/{domain_id}/verify` 走到 `active`（§9；**session-only，Deploy Token 打不了**），再用**該網域**重跑一次主要路由，不是只驗 `*.ai-go.app` |
+
+**驗證後決策**：
+
+| 結果 | 下一步 |
+|---|---|
+| 全部通過 | 可交付；把 version marker 的值記給用戶當對照基準 |
+| 建置 `failed` 且日誌全空 | **原樣重送一次**（偶發型），再失敗往建置記憶體查 → §8 |
+| ksvc ready 逾時但 runtime-logs 顯示已就緒 | 綁定介面陷阱 → §2，不要改 PORT |
+| 改動「沒生效」 | 先確認上一次 rollout 成功（失敗＝對外還是舊版）→ §3.2；只改 env 就再等滿傳播窗 → §4 |
+| 登入後 401／導向 `https://0.0.0.0:8080` | env 沒帶齊或對外網址從 request 推算 → §4、§2 |
+| 任一項未通過 | **不得對外交付、不得回報完成**；先對症出口，不要重新上傳一次碰運氣 |
+
+⚠️ **不要在延遲窗內判定失敗**：env 傳播與 rollout 都不是瞬間的，急著重建會把偶發問題
+變成連鎖問題（2026-09-02 曾因此誤判）。等滿再判。
 
 ## 4. 環境變數（詳情頁「環境變數」tab；`PUT /{id}/runtime-settings`）
 
