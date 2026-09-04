@@ -63,7 +63,7 @@
 |---|---|
 | 應用介面，邊界表無「Hosted」命中 | **Custom App**（預設，繼續 SKILL.md 主流程） |
 | 應用介面，但部分功能命中「Hosted」 | **混合**：業務介面與租戶資料存取 → Custom App；命中的那部分 → 獨立 Hosted App（§5） |
-| 公開 web 資產（自有網域、SEO、整站匿名） | **Hosted App**（→ `hosted-apps.md`，不走 SKILL.md Phase 2–4）；若還有登入後的後台 → 混合 |
+| 公開 web 資產（自有網域、SEO、整站匿名） | **Hosted App**（→ `hosted-apps.md`，不走 SKILL.md Phase 2–4；驗證閘門改用該檔 §3.4）；若還有登入後的後台 → 混合 |
 | 全部功能都命中「Hosted」（自選框架整套做） | **Hosted App** |
 
 遷入情景（輸入：§2.0 的 stack 形狀×面向）：對照表在 `migration-workflow.md` §2.1。

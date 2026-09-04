@@ -137,9 +137,11 @@ aigo-builder/
 │   ├── event-triggers.md             # Webhook 與 App 排程
 │   ├── migration-workflow.md         # 有現存系統要遷入時
 │   ├── product-line-decision.md      # Phase 1.5 判產品線與模式（兩條路共用 SSOT）
+│   ├── hosted-apps.md                # Hosted App 產品線：形狀硬規則、部署、§3.4 部署後驗證閘門
 │   ├── verification-details.md       # 要執行驗證時
-│   ├── data-operations.md            # 資料操作模式：不開發 app，以使用者身分直接讀寫資料
+│   ├── data-operations.md            # 資料操作模式：不開發 app，直接讀寫資料（§3.5 寫入閘門）
 │   ├── troubleshooting.md            # 出錯時
+│   ├── platform-behaviors.md         # 實測行為補遺（分頁、JSONB、時區、權限閘…）
 │   ├── pre-report-self-grill.md      # 回報平台問題前（必走）：預設平台正確、六輪自審
 │   └── issue-reporting.md            # 回報平台問題時：BDD 規範、指令
 ├── resources/

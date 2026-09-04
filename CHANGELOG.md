@@ -4,6 +4,47 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.27.0
+
+### 三條意圖線的閘門補齊：資料操作線的寫入閘門、Hosted 的部署後驗證、自審樹的本線分支
+
+對三條意圖線（新建／遷入／資料操作）逐格核對 skill 自己的骨架——版本檢查、意圖判讀、
+強制盤點、不可逆閘門、執行規則、驗證閘門、失敗入口、自審回報——找出三個閘門缺口與三處填空。
+新建線與遷入線八格皆齊（遷入的資料面驗證在 `custom-app-dev-guide.md` §23.5，非缺口）；
+缺的是**判成 Hosted 之後**與**資料操作線**這兩段：
+
+- **`data-operations.md` 新增 §3.5 寫入閘門（★ 不可逆）**：開發線的不可逆決策（`access_mode`）
+  擋在計畫閘門後，這條線的不可逆是**直接改寫唯一一份正式資料**——沒有沙箱、沒有草稿版、
+  沒有發布快照可回退，遷入線匯錯還能重匯，這條線不能。四步缺一不動手：估影響面（同一組
+  filter 先 GET 出筆數，算不出就不准跑批次）→ 取現值備份（`--out` 存本地 JSON；刪除後
+  GET 404，本 skill 未知還原端點，備份是唯一退路）→ 先試一筆再分批 ≤100 逐批讀回 →
+  把租戶／身分／端點／body／影響筆數／備份路徑一起給用戶確認。**DELETE 預設不做**，
+  先問能不能用狀態欄代替
+- **`data-operations.md` 新增 §7 出口**：本檔原本零連結指向 `troubleshooting.md`／
+  `pre-report-self-grill.md`（全檔三個連結全指 dev-guide），撞牆時只能靠 SKILL.md 的全域段落
+  兜底。補上出口並列出速查表中對本線有效的列
+- **`pre-report-self-grill.md` 補 Q6.1b（★ 修一道結構性失效的閘）**：第 6 輪 Q6.1
+  「去掉 app 程式碼、用純 API 重現」在資料操作線上**恆真**——這條線本來就是純 API，
+  全樹最強的「app 側 vs 平台側」濾網在此自動通過，誤報成本高於另兩線。替代判準：
+  ① 平台 UI 同帳號同操作對照（UI 也失敗才可能是平台側）② Q6.4 變因對照再多換一顆帳號。
+  §3 送出條件 (a)「用純 API 穩定重現」有同一個破口，一併註明本線不適用、改以 UI 對照為準
+- **`pre-report-self-grill.md` 補 Q3.7 資料操作線契約**：`perm-check` 是推估不是權威
+  （✅ 仍可能 403）、Meta key ≠ proxy／refs 面表名（`crm_clients` vs `customers`）、
+  分頁形狀分兩派（`skip`+`limit` vs `page`+`page_size`）、匯出白名單只有 6 張且自建表不在範圍
+- **`hosted-apps.md` 新增 §3.4 部署後驗證閘門（＝Phase 4.2 的等價物）**：原本只有動手前的
+  形狀硬規則（§2）與失敗診斷（§8／§10），部署後沒有任何條目化閘門，全檔唯一的驗證動作是
+  §3.2 一句 version marker。新增「變更範圍 → 先等多久 → 必驗項目」矩陣（env／程式碼／
+  首次部署／自訂網域）與驗證後決策表；`deployment: active` 不等於對外服務的是這一版
+  （rollout 失敗對外仍是舊 revision，平台不顯示服務中版本），**任一項未通過不得對外交付**
+- **`troubleshooting.md` 補 5 列資料操作線症狀**：模組 REST 分頁抓不齊、匯出 `/download`
+  409、匯出送自建表 failed、`perm-check` ✅ 仍 403、Git Bash MSYS 路徑改寫；
+  「查不到怎麼辦」加指向 `data-operations.md`
+- **措辭修正**：SKILL.md 源頭意圖分流「兩條路」→「三條線」（1.18.0 寫於兩列時代，
+  1.23.0 加第三列時未同步）；意圖分流表、驗證流程快速參照、參考文件表補上兩道新閘門的指標；
+  `migration-workflow.md` §2.1 與 `product-line-decision.md` 的「不走 Phase 2–4」補上
+  「驗證閘門改用 hosted-apps §3.4」
+- **README 目錄補漏**：`hosted-apps.md` 與 `platform-behaviors.md` 原本完全不在目錄樹裡
+
 ## 1.26.0
 
 ### 新建 App 需求盤點：用戶的一句話是題目不是需求，先盤再判產品線

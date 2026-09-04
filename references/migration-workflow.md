@@ -55,7 +55,8 @@
 
 > 依序執行 §2.0 → §2.5。§2.1 判走 Hosted App 的系統只需再做 §2.2（解構盤點）
 > 與資料側的 §2.4／§2.5（資料落點見 `hosted-apps.md` §7.1），
-> 開發與部署改走 `references/hosted-apps.md`，不進本 skill 的 Phase 2–4。
+> 開發與部署改走 `references/hosted-apps.md`，不進本 skill 的 Phase 2–4；
+> 驗證閘門用該檔 §3.4（Phase 4.2 的等價物），不是沒有閘門。
 
 ### 2.0 Stack 結構盤點（★ 架構師視角，最先做）
 

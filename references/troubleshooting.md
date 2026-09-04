@@ -68,6 +68,11 @@
 | 自建表 records POST 回 422 `not_null_violation` 但欄位明明有給 | body 沒包 `{"data": {...}}`，整包被忽略後報第一個必填欄位 → `data-center.md` §7 |
 | 建自建表 relation 回 422「無法解析 target_erp_key」 | 預設表目標只有部分可解析，無法事先查。改 `text` 存 UUID，唯一性用 `legacy_id`(unique) 承載 → `data-center.md` §3 |
 | 自建表 `select` 欄位建欄 422 `Input should be a valid string` | `options` 必須是**純字串陣列**，不收 `{label,value}` → `data-center.md` §3 |
+| **模組 REST 分頁抓不齊／筆數與 `total` 對不上**（資料操作線） | 分頁參數**分兩派**：`client`／`sale`／`hr`／`stock`／`purchase` 用 `skip`＋`limit`，`crm` 用 `page`＋`page_size`；單頁上限多為 500（`client` 未設上限、預設 100）。不要手刻翻頁，用 `aigo_data.py call --all` 依 openapi 自動判形狀 → `data-operations.md` §4 |
+| 匯出 `/download` 回 409「匯出尚未完成」 | 匯出是**非同步任務**（`queued` → `completed`，實測數十秒）。先輪詢任務狀態再下載，不是壞了 → `data-operations.md` §5 |
+| 匯出送自建表回 failed（`custom object not in tenant`／`badly formed hexadecimal UUID string`） | `source_type: custom_table` 指的是**舊 CustomObject**，**資料中心自建表不在匯出範圍**（白名單只有 6 張預設表）。整表取出改用 `call GET /api/v1/data-center/tables/{key}/records --all` → `data-operations.md` §5 |
+| `aigo_data.py perm-check` 回 ✅ 卻仍 403 | perm-check 是**推估不是權威**，少數端點另有細權限（`hr.leave_manage`、`accounting.post`）。403 就停、請管理員授權，**不要換路徑繞** → `data-operations.md` §6、`pre-report-self-grill.md` Q3.7 |
+| Git Bash 下路徑參數變成 `C:/Program Files/Git/api/v1/...` | MSYS 路徑轉換，不是腳本壞了。`aigo_data.py` 會自動剝除，也接受省略前綴（`call GET client`）；根治在指令前加 `MSYS_NO_PATHCONV=1` 或改用 PowerShell → `data-operations.md` §4 |
 | 預設表寫入回 500 `CheckViolationError` | 欄位值不在 CHECK 值域內，columns 端點不回值域。查 `custom-app-dev-guide.md` §20.2 的值域表或 Meta API |
 | webhook 端點 404 | manifest 缺 `"webhook": true`，或**改完沒 republish** |
 | webhook 驗簽失敗 | 用了重新序列化的 body；必須用 `ctx.params["body"]` 原字串 |
@@ -92,7 +97,8 @@
 
 ## 查不到怎麼辦
 
-1. 對照 `references/data-center.md` §7 / `references/event-triggers.md` §3 的分項速查
+1. 對照 `references/data-center.md` §7 / `references/event-triggers.md` §3 的分項速查；
+   不開發 app、直接讀寫資料的情境 → `references/data-operations.md`（§3.5 寫入閘門、§7 出口）
 2. 狀態碼語義：**403**＝權限（看是 `system.admin` 還是 `builder.access`）；
    **409**＝配額或衝突；**422**＝輸入不合法（欄位／型別／查詢契約）；
    **400**＝業務規則拒絕（tier 超限、草稿 app 建排程、暫停排程 run-now）
