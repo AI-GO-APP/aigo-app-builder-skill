@@ -1238,6 +1238,8 @@ POST /api/v1/builder/apps          （權限：builder.access）
 
 - **`access_mode` 由模板決定**——body 裡的 `access_mode` 欄位是殘留 fallback，
   模板必填所以恆被模板蓋掉。建立後不可改模式，選錯要砍掉重建
+- **模板 slug 由 Phase 1.5 計畫的 app 分配表指定，不在建立時臨場判**：新建情景要先過
+  §1.0 需求盤點的「誰在用」與產品線判斷；計畫未經用戶確認前不建 app
 - 模板商城的其他模板（實測 116 個）也可用其 slug 建立；
   清單：`GET /api/v1/templates`（唯讀）
 - `self_built` 是 access_mode 的第三值，但它屬於 Hosted App 隨附整合，

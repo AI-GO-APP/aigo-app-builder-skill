@@ -2,7 +2,8 @@
 name: aigo-builder
 description: >
   Use when working on an AI GO Custom App (ai-go.app)：開發前端（React + TypeScript）
-  或 Server-Side Action（Python）、部署與驗證、規劃資料架構（資料中心自建表 /
+  或 Server-Side Action（Python）、部署與驗證、從零規劃新 App（需求盤點、
+  Custom App／Hosted App 產品線判斷）、規劃資料架構（資料中心自建表 /
   Data Reference）、接 Webhook 或設定 App 排程、將現有系統或整套專案
   （前端＋後端＋DB；Supabase / Google Sheet / MySQL 等）搬入／遷入 AI GO。
 ---
@@ -63,7 +64,7 @@ python scripts/check_update.py     # macOS / Linux 用 python3
 
 | 意圖 | 走法 |
 |------|------|
-| **開發新 App**（從零做新功能） | 直接走主流程（Phase 0 →） |
+| **開發新 App**（從零做新功能） | 走主流程（Phase 0 →），**但建 app 之前必先完成 Phase 1.5 §1.0 的需求盤點**（四問＋Custom App 能力邊界核對，對稱遷入線的 §2.0）——用戶開場的一句話是題目不是需求；產品線判斷（Custom／Hosted／混合）與 internal／external 在 Phase 1.5 定案後才建 app |
 | **現有 App 遷入**（有既存系統／repo／DB 要搬進 AI GO） | **先讀 `references/migration-workflow.md`，從 §2.0 的 stack 盤點做起**（架構師視角：先盤前端／後端／資料的結構，再分流產品線），之後才回主流程 |
 | **資料操作，不開發 app**（查、改、批次、匯出自己有權限的資料） | **走 `references/data-operations.md` 的短流程**：`aigo_auth.py status` → `aigo_data.py me` → `perm-check` → `openapi` 查路由 → `call`／`export`。不進 Phase 0 的 VFS review、不建 app、不走 proxy——用登入者自己的 token 與權限 |
 
@@ -241,9 +242,12 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
    - **既有 App**：進入 Builder → Custom Apps → 記下 App 的 UUID (`app_id`)
    - **新 App 可直接用 API 建立，不必走 UI**（2026-09-01 實測）：
      `POST /api/v1/builder/apps`，`name` + `template_slug` 必填——
-     起手式依情景選 `starter-internal`（租戶成員的內部工具）或
-     `starter-external`（對外應用、終端使用者自助註冊）；
+     `starter-internal`（租戶成員的內部工具）或 `starter-external`
+     （對外應用、終端使用者自助註冊）；
      **access_mode 由模板決定、建立後不可改**，回應的 `id` 就是 `app_id`。
+     ★ **新建情景不在這裡臨場選模板**：先完成 Phase 1.5（§1.0 需求盤點 → 產品線與模式判斷
+     → 計畫確認），模板 slug 照計畫的 **app 分配表**——計畫未確認前登錄表留空是合法狀態。
+     判走 Hosted App 的 app 不走這個端點（`references/hosted-apps.md` §3）。
      完整契約與「起手式帶示範檔案要先清」等注意事項見
      `references/custom-app-dev-guide.md` §26
    - 填入 `.aigo/config.json` 的 `email`；app 用 `aigo_auth.py app add <alias> --id <uuid>` 登錄
@@ -274,55 +278,90 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
 ## Phase 1.25：多系統遷入盤點（條件觸發）
 
 > **觸發條件**：用戶有 **2 個以上外部系統**（各自帶 Supabase / Google Sheet / MySQL
-> 等 DB）要遷入 AI GO。僅遷入 1 個系統或純新建 App → 跳過，直接進 Phase 1.5。
+> 等 DB）要遷入 AI GO。僅遷入 1 個系統或純新建 App → 跳過，直接進 Phase 1.5
+> （純新建從 §1.0 需求盤點起手）。
 
 > 觸發時 → 讀 `references/migration-workflow.md` §1。目的是在任何單一 App 開始
 > Phase 1.5 之前建立**全局視圖**，避免各 App 各自為政導致資料架構混亂；
 > 產出的「遷入全景表」會在後續各 App 的 Phase 1.5 持續參照。
 
-## Phase 1.5：實作計畫（★ 強制步驟）
+## Phase 1.5：需求盤點與實作計畫（★ 強制步驟）
 
-> **在任何開發工作開始前（包含從模板建立），必須先提出實作計畫並獲得用戶確認。**
-> **禁止跳過此步驟直接進入 Phase 2 寫 code。**
+> **在任何開發工作開始前（包含建立 app、從模板建立），必須先完成需求盤點、提出實作計畫
+> 並獲得用戶確認。禁止跳過此步驟直接進入 Phase 2 寫 code；也禁止在 §1.0 盤點與計畫確認前
+> 建立 app**——模板＝`access_mode`，建立後不可改。
+
+### 1.0 需求盤點（★ 新建情景的起手，對稱遷入線的 §2.0）
+
+遷入線靠 `migration-workflow.md` §2.0 把系統的 stack 形狀盤出來再分流；新建線沒有 repo
+可盤，**輸入只能來自用戶，所以要主動問**。用戶開場的一句話（「幫我做個報修系統」）
+**是題目，不是需求**——拿題目直接寫計畫、再拿計畫過閘門，等於讓用戶替你補作業。
+
+- **資訊不足就問，不猜**；用戶答不出來就給選項（下表右欄），不要替他選
+- 一輪把四問問完（不要一題一題擠牙膏），但**四問缺一不進 1.5**
+- 已在對話中明確講過的不重問；遷入情景這四問由 §2.0 盤點推導，不另問
+- **常見情況幾句話就答完**（內部成員用、沒有對外、沒命中邊界 → 一個 Custom App）——
+  問是為了確認沒有例外，不是把簡單需求問成專案訪談
+
+| # | 問什麼 | 為什麼非問不可 | 用戶答不出時給的選項 |
+|---|---|---|---|
+| 一 | **誰在用**——租戶內部成員、外部客戶／會員／公眾、還是兩者都有？ | 決定 `access_mode`——**建立後不可改，選錯砍掉重建**；「兩者都有」要拆成兩個 app | 「員工自己用的後台」／「客戶或會員會登入的前台」／「兩邊都有」 |
+| 二 | **做什麼**——功能清單、每個功能的使用場景與使用者流程、涉及哪些資料實體 | 計畫第 1 項全部來自這裡；資料實體清單餵第 3 項的雙軌分流 | 請用戶用「誰、在什麼時候、要完成什麼」各講一句 |
+| 三 | **對外面向**——需不需要自有網域、SEO、讓匿名訪客瀏覽整站？ | 公開 web 資產 → Hosted App；Custom App 的 `/runtime`＋HashRouter 做不了 SEO 與自有網域，`/pub` 只適合少數公開頁 | 「純內部、登入後才能用」／「有幾頁不登入也要看」／「整個站要對外、要自己的網址」 |
+| 四 | **機制需求**——逐條核對 `references/product-line-decision.md` §2 的 **Custom App 能力邊界表** | 命中的每一條是 Hosted 訊號或要改設計；**留到寫 code 才發現＝整段白做** | 把邊界表拿給用戶逐條勾 |
+
+另外順帶盤（不決定產品線，計畫第 4.5–4.7 項要用）：第三方 API、外部 webhook、定時工作、檔案上傳。
+
+**產出：需求形狀結論**（照 `resources/new_app_requirements_template.md` 填，帶進 1.5）：
+
+```
+使用者：internal / external / 兩者（→ 拆）
+面向：應用介面 / 公開 web 資產 / 混合（→ 拆）
+邊界命中：<條目，每條標「Hosted」或「改設計」>；或「無」
+功能群：<群名 → 功能清單>（2 群以上不同目的 → 第 2 項拆分）
+資料實體：<清單>
+外部整合：API <slug 清單> / webhook <來源> / 排程 <頻率> / 檔案 <有無>
+```
 
 ### 計畫內容必須包含
 
-1. **需求分析**
+1. **需求分析**（新建：由 §1.0 問題二的答案整理；遷入：由 §2.0／§2.2 盤點整理）
    - 用戶要實現的功能清單
    - 每個功能的目標使用場景
    - 預期的使用者流程
 
-1.5. **產品線判斷（Custom App vs Hosted App）**
-   - 平台有兩條**平行**產品線：本 skill 教的 **Custom App**（Builder VFS + Shadow DOM，
-     在平台內跑）與 **Hosted App**（任意技術棧原始碼 → 容器 → `{slug}.deploy.ai-go.app`，
-     UI 繁中叫「自訂 App」——注意 code 裡的 `CustomApp` 反而指 Builder 產物）
-   - **判斷（新建情景）**：需要自選後端框架、常駐進程、WebSocket、自訂網域
-     → 建議 Hosted App（→ `references/hosted-apps.md`，開發流程完全不同，
-     不走本 skill 的 Phase 2–4）；要在平台內做業務介面、直接用 `ctx`/SDK 存取
-     租戶資料 → Custom App，繼續本流程
-   - **判斷（遷入情景，既有系統／整套專案要搬進來）→ 一律先走
-     `references/migration-workflow.md` §2.0 的 stack 盤點＋§2.1 的三向決策**：
-     stack 形狀×面向給預設走向（純前端的**應用介面** → 1..n Custom App；
-     純前端的**公開 web 資產**（官網／電商 storefront，要自有網域與 SEO）→
-     Hosted App；有後端且可改寫成 Server Action → 仍 Custom App；
-     有後端且整搬 → 1..n Hosted App），
-     再問「原系統的登入使用者是誰」定 internal / external——
-     **access_mode 建立後不可改，選錯要砍掉重建**，這一步不能靠預設值帶過
-   - ⚠️ **「Hosted = 整套搬」指的是程式，不是資料**：不論哪條產品線，
-     業務資料一律遷入 AI GO 的表（預設引用＋自建）、原 DB 退場——
-     Hosted App 的資料層改寫與資料去向見 `hosted-apps.md` §7.1
-   - 拿不準就把兩條線的差異表（`hosted-apps.md` §1）給用戶選
+1.5. **產品線與模式判斷**（Custom App vs Hosted App × internal vs external；★ 結果不可逆）
+   - **SSOT 在 `references/product-line-decision.md`**，兩條路共用——判斷前讀它
+   - **預設立場：一個 Custom App**。新建 app 絕大多數就是這個答案；只有命中訊號才偏離：
+     功能群目的不同 → 多個 Custom App；使用者「兩者都有」→ internal + external 各一；
+     公開 web 資產（自有網域／SEO／整站匿名）→ Hosted App；邊界表命中「Hosted」→ Hosted 或**混合**
+     （業務介面 Custom ＋ 命中的部分獨立 Hosted，共用資料落平台側、Hosted 走 Open Proxy）
+   - **兩問定位，先問使用者、再看形狀**：問題一「誰在登入」定 internal／external
+     （新建取 §1.0 問題一；遷入問原系統）；問題二「形狀」定 Custom／Hosted／混合
+     （新建取 §1.0 的面向＋邊界命中；遷入取 §2.0 的 stack 形狀，對照表在 `migration-workflow.md` §2.1）
+   - **不可逆與硬前提**：`access_mode` 由模板決定、建立後不可改 → **app 等本計畫確認後才建**；
+     `internal` 不能開匿名（400）→「內部工具想給訪客看一頁」要在此刻攤開；
+     拿不準 Custom vs Hosted 給 `hosted-apps.md` §1 差異表選，拿不準 internal vs external 回頭問，
+     **不可用預設值帶過**
+   - 判走 Hosted App 的 app → `references/hosted-apps.md`，不走本 skill 的 Phase 2–4；
+     「Hosted = 整套搬」指程式不指資料，業務資料一律落平台的表（`hosted-apps.md` §7.1）
+   - **產出：app 分配表**（每個 app 一列，寫進計畫、確認後照表建 app）
+     `| alias | 產品線 | 模式（模板 slug / visibility） | 負責的功能群 | 拆分理由 |`
+     ——預設情況就是一列 `| <alias> | Custom | starter-internal | 全部 | — |`
 
 2. **場景拆分與 App 邊界建議**
-   - 若需求涵蓋 2 群以上不同功能與目的的情景，**必須建議用戶分別做成不同的 Custom App**
-   - 例如：「客戶管理」和「財務報表」應為 2 個獨立 App
-   - 每個 App 的 `app_domain` 標籤建議值
+   - 出現任一情況就**必須建議拆成多個 app**：
+     - (a) 需求涵蓋 2 群以上不同功能與目的——「客戶管理」和「財務報表」→ 2 個 Custom App
+     - (b) 問題一答「兩者都有」——員工後台 + 客戶前台 → internal + external 各一
+     - (c) 部分功能命中 Hosted 邊界——Custom + Hosted 混合，分工見 `product-line-decision.md` §5
+   - 拆出來的每個 app **各自過 1.5 的兩問、各自定模式**，不是複製同一個答案
+   - 每個 Custom App 的 `app_domain` 標籤建議值
    - **拆出來的每個 app（Custom 或 Hosted）都要進工作區登錄表**：建好後
-     `aigo_auth.py app add <alias> --id <uuid>`，alias 用計畫裡的短名；
+     `aigo_auth.py app add <alias> --id <uuid>`，alias 用 app 分配表的短名；
      之後對話與指令一律用 alias 指稱，UUID 不在對話裡傳遞
 
 3. **資料架構設計**（★ 必須遵循雙軌分流策略，見 Phase 3 規則 18）
-   - **先盤受眾**（★ 決定資料存取層的寫法，見規則 31）：這個 app 會開給誰？
+   - **受眾承接 1.5 問題一的答案，不重問**（★ 決定資料存取層的寫法，見規則 31）：
      受眾中有沒有**無 `builder.access` 的一般員工**？
      - internal app 且有一般員工受眾（絕大多數情況）→ 自建表存取
        **全部包 Server Action**，前端不直呼 `queryTable` 等方法
@@ -332,7 +371,7 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
      - `GET /api/v1/refs/available-tables` — 可引用的預設表清單
      - 對候選預設表呼叫 `GET /api/v1/refs/tables/{name}/columns` 查欄位結構
        ⚠️ **查到的表沒有 `tenant_id` 是正常的**，不代表不安全，也不要自補過濾——見規則 25
-   - 列出所有需要的資料表，逐表判定走哪一軌（判定標準見規則 18）
+   - 列出所有需要的資料表（來源：§1.0 的資料實體清單），逐表判定走哪一軌（判定標準見規則 18）
    - **重用優先於新建**：既有自建表語意相同就重用，不要新建；
      **重用的表欄位不足 → 直接加實體欄位**（`data-center.md` §7 加欄），
      不要因缺欄就另建新表或把結構化欄位塞進 json 欄
@@ -341,9 +380,11 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
      `| 表顯示名 | 欄位顯示名 | 型別 | 必填 | 唯一 | relation 目標 |`
    - 若決定使用的預設表尚未被引用（以 `GET /api/v1/refs/apps/{app_id}` 為準，不是 db.json），
      引導用戶到 Builder 後台加入 Data Reference
+   - 需求命中「交易／JOIN／條件式 UPDATE」邊界的實體，在這裡寫出改設計後的寫法
+     （dev-guide §23.9），不要留到 Phase 3 才想
 
 4. **頁面架構**
-   - 路由結構（單頁 / 多頁）
+   - 路由結構（單頁 / 多頁）——**在這裡定案**，Phase 2 不再另問
    - 主要頁面和功能
    - Server Action 需求
 
@@ -383,22 +424,29 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
 6. **現有系統遷移評估**（若適用）
 
    > 用戶有現存系統（Supabase / Google Sheet / MySQL / 既有程式碼）要遷入
-   > → 先讀 `references/migration-workflow.md` §2，依序做：產品線與模式判斷（§2.1，
-   > 不可逆）、專案解構盤點（§2.2，前+後+DB 完整專案時，含使用者表與 DB 層邏輯的
-   > 特殊處理）、語言架構評估、Schema 映射與資料遷移計畫。純新建 App 跳過本項。
+   > → 先讀 `references/migration-workflow.md` §2，依序做：stack 盤點（§2.0）、
+   > 產品線與模式判斷的遷入輸入（§2.1）、專案解構盤點（§2.2，前+後+DB 完整專案時，
+   > 含使用者表與 DB 層邏輯的特殊處理）、語言架構評估、Schema 映射與資料遷移計畫。
+   > 純新建 App 跳過本項。
 
 ### 計畫閘門
 
+- **新建情景：§1.0 四問未齊、或計畫裡沒有「需求形狀結論」與「app 分配表」→ 不算完成計畫，
+  不得送閘門**——先回 §1.0 補問
 - **必須等待用戶明確回覆「同意」或提供修改意見後，才可進入 Phase 2**
 - 若用戶修改需求，需更新計畫後再次確認
-- 計畫確認後將 `app_domain` 值記錄到 `.aigo/config.json`
+- 計畫確認後：
+  - 依 app 分配表建 app（Phase 1 步驟 3，模板 slug 照表）並 `aigo_auth.py app add` 登錄——
+    **這是建 app 的唯一時點**
+  - 將 `app_domain` 值記錄到 `.aigo/config.json`
+  - 判走 Hosted App 的 app → 轉 `references/hosted-apps.md`；本 skill 的 Phase 2–4 只跑 Custom App
 
 ## Phase 2：專案腳手架
 
 基於 Phase 0 Review 結果決定策略：
 
 - **VFS 為空**：生成全新專案結構
-  - 詢問用戶：單頁 App 或多頁 App？
+  - 單頁／多頁依 Phase 1.5 計畫第 4 項的頁面架構，**不另問**；計畫沒寫就是計畫不完整，回 1.5 補
   - 單頁：直接渲染，不使用 Router
   - 多頁：HashRouter + Sidebar 導航
   - 可用 `scripts/aigo_scaffold.py` 的 `scaffold_new_project()`
@@ -835,11 +883,12 @@ uv run --project scripts python scripts/report_issue.py submit "一句話標題"
 | `references/custom-app-dev-guide.md` | 核心 API 規格與架構理念 |
 | `references/data-center.md` | 自建表完整規格（型別、配額、權限、SDK）＋ 延伸欄位（§10） |
 | `references/event-triggers.md` | Webhook 與 App 排程（冪等要求、宣告、限制） |
-| `references/migration-workflow.md` | **有現存系統要遷入時**：stack 盤點（§2.0，最先做）、產品線／模式三向判斷（不可逆）、專案解構、Schema 映射、資料遷移 |
+| `references/product-line-decision.md` | **Phase 1.5 判產品線與模式時（兩條路共用 SSOT）**：預設 Custom App 與偏離訊號、Custom App 能力邊界核對表、兩問四象限、混合方案分工、不可逆前提、app 分配表 |
+| `references/migration-workflow.md` | **有現存系統要遷入時**：stack 盤點（§2.0，最先做）、產品線判斷的遷入輸入（§2.1）、專案解構、Schema 映射、資料遷移 |
 | `references/verification-details.md` | **要執行驗證時**：四項驗證的完整定義、Phase 5 里程碑 |
 | `references/troubleshooting.md` | **出錯時**：錯誤速查表 |
 | `references/pre-report-self-grill.md` | **回報平台問題前（必走）**：預設平台正確、六輪自審排除樹、送出條件、已排除清單 |
 | `references/issue-reporting.md` | **回報平台問題時**：BDD 撰寫規範、指令、進度追蹤 |
 | `references/platform-behaviors.md` | **實測行為補遺**：DB Proxy 分頁與筆數上限、`custom_data` 不可伺服器端過濾、TIMESTAMP 格式、seed 表唯讀、`ctx.erp` 白名單、空渲染偵測、API 權限閘 |
-| `references/hosted-apps.md` | **Hosted App（「自訂 App」）產品線**：與 Custom App 的邊界、部署 API、env 規則、錯誤碼對照——Phase 1.5 判斷走這條線時讀 |
+| `references/hosted-apps.md` | **Hosted App（「自訂 App」）產品線**：與 Custom App 的邊界、部署 API、env 規則、錯誤碼對照——Phase 1.5 判斷走這條線或混合方案時讀 |
 | `references/data-operations.md` | **資料操作模式（不開發 app）**：四條使用者身分資料面與權限閘、模組 REST 慣例、匯出白名單、Meta 值域——源頭意圖判成「資料操作」時讀 |

@@ -9,6 +9,7 @@
 | **Phase -1** | Skill 自我更新檢查 — 比對遠端 `VERSION`，有新版時提示並徵詢是否更新（見「保持更新」） |
 | **Phase 0** | Review 現有 Code（強制） — 分析雲端 VFS 狀態、檔案分類、路由結構、CSS 合規性與 Server Actions |
 | **Phase 1** | 環境設定 — 帳號登入、取得 Token、初始化 `.aigo/config.json` |
+| **Phase 1.5** | 需求盤點與實作計畫（強制） — 新建情景四問＋Custom App 能力邊界核對、產品線與模式判斷（Custom / Hosted / 混合 × internal / external，不可逆）、app 分配表、資料架構雙軌分流；計畫確認後才建 app |
 | **Phase 2** | 專案腳手架（單頁/多頁） — 從雲端 VFS 下載到本地，自動排除 SDK 保護檔 |
 | **Phase 3** | 開發指引（React 18 + TypeScript + Shadow DOM） — 元件開發規範、CSS 限制、Server Actions 撰寫 |
 | **Phase 4** | 部署（sync → compile → publish） — 差異同步、樂觀鎖版本控制、自動 CSS 修復 |
@@ -21,6 +22,8 @@
 - **Webhook** — manifest 宣告、多端點、驗簽、冪等要求
 - **App 排程** — 結構化排程、tier 限制、重疊與自動暫停語義
 - **現有系統遷入** — Supabase / Google Sheet / MySQL 的 Schema 映射與資料遷移
+- **新建 App 需求盤點** — 用戶的一句話是題目不是需求：四問（誰在用／做什麼／對外面向／機制需求）
+  ＋能力邊界核對，產出需求形狀結論後才判產品線；Custom 不夠就搭 Hosted 的混合方案有明確分工
 
 ## 安裝方式
 
@@ -133,6 +136,7 @@ aigo-builder/
 │   ├── data-center.md                # 資料中心自建表完整規格
 │   ├── event-triggers.md             # Webhook 與 App 排程
 │   ├── migration-workflow.md         # 有現存系統要遷入時
+│   ├── product-line-decision.md      # Phase 1.5 判產品線與模式（兩條路共用 SSOT）
 │   ├── verification-details.md       # 要執行驗證時
 │   ├── data-operations.md            # 資料操作模式：不開發 app，以使用者身分直接讀寫資料
 │   ├── troubleshooting.md            # 出錯時
@@ -142,6 +146,7 @@ aigo-builder/
 │   ├── vfs_template.json             # VFS 範本（單頁/多頁）
 │   ├── migration_mapping_template.md # 外部 Schema ↔ AI GO 映射表模板
 │   ├── project_deconstruction_template.md # 既有專案解構清單（前+後+DB 遷入用）
+│   ├── new_app_requirements_template.md   # 新建 App 需求盤點表（Phase 1.5 §1.0 用）
 │   └── hooks/                        # SessionStart 更新檢查 hook 範本
 │       ├── claude-code.settings.example.json
 │       └── codex.config.example.toml
