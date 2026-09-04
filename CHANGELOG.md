@@ -4,6 +4,37 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.26.0
+
+### 新建 App 需求盤點：用戶的一句話是題目不是需求，先盤再判產品線
+
+遷入線有 §2.0 stack 盤點→§2.1 兩問四象限→不可逆警示的完整鏈，新建線只有一行技術啟發式
+（「需要常駐進程／WebSocket → Hosted」），沒有引導用戶說完整需求的步驟，`access_mode`
+不可逆這件事也只在遷入分支有閘門；Phase 1 建 app 選模板的時點還在計畫之前。本版把新建鏈路
+補到與遷入線對稱：
+
+- **SKILL.md Phase 1.5 改名「需求盤點與實作計畫」，新增 §1.0 需求盤點**（新建情景的起手）：
+  四問（誰在用→`access_mode`／做什麼→功能與資料實體／對外面向→公開 web 資產／機制需求→
+  逐條核對 **Custom App 能力邊界表**：常駐進程、長任務上限、自選框架、自有網域與 SEO、
+  前端框架限制、交易／JOIN／條件式 UPDATE、動態 schema、單檔 100 MB、Node 原生模組、直連 DB），
+  每條標「Hosted」或「改設計」——標「兩條線都沒有」的資料層邊界換 Hosted 也解決不了；
+  資訊不足就問不猜、答不出給選項；產出固定格式的「需求形狀結論」
+- **新增 `references/product-line-decision.md`——兩條路共用的產品線與模式判斷 SSOT**（SKILL.md 第 1.5 項
+  只留骨架與指標）：**預設立場「一個 Custom App」**與四種偏離訊號（功能群目的不同→多 Custom；使用者兩者都有→
+  internal+external；公開 web 資產→Hosted；邊界命中→Hosted 或混合）、Custom App 能力邊界核對表、
+  兩問四象限（先問誰在登入、再看形狀）、四象限落點、**混合方案分工原則**（共用資料落平台側、Hosted 走
+  Open Proxy、不硬併、不得把 DB 立成 Hosted）、不可逆與硬前提（`access_mode` 建立後不可改→app 等計畫確認後
+  才建；`internal` 不能開匿名要當場攤開）；產出 **app 分配表**（預設就是一列 Custom `starter-internal`）
+- **第 2 項拆分觸發擴為三種**：功能群目的不同、使用者兩者都有、部分功能命中 Hosted 邊界；
+  每個 app 各自過兩問。第 3 項受眾承接問題一不重問；第 4 項單頁／多頁在計畫定案，Phase 2 不另問
+- **計畫閘門**：四問未齊或缺需求形狀結論／app 分配表不算完成計畫；確認後才是建 app 的唯一時點。
+  Phase 1 步驟 3 與 dev-guide §26.1 同步「模板 slug 照 app 分配表，不臨場判」
+- **`migration-workflow.md` §2.1 去重**：只保留遷入特有輸入（原系統誰在登入、§2.0 stack 形狀×面向
+  對照表），問題一落點／四象限／不可逆警示指向 `product-line-decision.md`
+- **新增 `resources/new_app_requirements_template.md`**：四問填表、邊界核對表、需求形狀結論、
+  app 分配表——對稱遷入線的 `project_deconstruction_template.md`
+- 源頭意圖分流表「開發新 App」列改寫；README 加 Phase 1.5 列、新 reference 與新模板
+
 ## 1.25.0
 
 ### 回報前自審閘門：預設平台必定正確，失敗預設是自己操作有誤
