@@ -881,6 +881,9 @@ uv run --project scripts python scripts/report_issue.py submit "一句話標題"
 - ★ `--ruled-out` 是自審紀錄濃縮成的**已排除清單**（每行一項、至少三項），會附在卡片裡
   讓開發團隊快速 triage；寫不出這段就代表還沒排除完
 - 追蹤進度與官方回覆：`report_issue.py list`／`show <ticket_id>`
+- `submit` 會先做**開單前查既有卡**並印一行結果（同症狀的卡已修復／處理中／沒有）。
+  **第一階段只記錄，不改流程**——不論結果都照常送出，不要據此自行決定不報或跟使用者
+  說「已經修好了」；那是第二階段的事，等命中率看得到再開（`references/issue-reporting.md`）
 
 ## 參考文件
 

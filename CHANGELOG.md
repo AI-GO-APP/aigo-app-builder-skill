@@ -4,6 +4,23 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.29.0
+
+### 回報：開單前查既有卡（preflight，第一階段只記錄）
+
+`report_issue.py submit` 送出前先呼叫回報系統的 `POST /api/tickets/preflight`，問
+「同症狀是否已有卡、修好了沒」，印一行結果並帶 `preflight_id` 送出；成功後回報
+`outcome=submitted`。這是 CSM Manager #45／#46 的 skill 側（本 repo #43）第一階段：
+
+- **不改流程**：不論 decision 是 `fixed`／`tracking`／`none` 都照常送出。這一階段在累積
+  「判得準不準」——伺服器端歸卡上線至今零命中實績，而誤命中的代價是 AI 對使用者說
+  「修好了我直接繼續」然後重試失敗。命中率看得到再開第二階段（一句帶過、自動重試、續行）
+- 帶 `preflight_id` 讓伺服器直接附掛處理中的卡（省一次 LLM 歸卡）、或把「已修復但重試
+  失敗」當復發處理；伺服器不認（400／409）就退回不帶它再送一次
+- best-effort：查卡任何失敗都靜靜略過，不影響回報；`URFIT_TICKET_PREFLIGHT=0` 可關
+- SKILL.md 與 `references/issue-reporting.md` 明寫：**不要據那一行自行決定不報或告訴使用者
+  已修好**
+
 ## 1.28.0
 
 ### 更新覆蓋規範改為強制同步：發現遠端較新即覆蓋本機所有安裝，不徵詢使用者
