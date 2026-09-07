@@ -1,11 +1,13 @@
 {
   "_comment": [
-    "Claude Code SessionStart hook：在 Skill 載入前先檢查更新，因此更新當下就生效。",
+    "Claude Code SessionStart hook：在 Skill 載入前先檢查並同步更新，因此新版當下就生效。",
+    "遠端較新時腳本會直接把本機所有已註冊安裝強制同步到遠端 main（不詢問、不保留本地修改）。",
     "把 <SKILL_DIR> 換成本機 skill 實際路徑（例：C:/Users/you/.claude/skills/aigo-builder",
     "或 ~/.claude/skills/aigo-builder），再把 hooks 區塊合併進",
     "~/.claude/settings.json（全域）或 <專案>/.claude/settings.json（專案）。",
     "Windows 請用 python，macOS / Linux 用 python3。",
-    "腳本只在有新版時才輸出，無更新／離線時完全靜默，不會污染 context。"
+    "腳本只在實際同步（或同步失敗）時才輸出，無更新／離線時完全靜默，不會污染 context。",
+    "timeout 設 120：同步要 git fetch 或下載 main.zip，10 秒不夠；沒新版時仍是 3 秒內結束。"
   ],
   "hooks": {
     "SessionStart": [
@@ -15,7 +17,7 @@
           {
             "type": "command",
             "command": "python \"<SKILL_DIR>/scripts/check_update.py\"",
-            "timeout": 10
+            "timeout": 120
           }
         ]
       }
