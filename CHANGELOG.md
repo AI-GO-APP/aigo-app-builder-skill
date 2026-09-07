@@ -31,6 +31,13 @@
   作為 runner ceiling（修正前恆 30 秒）。`custom-app-dev-guide.md` §7 新段；`event-triggers.md`
   §1.6／§2.6 改口——**cron 實務上限 120 秒不是 280**（dispatcher 300 秒只是外層）；troubleshooting
   「Action 超時」列改寫；prod 若仍 30 秒被切＝部署落差
+- **Custom App 執行模式租戶自選（T43）**——新 `custom-app-dev-guide.md` **§28**：
+  `PATCH /builder/apps/{id}/runtime-settings {"always_on"}`（`builder.publish`；免費 403
+  `ALWAYS_ON_REQUIRES_PAID_PLAN`、未發布 422、綁通訊渠道一律常駐 `locked_reason`）；草稿固定冷啟動；
+  Builder App 的 per-app CPU／記憶體上限**沒有租戶 UI**。troubleshooting 新列「閒置後第一發很慢」
+- **§27.1 補**：拒絕紀錄查詢 `GET /apps/{id}/data-policy/decision-logs`／`GET /data-policy/decision-counts`、
+  租戶級規則管理頁 `/dashboard/settings/data-policy`（T69）、`where_dsl` 引用 `id` 在 ERP read 隱含放行
+  但 write 面仍 fail-closed（T72）、ADR 0029 定位（租戶自擔授權責任）
 - **前端 `db.ts` 的 `update()` 動詞 PUT→PATCH**（#1416，2026-09-01）：舊模板送 PUT 恆回 405、
   更新從未生效。SKILL.md 規則 12 加註、troubleshooting 新列
 - **503 帶 `quota_hint`**（#1437）：runner 不可達的 503 若租戶運算配額 ≥90% 會在 `detail` 後接配額
@@ -54,6 +61,12 @@
     `POST /{id}/logs/interpret-line`；三支收 Deploy Token
   - **租戶 app 數配額已移除**（T49，2026-09-07）：§10 的 429 `hosted_app_quota_exceeded` 只剩
     建置時限一種成因；新增「機器保留量已滿」列
+  - **§5 Open Proxy 也在 Auth gate 執法範圍**（T66）：app 身分無 user，`restrict` 規則用到 `$user.*`
+    即整列 deny——租戶開「依員工過濾」規則時 hosted app 直接 403；troubleshooting 新列
+  - **§3.2 `active` 語意收緊**（#1464，2026-09-04 main）：結清改等新 revision 真的接手，起不來落 `failed`；
+    §3.4 的 version marker 要求因 prod 未切換不放寬
+  - §6 記 #1421 修掉的「已登入使用者被匿名枚舉佇列擋成 503」；§8 補 App 佔用表 `restartCount`／
+    `lastTerminatedReason`「有狀況」標記與五種原因的白話對照（T48）
   - 檔頭部署落差段補 2026-09-07 main 三塊的判讀提示
 - **平台行為補遺**（`platform-behaviors.md`）：§1.5 proxy 面新增 `not_in`（第 12 個運算子）；
   §6.2 新段——深連結 `?next=` 承載 search+hash（2026-09-02 起 HashRouter 頁面狀態可分享）與

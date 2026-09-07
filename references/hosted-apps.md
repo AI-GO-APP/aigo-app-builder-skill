@@ -130,6 +130,10 @@ POST {deployd_upload_url}  (原始碼 tarball + upload_token)
 - 重複部署**網址不變**（slug 不變）
 - **rollout 失敗期間對外仍是舊 revision**，平台不顯示「目前服務的是哪一版」——
   驗證新版時在回應加 version marker，別把舊版行為當成新版的 bug（2026-09-02 曾因此誤判）
+- **`active` 的語意已收緊**（#1464，2026-09-04 main；prod 待 tag）：結清改等**新 revision 真的接手**
+  （WaitRevisionLive 三道判準），新 revision 起不來（如 exec EPERM）會落 `failed`，不再把舊 revision
+  的 Ready 誤報成 `active`。所以在新版平台上 `active`＝新版已在服務；仍留 version marker 是因為
+  prod 切換前的 `active` 還是舊語意，且它能一併抓到「路由到錯的 app」
 - 部署建議走 CLI（§3.3）；REST 流程留給 CLI 裝不了的環境
 
 ### 3.3 CLI（`aigo`，建議的部署路徑）
@@ -168,6 +172,8 @@ Custom App 線每次變更都要過 SKILL.md Phase 4.2 的驗證閘門；Hosted 
 **本節是它的等價物**。`deployment` 變成 `active` 只代表**建置與 rollout 成功**，
 不代表對外服務的就是你這一版——rollout 失敗時對外仍是舊 revision，而平台**不顯示
 目前服務中的版本**（§3.2）。沒有 version marker 就沒有「新版已生效」的證據。
+（2026-09-04 main 起 `active` 已改為「新 revision 真的接手」，但 prod 切換前仍是舊語意，
+本節的 version marker 要求不放寬——見 §3.2。）
 
 | 變更範圍 | 先等 | 必驗項目 |
 |---|---|---|
@@ -285,6 +291,12 @@ Hosted App 容器**只帶平台注入的 `AIGO_*`**，原系統的 env 一顆都
   資料中心自建表預設是整租戶可用，不用加引用
 - 憑證三動詞（session-only，**互不替代**）：`POST /{id}/credential/provision`（補建，冪等）
   ／`rotate`（輪替，新舊重疊 30 分鐘）／`revoke`（立即失效）
+- ★ **Open Proxy 也在租戶「資料存取規則」（Auth gate v1）的執法範圍**（T66，UAT on／prod off，
+  2026-09-07）：`/open/*` 的呼叫身分是 **app**（沒有 user）——`deny` 規則照擋（403 body 帶
+  `reason`／`rule_id`）；`restrict` 規則只要 `where_dsl` 用到 `$user.*` 就**解不出→整列判 deny**
+  （D28），所以租戶一開「依員工過濾」類規則，hosted app 的 Open Proxy 讀取會直接 403 而不是少列。
+  遷入案的資料層改寫前把這條告訴租戶：對 app 身分要另設不帶 `$user.*` 的規則、或用 app 級規則放行；
+  app 端改 code 無解 → `custom-app-dev-guide.md` §27
 
 ## 6. 可見度與 internal app 的 401 處置
 
@@ -297,6 +309,9 @@ Hosted App 容器**只帶平台注入的 `AIGO_*`**，原系統的 env 一顆都
     發起頂層導覽；**不要**自己導去回應裡的 `login_origin`（CSRF nonce 只在
     HTML 導覽路徑鑄造，自導必失敗）；不要無限重試
 - session 24 小時；平台 cookie 會在進容器前被剝掉——**容器內看不到、也不用管**平台 cookie
+- 已修的一個平台缺陷（#1421，2026-09）：internal app 的 auth proxy 曾把**已登入使用者的冷 miss**
+  丟進匿名枚舉的全域佇列（8 名額），枚舉流量一來所有登入者都拿 503。現在只有真匿名才排隊。
+  仍見「登入者間歇 503、無 app 端錯誤」＝部署落差，不是 app 掛
 
 ## 7. 持久化語意（★ 資料放哪裡才不會消失）
 
@@ -382,6 +397,10 @@ Hosted App 讓其他 App 打 HTTP 過去——這是明文禁止的反模式，�
   - `POST /{id}/logs/interpret-line`：AI 解讀單行——只送定位（實例名＋行 hash），伺服器自己重抓
   - 三支都收 Deploy Token；`reason` 對應的白話文案由平台給，回報用戶時照平台的說法
     （「記憶體超過上限被停掉」「App 一直重啟」），不要自己講 OOM／pod
+  - 運算資源頁「App 佔用」表每列另帶 `restartCount`／`lastTerminatedReason`（T48）：任一非空即標
+    「有狀況」，點了開 Agent 面板問「這支 App 為什麼掛掉」。五種原因對白話：`OOMKilled` 記憶體超過上限、
+    `Evicted` 機器整體記憶體吃緊、`FailedScheduling`／`exceeded quota` 機器保留量已滿、
+    `CrashLoopBackOff` App 啟動後很快退出（通常是程式問題）
 - **活容器檔案／終端**（session-only）：`GET /{id}/console/instances` 先看有沒有活實例
   （`scaled_to_zero` 要先打一下 app 網址喚醒）；檔案讀寫上限：下載 10 MiB／寫入 5 MiB；
   終端 PTY idle 15 分鐘、上限 1 小時。**都是除錯用途**——寫入不持久（§7）

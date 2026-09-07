@@ -63,6 +63,7 @@
 | Hosted App 登入後每個操作都 401／OAuth 導去 `https://0.0.0.0:8080` | 原系統 env 沒帶過來（session 密鑰、對外網址、第三方 key）。逐顆補進 runtime-settings → `hosted-apps.md` §4 遷入 env 清單 |
 | Hosted App 容器內打 `/api/v1/data-center/...` 回 401 `Invalid authentication token` | 少了 `/open` 前綴，不是憑證問題 → `hosted-apps.md` §5 |
 | `/open/proxy/{table}` 403「App 未被授權存取表」 | 「App」指隨附整合。`POST /api/v1/refs/apps/{整合 id}` 加引用（登入 session），立即生效 → `hosted-apps.md` §5 |
+| `/open/*` 403 且 body 帶 `reason`／`rule_id`，引用明明加了 | 租戶「資料存取規則」擋的：app 身分沒有 user，`restrict` 規則一用 `$user.*` 就整列判 deny。請租戶對 app 身分另設規則；app 端無解 → `hosted-apps.md` §5、dev-guide §27 |
 | 預設表 proxy query 帶了 `where` 卻回整表 | `where`／`filter`／`conditions` 被**靜默忽略**，只有 `filters:[{column,op,value}]` 生效 → `platform-behaviors.md` §1.5 |
 | 自建表 records `filters` 回 422「不支援的運算子」 | records 平面只有 `eq/contains/gte/lte`，且 `gte/lte` 僅 number／date／datetime，text 只有 `eq/contains`；沒有 `in`、沒有 OR → `platform-behaviors.md` §1.5 |
 | 自建表 records POST 回 422 `not_null_violation` 但欄位明明有給 | body 沒包 `{"data": {...}}`，整包被忽略後報第一個必填欄位 → `data-center.md` §7 |
@@ -97,6 +98,7 @@
 | **資料層 403、body 帶 `reason`（`policy_denied`／`hidden_column_write`／`policy_invalid`／`runner_unavailable`／`app_data_access_suspended`）＋`rule_id`** | 租戶「資料存取規則」（Auth gate）擋的，**app 端改 code 無解**——把 `rule_id` 轉給租戶管理員到 Builder「資料存取規則」分頁看；`hidden_column_write`＝payload 碰到被遮蔽欄位；UAT on／prod off（2026-09-07）→ `custom-app-dev-guide.md` §27 |
 | 使用者開 app 看到整頁「資料存取暫停」 | 管理員對這支 app 按了「封鎖資料存取」（萬用 deny 規則），平台 host 直接接管畫面。找租戶管理員解除，app 沒壞 → dev-guide §27.2 |
 | 清單少了欄位／少了列，API 回 200 | 命中 `restrict` 規則：`where` 併進查詢、`hide` 欄位從回應消失——**預期行為**。若 hide 欄位被寫在 `order_by`／`filters` 會轉成 403 `policy_invalid` → dev-guide §27.2 |
+| **已發布 app 閒置一陣子後第一次呼叫 action 很慢／逾時，之後就正常** | runner scale-to-zero 冷啟動，不是 action 壞。付費租戶可 `PATCH /api/v1/builder/apps/{id}/runtime-settings {"always_on": true}`（`builder.publish`）或在 Builder App 設定「執行模式」切常駐；免費 403 `ALWAYS_ON_REQUIRES_PAID_PLAN`、未發布 422、綁通訊渠道的 app 本來就常駐（`locked_reason: messaging_trigger`）→ `custom-app-dev-guide.md` §28 |
 | 排程 action 在 120 秒被切、回 `status: "timeout"` | runner 內層 ceiling 最高 120000（2026-09-07 起），cron 的 280 秒只是 dispatcher 外層；切批次到 120 秒內 → `event-triggers.md` §2.6。**30 秒**就被切且 manifest 設更大＝部署落差（#1518） |
 | **pub/ API 或 external app 終端使用者拿 404「App 不存在」，開發者自己預覽正常** | 匿名對外服務**未經平台核可**（開旗標≠核可；核可前刻意與不存在同形，app 使用者 token 也擋）。查 app 的 `anonymous_access_requested_at`／`approved_at`，未申請就 `POST /apps/{id}/anonymous-access-request`，已申請請用戶找平台 → `custom-app-dev-guide.md` §15.1 |
 | 分享的 `/runtime/{slug}?…#/page` 深連結登入後落回首頁 | 2026-09-02 起已修（`?next=` 承載 search+hash）；仍發生＝部署落差，不要在 app 內自己補 localStorage 復原 → `platform-behaviors.md` §6.2 |

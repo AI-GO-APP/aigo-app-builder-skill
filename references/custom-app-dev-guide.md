@@ -1329,6 +1329,14 @@ DELETE /api/v1/builder/apps/{app_id}   （builder.access；實測回 200，之�
 - 生命週期：建立時 `enabled=false`、`mode=audit`；切 `enforce` 前必過 dry-run（重放最近 100 筆
   拒絕紀錄、錯誤 0 筆才准）。`GET /apps/{app_id}/data-policy/explain?role_ids=…` 回合成視圖
   （每表每動詞 `open`｜`restricted`｜`denied`｜`unreferenced`），與執法走同一條求值路徑
+- 被擋了看哪裡：`GET /apps/{app_id}/data-policy/decision-logs`（拒絕紀錄，含 audit 模式的 would_deny）、
+  `GET /data-policy/decision-counts`（各 app 過去 24 小時 would_deny／would_restrict 計數）。
+  租戶級規則的管理頁在 **`/dashboard/settings/data-policy`**（T69）；app 級在 Builder 分頁
+- `where_dsl` 的 `field` 引用主鍵 `id`：ERP 面 read 自 T72（2026-09-07）起隱含放行（除非 `id` 同時被
+  hide）；**write 面仍不放行 `id`／`created_at`／`updated_at`**（落地值不經綁定參數，fail-closed 判
+  `policy_invalid`）——「只准改近期建立的列」這類規則 read 通、write 403 是設計
+- 產品定位（ADR 0029，2026-08-18 定案）：AI GO 是**租戶自擔授權責任的 PaaS**——規則由租戶訂、
+  平台執法；app 開發者的責任是把 403 接好、不是替租戶決定誰能看什麼
 
 ### 27.2 ★ app 會撞到什麼（寫 code 時就要接住）
 
@@ -1363,4 +1371,28 @@ user_attrs=…)` 拿 `(allow, row_filter, columns)`，**row_filter 要自己接�
 ⚠️ 它讀 `ctx.user_role_ids`，**runner 今天（2026-09-07 main）還沒有這個屬性**（接線分支未 merge），
 模組會退回空清單＝「沒有任何角色」，只有 `entity_id="*"` 的規則列會命中——方向是更嚴不是誤放行，
 但表示 v0 模板現階段**做不到依角色放行**。要人軸控管請等 v1 切 on，不要再擴 v0。
+
+## 28. 執行模式：冷啟動／常駐（`always_on`，租戶自選，2026-09-07 起）
+
+已發布 app 的 runner 預設 **scale-to-zero**：閒置後縮到 0，下一次呼叫 action 要等 pod 拉起
+（第一發明顯慢、甚至逾時）。租戶可把單支 app 切成**常駐**（隨時保留一個實例）：
+
+```http
+PATCH /api/v1/builder/apps/{app_id}/runtime-settings   （builder.publish）
+{"always_on": true}
+→ {"app_id", "always_on", "effective_mode": "always_on"|"scale_to_zero",
+   "locked_reason": null|"messaging_trigger", "apply_state": "applied"|"skipped"|"failed"}
+```
+
+- UI 在 Builder 列表的 App 設定 Dialog「執行模式」radio；權限與「能發布」同一把（`builder.publish`）
+- **免費租戶 403 `ALWAYS_ON_REQUIRES_PAID_PLAN`**（T43：免費方案不提供常駐）；**未發布 422** 不寫
+- **綁了通訊渠道（messaging trigger）的 app 一律常駐**：`always_on=false` 照存但不生效，
+  回 `locked_reason: "messaging_trigger"`，UI 鎖定不可切——trigger 要常駐收訊息
+- `apply_state` 是 k8s 重套結果，設定已落 DB；`failed` 不代表沒存，稍後 publish 會再套
+- 草稿（draft runner）**固定冷啟動**，本設定只作用於已發布 runner
+- 常駐會佔租戶機器的保留量（運算資源頁「App 佔用」卡把常駐 app 的副本 0 也列出來）；
+  共用池租戶要考慮 ResourceQuota，撞牆症狀見 SKILL.md 錯誤處理的 503 `quota_hint`
+- **per-app CPU／記憶體上限（`runner_resources`）沒有租戶 UI**——Builder App 這組值由 ops 直改 DB；
+  Hosted App 才有 `resources` 自設（`hosted-apps.md` §4.1）
+- 何時建議常駐：使用者面對面操作、第一發逾時會被當成壞掉的 app；純排程／批次 app 不必
 
