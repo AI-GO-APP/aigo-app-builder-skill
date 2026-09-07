@@ -43,7 +43,7 @@
 | Builder 引用頁籤 jsonb 欄顯示 `[object Object]`／存檔炸 invalid JSON | 舊版顯示 bug 已修（2026-08）：現在顯示與輸入都是 JSON 字面值——字串要帶引號（`"pro"`），物件寫 `{"k":"v"}` |
 | Action 全面逾時、且最近改過 requirements.txt | 依賴安裝失敗會讓 runner 起不來（不帶病上線）。先回頭檢查 requirements.txt 的 pin，不要改 action 邏輯 → `custom-app-dev-guide.md` §16.2 |
 | `ctx.erp.xxx` 回 403（來自 `/internal/ctx/invoke`） | 該方法不在閘道白名單。可用的六個見 `platform-behaviors.md` §4.2；403 是「方法未開通」不是「能力不存在」 |
-| Action 超時 | 先看 manifest `timeout_ms`（1000～120000，2026-09-07 起真的生效；prod 若仍固定 30 秒被切＝部署落差 #1518）；超過 120 秒的工作切批次；若 timeout 出在對外呼叫，先確認不是 raw httpx 直連（見下一列）→ `custom-app-dev-guide.md` §7 |
+| Action 超時 | 先看 manifest `timeout_ms`（1000～120000，prod v1.13.0 起真的生效；**v1.13.0 前發布的 app 要 republish 一次**才換上新 ceiling，否則仍 30 秒被切）；超過 120 秒的工作切批次；若 timeout 出在對外呼叫，先確認不是 raw httpx 直連（見下一列）→ `custom-app-dev-guide.md` §7 |
 | **Action 打第三方 API 連不出去** | 先看症狀對症：**timeout（約 20 秒）** = raw `import httpx/requests` 直連——runner 是 default-deny egress，必改 `ctx.http.call(<egress-slug>, <path>)`；**`ctx.http.call` 仍失敗** = slug 沒有同名「外部服務」或服務未授權給本 App → 引導用戶到 Builder（`/builder/{app_id}`）「外部服務」tab 建立（base_url 域名白名單）並授權本 App；**401** = 外部 API 拒絕憑證——閘道不注入也不剝除 `Authorization`（域名驗證 only，ADR 0010），檢查 action 自組的 header 與 `ctx.secrets` 金鑰（app 側問題，別改外部服務設定）。前兩種設定問題**停止改 code**；建立需本 App 擁有者或 admin，權限不足請管理員代設 → `custom-app-dev-guide.md` §25 |
 | pub/ API 403 | 確認 `allow_anonymous_access=true`；且**只有 `external` / `self_built` 能啟用匿名**，`internal` app 開不了 |
 | **一般使用者用 internal app 時資料載不出來／操作沒反應，network 見 `/data-center/...` 403** | **builder.access 破口**：前端直呼了自建表 SDK（`queryTable` 等），以登入者身分過 `builder.access` 閘，無開發權限的員工必 403。修法**只有一條**：包成 Server Action（`ctx.db.*`）＋前端 `runAction`，並在 action 內補授權分流；**不要**發 `builder.access` 給全員、也**不能**改成 external（`access_mode` 不可改）。開發帳號測不出此問題（必有 `builder.access`）→ `data-center.md` §7.5、SKILL.md 規則 31 |
@@ -54,7 +54,7 @@
 | Publish 一致性失敗 | 重新 sync → compile → publish 完整循環 |
 | 建表 403 | 帳號缺 `datacenter.schema_write`（也非 `system.admin`），改輸出建表規格引導用戶到資料中心 UI 自建；**刪表／刪欄另限 `system.admin`**（建改與刪除是兩段權限）→ `data-center.md` §2 |
 | 建表／加欄 409 | 撞配額（`table_quota_exceeded` / `field_quota_exceeded`，數值見 `data-center.md` §4）或實體名撞名；「**與平台保留表名衝突**」= 撞到平台地板表名（users/tenants/api_keys…），沒有補救管道，換個實體名（⚠️ 2026-09-01 實測此檢查 prod 尚未生效——沒被擋≠可以用，一律自律避開）→ `data-center.md` §1 |
-| 文件宣稱的端點回 404／回應缺欄位 | 先懷疑**部署落差**（prod 落後 monorepo main 約一週，2026-09-01 實測），不是文件錯也不是打錯路徑。隔幾天再試；受影響清單見 `hosted-apps.md` 檔頭與 `data-center.md` §9 |
+| 文件宣稱的端點回 404／回應缺欄位 | 先懷疑**部署落差**——prod 由 `v*` tag 觸發，可能落後 main 數天到一週；**判準是查 prod 的 `GET /api/v1/openapi.json`（免登入）有沒有那條路徑**，不是文件錯也不是打錯。2026-09-07 prod＝v1.13.0，與 main 幾乎同步；歷史紀錄見 `hosted-apps.md` 檔頭與 `data-center.md` §9 |
 | 刪表／刪欄被擋 | 兩段式刪除：先取 `/impact`，確認值必須是**實體名**不是顯示名 |
 | **Hosted App rollout 卡「ksvc ready 逾時」，runtime-logs 卻顯示已 Ready** | 框架綁到 pod 名稱、不綁 loopback（`HOSTNAME` 被 k8s 設成 pod 名）。看 runtime-logs 的 `Local:` 是否印 pod 名稱；Dockerfile 加 `ENV HOSTNAME=0.0.0.0`。平台訊息「未聽 PORT」是錯方向；症狀時好時壞 → `hosted-apps.md` §2 |
 | **Hosted App 建置 failed、日誌全空、「builder 未留下 termination message」** | 先**原樣重送一次**（偶發型）；再失敗往建置記憶體查：限制建置 worker 數、`--max-old-space-size` 設包絡 60–65%（設太高反而無日誌 OOM）→ `hosted-apps.md` §8 |
@@ -99,15 +99,15 @@
 | 使用者開 app 看到整頁「資料存取暫停」 | 管理員對這支 app 按了「封鎖資料存取」（萬用 deny 規則），平台 host 直接接管畫面。找租戶管理員解除，app 沒壞 → dev-guide §27.2 |
 | 清單少了欄位／少了列，API 回 200 | 命中 `restrict` 規則：`where` 併進查詢、`hide` 欄位從回應消失——**預期行為**。若 hide 欄位被寫在 `order_by`／`filters` 會轉成 403 `policy_invalid` → dev-guide §27.2 |
 | **已發布 app 閒置一陣子後第一次呼叫 action 很慢／逾時，之後就正常** | runner scale-to-zero 冷啟動，不是 action 壞。付費租戶可 `PATCH /api/v1/builder/apps/{id}/runtime-settings {"always_on": true}`（`builder.publish`）或在 Builder App 設定「執行模式」切常駐；免費 403 `ALWAYS_ON_REQUIRES_PAID_PLAN`、未發布 422、綁通訊渠道的 app 本來就常駐（`locked_reason: messaging_trigger`）→ `custom-app-dev-guide.md` §28 |
-| 排程 action 在 120 秒被切、回 `status: "timeout"` | runner 內層 ceiling 最高 120000（2026-09-07 起），cron 的 280 秒只是 dispatcher 外層；切批次到 120 秒內 → `event-triggers.md` §2.6。**30 秒**就被切且 manifest 設更大＝部署落差（#1518） |
+| 排程 action 在 120 秒被切、回 `status: "timeout"` | runner 內層 ceiling 最高 120000（2026-09-07 起），cron 的 280 秒只是 dispatcher 外層；切批次到 120 秒內 → `event-triggers.md` §2.6。**30 秒**就被切且 manifest 設更大＝該 app 在 v1.13.0 前發布、還沒 republish（#1518） |
 | **pub/ API 或 external app 終端使用者拿 404「App 不存在」，開發者自己預覽正常** | 匿名對外服務**未經平台核可**（開旗標≠核可；核可前刻意與不存在同形，app 使用者 token 也擋）。查 app 的 `anonymous_access_requested_at`／`approved_at`，未申請就 `POST /apps/{id}/anonymous-access-request`，已申請請用戶找平台 → `custom-app-dev-guide.md` §15.1 |
-| 分享的 `/runtime/{slug}?…#/page` 深連結登入後落回首頁 | 2026-09-02 起已修（`?next=` 承載 search+hash）；仍發生＝部署落差，不要在 app 內自己補 localStorage 復原 → `platform-behaviors.md` §6.2 |
+| 分享的 `/runtime/{slug}?…#/page` 深連結登入後落回首頁 | 已修（`?next=` 承載 search+hash，prod v1.13.0 起）；不要在 app 內自己補 localStorage 復原；仍發生就回報平台 → `platform-behaviors.md` §6.2 |
 | 用戶回報「找不到此應用」 | 訊息依身分分三層：匿名／token 失效＝通用訊息（刻意不區分未發布與不存在）；已登入同租戶＝「尚未發布」；已登入查不到＝網址錯或跨租戶。先問**登入了沒、同租戶嗎**再定方向 → `platform-behaviors.md` §6.2 |
 | 前端 toast「輸入內容格式不正確，請檢查後重試」 | 平台前端把 422 的 pydantic 陣列收斂成通用提示（2026-09 起；只有 backend validator 自寫的 `value_error` 訊息原樣顯示）。**API 回應的 `detail` 仍是完整的**——開 network 看 response，別叫用戶重填 |
 | Storage `413`／`403「無權存取此路徑」`／`list` 對不到剛傳的檔 | 413 有兩個來源（單檔 100 MB、整包 109 MiB）；403 是路徑逃出 app 前綴（含 `..`，2026-09-01 起）；`list` 非遞迴且 `folder` 要與上傳時同一個 → `custom-app-dev-guide.md` §12 坑表 |
 | Hosted App `PUT /runtime-settings` 回 422 `RESOURCE_LIMIT_EXCEEDS_MACHINE`／403 `RESOURCES_REQUIRE_DEDICATED_NODES` | per-app 執行上限超過租戶機型單台可用量（body `hint_instance_type` 是最小裝得下的規格）／共用池租戶不能設 `resources`。租戶到「運算資源」頁換規格或開專屬機器，app 端無解 → `hosted-apps.md` §4.1 |
-| Hosted App rollout 失敗 `exec /usr/bin/caddy: operation not permitted` | 執行檔帶 file capability、容器 `drop ALL`。只需 `NET_BIND_SERVICE` 的（caddy／nginx-unprivileged）平台已恆補（2026-09-05）——仍撞到＝部署落差；需要其他 cap 的二進位換掉 → `hosted-apps.md` §2 |
-| Hosted App 建 app 回 429 `hosted_app_quota_exceeded` 說 app 數超額 | 租戶 app 數配額已於 2026-09-07 移除（只剩建置時限那條 429）——prod 仍回＝部署落差，先刪不用的 app 過關 → `hosted-apps.md` §10 |
+| Hosted App rollout 失敗 `exec /usr/bin/caddy: operation not permitted` | 執行檔帶 file capability、容器 `drop ALL`。只需 `NET_BIND_SERVICE` 的（caddy／nginx-unprivileged）平台已恆補（UAT 09-05、prod v1.13.0）；仍撞到＝該二進位要別的 cap，換掉它 → `hosted-apps.md` §2 |
+| Hosted App 建 app 回 429 `hosted_app_quota_exceeded` 說 app 數超額 | 租戶 app 數配額已於 v1.13.0 移除（只剩建置時限那條 429）；仍看到 app 數超額訊息就回報平台 → `hosted-apps.md` §10 |
 | Hosted App 記錄頁「先前啟動」標「閒置停止」但用戶說 app 當掉 | `idle` 是**推定**（排除法），節點汰換也會被標成閒置；只有 `crash`（`container_restarted[:oom_killed]`）是有證據的異常。看 `reason_evidence`，別拿 idle 當「沒問題」 → `hosted-apps.md` §8 |
 
 ---

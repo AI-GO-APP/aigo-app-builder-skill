@@ -675,8 +675,9 @@ def execute(ctx):
 ```
 
 > `ctx.db` **不提供結構操作**——action 執行期無法建表或改欄，這是刻意的能力邊界。
-> 執行逾時：manifest `timeout_ms` 1000～**120000** 現在真的生效（2026-09-07 前恆被切在 30 秒），
-> 排程 action 實務上限也是 120 秒——`references/custom-app-dev-guide.md` §7、`event-triggers.md` §2.6。
+> 執行逾時：manifest `timeout_ms` 1000～**120000** 現在真的生效（prod v1.13.0 前恆被切在 30 秒；
+> 舊 app 要 **republish** 才換上新值），排程 action 實務上限也是 120 秒——
+> `references/custom-app-dev-guide.md` §7、`event-triggers.md` §2.6。
 > 資料層 403 若 body 帶 `reason`／`rule_id`＝租戶「資料存取規則」擋的，改 code 無解 → dev-guide §27。
 
 **呼叫外部 API：一律走 `ctx.http.call(<egress-slug>, <path>)` 閘道**，

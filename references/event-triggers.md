@@ -159,7 +159,8 @@ def execute(ctx):
 ⚠️ **上表是 dispatcher 的外層上限；runner 內層另有 ceiling**（2026-09-07 起）：ceiling ＝
 manifest 全部 action `timeout_ms` 的最大值，夾在 30000～**120000**；實際生效＝兩道取小。
 所以 cron 的「280 秒」今天實際只到 **120 秒**（宣告再大也被夾回），設計批次大小時以 120 秒算。
-修正（#1518）前 ceiling 恆 30 秒——prod 若仍在 30 秒被切，是部署落差（`custom-app-dev-guide.md` §7）。
+修正（#1518，prod v1.13.0 起）前 ceiling 恆 30 秒；ceiling 在 publish 時寫入，**舊 app 要 republish
+一次才換上新值**（`custom-app-dev-guide.md` §7）。
 
 ### 1.7 Meta（FB／IG／WhatsApp）訂閱驗證
 

@@ -5,26 +5,33 @@
 > **Phase 4.2 驗證閘門的等價物是 §3.4——部署後必過，未通過不得對外交付。**
 > 內容核對自平台原始碼與文件（2026-09-01），部分端點已實測（見下）。
 
-### ⚠️ 部署落差（2026-09-01 對 prod 實測）
+### ⚠️ 部署落差（prod 現況：**v1.13.0，2026-09-07 10:35Z 部署成功**）
 
-本檔以平台 monorepo `main` 為準，**prod 落後 main 約一週**。實測結果：
+本檔以平台 monorepo `main` 為準。**2026-09-07 起 prod 與 main 只差一個觀測性修補**
+（v1.13.0 tag 落在 main 倒數第二個 commit；prod openapi 實查已含本檔所有端點）。
+下列 2026-09-01／09-02 的實測紀錄是**歷史**——當時缺的東西已隨 v1.13.0 補齊，留著是給
+「下一次 prod 又落後 main」時當判讀範本：
 
 - ✅ 可用：`GET /hosted-apps`（含 visibility 欄）、`GET .../deployments`、
   `GET|PUT .../runtime-settings`、`GET /deploy-tokens`
-- ❌ 尚未部署（404 或回應缺欄位）：`GET .../resource-usage`；
+- ❌（**已於 v1.13.0 補齊**：prod openapi 有 `resource-usage`，`runtime-settings` schema 含
+  `env_availability`／`persistent_disk`／`resources`）2026-09-01 當時尚未部署：`GET .../resource-usage`；
   `runtime-settings` 回應**沒有** `env_availability`／`persistent_disk` 欄位
   ——env 執行期/建置期標記、持久碟、以及 §2.8 之後的多數新功能（網域、檔案／終端、
   記錄工具、複製、圖示）在 prod 生效與否**未逐項驗證**，使用前先打一次確認
-- ❌ **2026-09-02 追加實測仍 404**：`POST /{id}/restart`、`POST /{id}/redeploy`、
-  `POST /{id}/logs/interpret`（§11 表列為可用，主線原始碼確有，prod 未跟上）。
+- ❌（**已於 v1.13.0 補齊**：三支都在 prod openapi）2026-09-02 當時仍 404：`POST /{id}/restart`、
+  `POST /{id}/redeploy`、`POST /{id}/logs/interpret`（§11 表列為可用，主線原始碼確有，prod 未跟上）。
   需要「讓新設定生效」時**等傳播**（§4），需要「重跑建置」時**重新上傳**（§3.2）
 - ✅ 2026-09-02 實測可用：`/open/data-center/*`（自建表記錄面，§5）、
   `GET|POST /api/v1/refs/apps/{整合 id}`（預設表引用，§5）
-- **2026-09-07 main 已 merge、prod 待下一次 `v*` tag** 的三塊（本檔已按 main 更新，
-  使用前先打一次確認）：① 建置引擎搬 **AWS CodeBuild**（§1／§2，UAT 自 2026-09-05 起）；
-  ② 記錄分頁改版——`GET /{id}/runtime-starts`「先前啟動」與 `POST /{id}/logs/interpret-line`（§8）；
-  ③ `runtime-settings` 多一欄 **`resources`**（per-app 執行上限，§4）——`PUT` 的全量語意
-  從四欄變**五欄**；租戶 app 數配額（舊 429「預設 5 支」）已整條移除（§10）
+- **v1.13.0 帶上 prod 的三塊**（程式面 openapi 已實查；行為面尚未在 prod 實打）：
+  ① 建置引擎搬 **AWS CodeBuild**（§1／§2；UAT 2026-09-05、prod 隨 v1.13.0 切換，平台 0907 漂移
+  runbook 明記「prod 已切 CodeBuild」）；② 記錄分頁改版——`GET /{id}/runtime-starts`「先前啟動」與
+  `POST /{id}/logs/interpret-line`（§8）；③ `runtime-settings` 多一欄 **`resources`**（per-app 執行上限，
+  §4）——`PUT` 的全量語意從四欄變**五欄**；租戶 app 數配額（舊 429「預設 5 支」）已整條移除（§10）
+- **靠旗標不靠版本的兩條**：租戶專屬節點 `TENANT_DEDICATED_NODES` 在 **UAT 與 prod 都是 `ops-only`**
+  （租戶自助開機未開放，要平台替租戶開）⇒ §4.1 的 `resources` 在多數租戶會 403；
+  租戶資料存取規則 `POLICY_GATE_MODE` **prod＝off**（§5 末條）
 - **判讀原則**：對著本檔宣稱的端點拿到 404 或回應缺欄位，**先懷疑部署落差**，
   不是文件錯也不是你打錯——隔幾天再試或問平台
 
@@ -33,7 +40,7 @@
 | | Custom App（本 skill 主流程） | Hosted App |
 |---|---|---|
 | 產物 | Builder 產的 React bundle（VFS + Shadow DOM） | **任意技術棧原始碼 → 容器映像** |
-| 建置 | 平台 esbuild | zbpack 自動偵測語言（免 Dockerfile；有 Dockerfile 就走 Dockerfile）；**跑在 AWS CodeBuild（東京）叢集外**（2026-09-05 起，ADR 0028；prod 待 tag）——對開發者的差別只在建置包絡與 OOM 語意（§2） |
+| 建置 | 平台 esbuild | zbpack 自動偵測語言（免 Dockerfile；有 Dockerfile 就走 Dockerfile）；**跑在 AWS CodeBuild（東京）叢集外**（ADR 0028；UAT 2026-09-05、prod v1.13.0 2026-09-07 起）——對開發者的差別只在建置包絡與 OOM 語意（§2） |
 | 執行 | 平台 runtime 內 | Knative 容器，**scale-to-zero** |
 | 網址 | 主站內 `/runtime/...` | `https://{slug}.deploy.ai-go.app`（可綁自訂網域） |
 | 取平台資料 | `ctx` SDK／前端 SDK | 注入的 `AIGO_*` env + Open Proxy REST |
@@ -60,12 +67,13 @@
 | **監聽 `$PORT`（平台注入）且綁 `0.0.0.0`**——★ 看的是**框架實際綁的介面**，不是有沒有讀 `$PORT`（見下） | `connection refused`／readiness probe 失敗／**ksvc ready 逾時但 runtime-logs 顯示已就緒** |
 | **單一前台行程**——不可 supervisord／pm2／compose 多服務／Procfile worker | precheck `daemon` Issue |
 | **必須提交 lockfile**（go.sum／pnpm-lock.yaml…） | `missing go.sum`／`ERR_PNPM_NO_LOCKFILE` |
-| 建置包絡：**CodeBuild 上是整台 `BUILD_GENERAL1_MEDIUM`（ARM，8 GiB）**，OOM 只在整台用盡時發生（ADR 0028）；prod 切換前仍是 k8s Job 的 **2 CPU / 4 GiB**。預設時限 900 秒。★ 建置工具會依 CPU 數開多個 worker 各占一份 heap，包絡再大也要限 worker 數 | `OOMKilled`／`exit code 137`／timeout；**容器級 OOM 時日誌可能全空**（§8） |
+| 建置包絡：**CodeBuild 整台 `BUILD_GENERAL1_MEDIUM`（ARM，8 GiB）**，OOM 只在整台用盡時發生（ADR 0028；UAT／prod 皆已切換）；v1.13.0 之前是 k8s Job 的 2 CPU / 4 GiB。預設時限 900 秒。★ 建置工具會依 CPU 數開多個 worker 各占一份 heap，包絡再大也要限 worker 數 | `OOMKilled`／`exit code 137`／timeout；**容器級 OOM 時日誌可能全空**（§8） |
 | 不可是 monorepo／空目錄；無法辨識的目錄會 fallback 成 static 站 | precheck Issue／部署出來是靜態檔 |
-| **容器只保留 `NET_BIND_SERVICE` 一個 capability**（`drop ALL` 後恆補這一顆，2026-09-05 起；gVisor 已拆除，隔離靠 seccomp＋PSA baseline） | 執行檔帶其他 file capability（`setcap` 過的二進位）會 `exec …: operation not permitted`；只綁 <1024 埠的 caddy／nginx-unprivileged **現在可以**——若仍撞到即部署落差 |
+| **容器只保留 `NET_BIND_SERVICE` 一個 capability**（`drop ALL` 後恆補這一顆，2026-09-05 起；gVisor 已拆除，隔離靠 seccomp＋PSA baseline） | 執行檔帶其他 file capability（`setcap` 過的二進位）會 `exec …: operation not permitted`；只綁 <1024 埠的 caddy／nginx-unprivileged **現在可以**（UAT 09-05、prod v1.13.0 起） |
 
 - 執行資源：共用池與免費租戶固定 **800m CPU / 1.6 GiB**（平台常數）；**專屬節點租戶**可在
   `runtime-settings.resources` 自設（§4），沒填＝**整台**（一台機器扣掉平台保留後的全部）。
+  專屬節點目前 **UAT／prod 都是 `ops-only`**——由平台替租戶開，租戶自助尚未開放。
   容器內可 root，但沒有任何 capability（上表）
 - 建置時可連的公網來源是**白名單**（npm/PyPI/Docker Hub 等）——私有 registry 會被擋
 
@@ -90,9 +98,10 @@ PORT 其實有聽。判讀與處置：
 並把 `NODE_OPTIONS=--max-old-space-size` 設在包絡的 **60–65%（4 GiB → 約 2560）**
 才穩定——**設太高反而變成無日誌的容器級 OOM**（V8 heap 之外還有原生記憶體與 worker；
 3072 在程式碼長大後就爆，降到 2560 即過）。其他框架依同一原理處理。
-**CodeBuild 上（UAT 2026-09-05 起、prod 待 tag）包絡是整台 8 GiB 且沒有 cgroup `--memory`**——
-OOM 只在整台用盡時發生，「4 GiB 的 60–65%」那組數字要按 8 GiB 重算（約 5000）；但「限單 worker」
-的原則不變，因為 CodeBuild 那台也是多 vCPU。哪一套生效看部署落差（檔頭）。
+**CodeBuild 上（UAT 2026-09-05、prod v1.13.0 起）包絡是整台 8 GiB 且沒有 cgroup `--memory`**——
+OOM 只在整台用盡時發生，上面「4 GiB 的 60–65%」是舊引擎的實測數字，新引擎按 8 GiB 重算
+（約 5000）；但「限單 worker」的原則不變，因為 CodeBuild 那台也是多 vCPU。
+⚠️ 新引擎下的 OOM／無日誌失敗矩陣**尚未在 prod 實打**（平台 T15 也列為待驗），撞到時先照 §8 順序處理。
 
 ## 3. 部署
 
@@ -130,10 +139,10 @@ POST {deployd_upload_url}  (原始碼 tarball + upload_token)
 - 重複部署**網址不變**（slug 不變）
 - **rollout 失敗期間對外仍是舊 revision**，平台不顯示「目前服務的是哪一版」——
   驗證新版時在回應加 version marker，別把舊版行為當成新版的 bug（2026-09-02 曾因此誤判）
-- **`active` 的語意已收緊**（#1464，2026-09-04 main；prod 待 tag）：結清改等**新 revision 真的接手**
+- **`active` 的語意已收緊**（#1464；prod v1.13.0 起）：結清改等**新 revision 真的接手**
   （WaitRevisionLive 三道判準），新 revision 起不來（如 exec EPERM）會落 `failed`，不再把舊 revision
-  的 Ready 誤報成 `active`。所以在新版平台上 `active`＝新版已在服務；仍留 version marker 是因為
-  prod 切換前的 `active` 還是舊語意，且它能一併抓到「路由到錯的 app」
+  的 Ready 誤報成 `active`。所以 `active`＝新版已在服務；仍留 version marker 是因為它能一併抓到
+  「路由到錯的 app」與「打到快取」，而且這條收緊尚未在 prod 實打驗證
 - 部署建議走 CLI（§3.3）；REST 流程留給 CLI 裝不了的環境
 
 ### 3.3 CLI（`aigo`，建議的部署路徑）
@@ -172,7 +181,7 @@ Custom App 線每次變更都要過 SKILL.md Phase 4.2 的驗證閘門；Hosted 
 **本節是它的等價物**。`deployment` 變成 `active` 只代表**建置與 rollout 成功**，
 不代表對外服務的就是你這一版——rollout 失敗時對外仍是舊 revision，而平台**不顯示
 目前服務中的版本**（§3.2）。沒有 version marker 就沒有「新版已生效」的證據。
-（2026-09-04 main 起 `active` 已改為「新 revision 真的接手」，但 prod 切換前仍是舊語意，
+（v1.13.0 起 `active` 已改為「新 revision 真的接手」，但尚未在 prod 實打驗證，
 本節的 version marker 要求不放寬——見 §3.2。）
 
 | 變更範圍 | 先等 | 必驗項目 |
@@ -212,7 +221,7 @@ Custom App 線每次變更都要過 SKILL.md Phase 4.2 的驗證閘門；Hosted 
 - 🚨 **`PUT /runtime-settings` 是全量替換不是 merge**：省略 `env_vars`＝清空、
   省略 `always_on`＝關、省略 `persistent_disk`＝卸掛、省略 `resources`＝回平台預設——
   **五欄（env_vars／env_availability／always_on／persistent_disk／resources）一律一起送**
-  （2026-09-07 main 起五欄；prod 尚未帶 `resources` 時送了會被忽略，不會 422）
+  （v1.13.0 起五欄，prod openapi 的 `HostedAppRuntimeSettingsUpdate` 已含 `resources`）
 - 建置期 env 走 SSE-KMS 輸入物件（CodeBuild），不再落在 Job env；建置階段讀不到某顆 env 時，
   平台的失敗提示會指向「環境變數」頁的**建置階段**——先核那顆有沒有標 `build`／`both`，
   不是去查 Dockerfile
@@ -221,7 +230,7 @@ Custom App 線每次變更都要過 SKILL.md Phase 4.2 的驗證閘門；Hosted 
   **不保證容器已換版**——PUT 走 `wait_ready=false`。要確認是否傳播完成，唯一可靠方法是
   **從 app 內讀一個無害變數**（例如加一顆 `APP_BUILD_MARKER`）；用「移除變數」測比新增乾淨
 
-### 4.1 per-app 執行上限 `resources`（★ 只有專屬節點租戶能設，2026-09-07 main）
+### 4.1 per-app 執行上限 `resources`（★ 只有專屬節點租戶能設；v1.13.0 起，專屬節點 UAT／prod 皆 ops-only）
 
 ```json
 "resources": {"cpuRequest": "250m", "cpuLimit": "1000m", "memoryRequest": "256Mi", "memoryLimit": "2Gi"}
@@ -234,7 +243,8 @@ Custom App 線每次變更都要過 SKILL.md Phase 4.2 的驗證閘門；Hosted 
   `max_cpu`／`max_memory`／`hint_instance_type`＝最小裝得下的機型）——改小上限或請租戶到
   運算資源頁換規格，不是重試
 - 免費租戶 → 403；**共用池（非專屬節點）租戶 → 403 `RESOURCES_REQUIRE_DEDICATED_NODES`**——
-  這條線上租戶要先在「運算資源」頁開專屬機器，app 端改不了
+  app 端改不了。專屬機器目前 `TENANT_DEDICATED_NODES=ops-only`（UAT／prod 同），**租戶自己在
+  「運算資源」頁開不了**，要請平台替租戶開；沒開之前這個 403 是預期
 - 租戶換小機型時平台會逐 app 檢查，超限的 app 會擋住換機型（422 帶 `apps[]`）——
   遷入計畫裡把每支 app 的上限與機型一起定
 - `GET /{id}/resource-usage` 回設定值；租戶畫面「App 佔用」顯示**已保留（request×副本）**與
@@ -291,8 +301,8 @@ Hosted App 容器**只帶平台注入的 `AIGO_*`**，原系統的 env 一顆都
   資料中心自建表預設是整租戶可用，不用加引用
 - 憑證三動詞（session-only，**互不替代**）：`POST /{id}/credential/provision`（補建，冪等）
   ／`rotate`（輪替，新舊重疊 30 分鐘）／`revoke`（立即失效）
-- ★ **Open Proxy 也在租戶「資料存取規則」（Auth gate v1）的執法範圍**（T66，UAT on／prod off，
-  2026-09-07）：`/open/*` 的呼叫身分是 **app**（沒有 user）——`deny` 規則照擋（403 body 帶
+- ★ **Open Proxy 也在租戶「資料存取規則」（Auth gate v1）的執法範圍**（T66；端點與執法碼 v1.13.0
+  已在 prod，但 `POLICY_GATE_MODE` **UAT on／prod off**，2026-09-07 核自 k8s manifest）：`/open/*` 的呼叫身分是 **app**（沒有 user）——`deny` 規則照擋（403 body 帶
   `reason`／`rule_id`）；`restrict` 規則只要 `where_dsl` 用到 `$user.*` 就**解不出→整列判 deny**
   （D28），所以租戶一開「依員工過濾」類規則，hosted app 的 Open Proxy 讀取會直接 403 而不是少列。
   遷入案的資料層改寫前把這條告訴租戶：對 app 身分要另設不帶 `$user.*` 的規則、或用 app 級規則放行；
@@ -311,7 +321,7 @@ Hosted App 容器**只帶平台注入的 `AIGO_*`**，原系統的 env 一顆都
 - session 24 小時；平台 cookie 會在進容器前被剝掉——**容器內看不到、也不用管**平台 cookie
 - 已修的一個平台缺陷（#1421，2026-09）：internal app 的 auth proxy 曾把**已登入使用者的冷 miss**
   丟進匿名枚舉的全域佇列（8 名額），枚舉流量一來所有登入者都拿 503。現在只有真匿名才排隊。
-  仍見「登入者間歇 503、無 app 端錯誤」＝部署落差，不是 app 掛
+  v1.13.0 起 prod 生效；仍見「登入者間歇 503、無 app 端錯誤」先查平台側，不是 app 掛
 
 ## 7. 持久化語意（★ 資料放哪裡才不會消失）
 
@@ -386,7 +396,7 @@ Hosted App 讓其他 App 打 HTTP 過去——這是明文禁止的反模式，�
   （tail 1–1000 預設 200；`reason: scaled_to_zero` 也是 HTTP 200，不是錯誤）
 - **AI 解讀**：`POST /{id}/logs/interpret`——`source=build` 必帶 `deployment_id`
   且**不吃** tail/since/until/severity；`source=runtime` 相反。走 AI 額度（超額 429）
-- **記錄分頁改版（2026-09-07 main；prod 待 tag）**——三個子分頁「即時日誌／先前啟動／建置日誌」：
+- **記錄分頁改版（v1.13.0，三支端點 prod openapi 已實查）**——三個子分頁「即時日誌／先前啟動／建置日誌」：
   - `GET /{id}/runtime-starts`：最近 **7 天**每一次**容器執行段**（同一實例內容器重啟＝新的一段）
     的起迄、時長與 `reason`：`idle` 閒置停止／`rollout` 版次更新／`crash` 異常結束
     （`reason_evidence` 為 `container_restarted[:oom_killed]`）／`unknown` 已停止／`null` 執行中。
@@ -422,11 +432,11 @@ POST /{id}/domains/{domain_id}/verify   → pending_dns → pending_cert → act
 | 錯誤 | 含義 | 處置 |
 |---|---|---|
 | 403 `hosted_app_requires_paid_plan` | 免費檔不能用 Hosted App | 升級方案，重試無用 |
-| 429 `hosted_app_quota_exceeded` | **只剩一種成因：`build_timeout_seconds` 超過平台上限（900）**（`quota: max_build_duration_seconds`）。租戶 app 數上限（舊「預設 5 支」）已於 2026-09-07 整條移除——app 能裝幾支由專屬機器容量決定 | 降回 ≤900；若 prod 仍回 app 數超額＝部署落差，刪不用的 app 先過 |
+| 429 `hosted_app_quota_exceeded` | **只剩一種成因：`build_timeout_seconds` 超過平台上限（900）**（`quota: max_build_duration_seconds`）。租戶 app 數上限（舊「預設 5 支」）已於 2026-09-07 整條移除——app 能裝幾支由專屬機器容量決定 | 降回 ≤900 |
 | 422（env／timeout 下限） | env 出界（§4）或 timeout <120 | 修參數 |
 | 422 `RESOURCE_LIMIT_EXCEEDS_MACHINE` | `resources` 的 limit 超過租戶機型單台可用量（§4.1） | 改小上限或換機型；body 的 `hint_instance_type` 是最小裝得下的規格 |
 | 403 `RESOURCES_REQUIRE_DEDICATED_NODES` | 共用池租戶送了 `resources` | 租戶先開專屬機器；app 端無解 |
-| 建置 failed、rollout 時 `exec /usr/bin/xxx: operation not permitted` | 執行檔帶 file capability（caddy／nginx-unprivileged 常見） | 只需 `NET_BIND_SERVICE` 的已由平台恆補（2026-09-05）——仍撞到＝部署落差；需要其他 cap 的二進位換掉 |
+| 建置 failed、rollout 時 `exec /usr/bin/xxx: operation not permitted` | 執行檔帶 file capability（caddy／nginx-unprivileged 常見） | 只需 `NET_BIND_SERVICE` 的已由平台恆補（UAT 2026-09-05、prod v1.13.0）；仍撞到＝該二進位要的是別的 cap，換掉它 |
 | 副本起不來、`GET /tenant/compute` 的 `limit.reached=true`／事件 `exceeded quota` | 租戶機器的保留量已滿（不是本 app 的錯） | 引導租戶到「運算資源」頁加機器／尖峰加開，或降其他 app 的 request |
 | 503「建置管線尚未就緒」 | 平台側未就緒，整筆 rollback 不吃名額 | 稍後再試（不是你的問題） |
 | 409（redeploy） | 沒有可重跑的成功上傳 | 走完整上傳流程 |
@@ -445,7 +455,7 @@ POST /{id}/domains/{domain_id}/verify   → pending_dns → pending_cert → act
 | `POST /`（建立）——session-only（ADR 0019，§3.1；固定 403 訊息） | ❌ |
 | `POST /{id}/deployments`／`GET .../deployments*`／`.../logs` | ✅ |
 | `POST /{id}/restart`／`GET /{id}/runtime-logs`／`POST /{id}/logs/interpret`（⚠️ restart／interpret prod 2026-09-02 仍 404） | ✅ |
-| `GET /{id}/runtime-starts`／`GET /{id}/runtime-starts/{pod_name}/logs`／`POST /{id}/logs/interpret-line`（§8；2026-09-07 main，prod 待 tag） | ✅ |
+| `GET /{id}/runtime-starts`／`GET /{id}/runtime-starts/{pod_name}/logs`／`POST /{id}/logs/interpret-line`（§8；v1.13.0，prod openapi 已實查） | ✅ |
 | `GET|PUT /{id}/runtime-settings`／`GET /{id}/resource-usage` | ✅ |
 | `GET /{id}/preview`／`POST /{id}/preview/capture` | ✅ |
 | `POST /{id}/redeploy`（⚠️ prod 2026-09-02 仍 404）／`clone`／`PATCH /{id}`（改名）／`DELETE /{id}` | ❌ |

@@ -165,8 +165,9 @@ Action 也可由 Webhook 或 App 排程觸發——**兩者都要求 action 冪�
 
 **執行逾時（★ 2026-09-07 起口徑）**：`actions/manifest.json` 各 action 的 `timeout_ms`
 可設 **1000～120000**；平台發布時取所有 action 的最大值（底線 30000）當 runner 的 ceiling，
-實際生效＝`min(該 action 的 timeout_ms, ceiling)`。修正（#1518）前 ceiling 恆為 30000，
-manifest 寫 120000 也在 30 秒被切——**若在 prod 仍見 30 秒即逾時，是部署落差不是設定錯**。
+實際生效＝`min(該 action 的 timeout_ms, ceiling)`。修正（#1518，prod v1.13.0 起）前 ceiling 恆為 30000，
+manifest 寫 120000 也在 30 秒被切。**ceiling 是在 publish 時寫進 runner 設定的**——v1.13.0 之前發布的
+app 仍帶舊的 30 秒 ceiling，**要 republish 一次**才會換上 manifest 的值；republish 後仍 30 秒被切才是平台問題。
 超過 120000 的宣告會被夾回 120000；webhook（90 秒）與排程（300 秒）的 dispatcher 外層上限
 另算（`event-triggers.md` §1.6／§2.6），兩道取小。逾時回 `status: "timeout"`，長工作仍要切批次。
 
@@ -1313,8 +1314,9 @@ DELETE /api/v1/builder/apps/{app_id}   （builder.access；實測回 200，之�
 > 「哪個角色對哪張表能做什麼、看得到哪幾列／哪幾欄」，由**平台**在資料函式層執法，
 > app 不用也不該各自實作一套。
 
-**現況（2026-09-07）**：`POLICY_GATE_MODE` **UAT＝on、prod＝off**。prod 切 on 前規則只會被
-記錄（audit）不會生效；切 on 後本節全部成立。**新開發的 app 現在就按本節寫**，切 on 時才不用回頭救。
+**現況（2026-09-07）**：規則 API、explain、拒絕紀錄、Builder 分頁等**程式面已隨 v1.13.0 上 prod**
+（openapi 實查），但執法開關 `POLICY_GATE_MODE` **UAT＝on、prod＝off**（核自 k8s manifest）。
+prod 切 on 前規則只會被記錄（audit）不會生效；切 on 後本節全部成立。**新開發的 app 現在就按本節寫**，切 on 時才不用回頭救。
 
 ### 27.1 規則長什麼樣、掛在哪
 
@@ -1372,7 +1374,7 @@ user_attrs=…)` 拿 `(allow, row_filter, columns)`，**row_filter 要自己接�
 模組會退回空清單＝「沒有任何角色」，只有 `entity_id="*"` 的規則列會命中——方向是更嚴不是誤放行，
 但表示 v0 模板現階段**做不到依角色放行**。要人軸控管請等 v1 切 on，不要再擴 v0。
 
-## 28. 執行模式：冷啟動／常駐（`always_on`，租戶自選，2026-09-07 起）
+## 28. 執行模式：冷啟動／常駐（`always_on`，租戶自選；v1.13.0 起，prod openapi 已實查）
 
 已發布 app 的 runner 預設 **scale-to-zero**：閒置後縮到 0，下一次呼叫 action 要等 pod 拉起
 （第一發明顯慢、甚至逾時）。租戶可把單支 app 切成**常駐**（隨時保留一個實例）：

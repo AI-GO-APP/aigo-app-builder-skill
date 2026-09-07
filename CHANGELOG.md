@@ -9,7 +9,10 @@
 ### 對齊平台 2026-09-01～09-07 main（v1.13.x）：Auth gate、匿名核可、timeout 上限、CodeBuild、per-app 資源
 
 平台 monorepo 一週內 merge 了 114 個 commit，逐條篩出對 app 開發者可見的行為變更，
-每條都核對過原始碼或 ADR／spec 才落文；**prod 尚未帶到的一律標「部署落差」**。
+每條都核對過原始碼或 ADR／spec 才落文。**prod 現況以 v1.13.0（2026-09-07 10:35Z 部署成功）為準**：
+tag 落在 main 倒數第二個 commit，本節所有端點與 schema 欄位皆以 prod 公開 `openapi.json` 實查在線；
+只有靠環境旗標的兩條例外（`POLICY_GATE_MODE` prod off、`TENANT_DEDICATED_NODES` UAT／prod 皆
+ops-only）與「程式在、行為未實打」的少數項目另行標明。
 
 - **租戶資料存取規則（Auth gate v1）**——新 `custom-app-dev-guide.md` **§27**：租戶自訂
   「角色 × 表 × 動詞 → deny／`where_dsl` 列過濾／`hide_columns` 欄遮蔽」，由**平台**在資料函式層
@@ -30,7 +33,7 @@
 - **Action 執行逾時真的生效了**：manifest `timeout_ms` 1000～**120000** 自 #1518（2026-09-07）起
   作為 runner ceiling（修正前恆 30 秒）。`custom-app-dev-guide.md` §7 新段；`event-triggers.md`
   §1.6／§2.6 改口——**cron 實務上限 120 秒不是 280**（dispatcher 300 秒只是外層）；troubleshooting
-  「Action 超時」列改寫；prod 若仍 30 秒被切＝部署落差
+  「Action 超時」列改寫；ceiling 在 publish 時寫入，**v1.13.0 前發布的 app 要 republish 才換上新值**
 - **Custom App 執行模式租戶自選（T43）**——新 `custom-app-dev-guide.md` **§28**：
   `PATCH /builder/apps/{id}/runtime-settings {"always_on"}`（`builder.publish`；免費 403
   `ALWAYS_ON_REQUIRES_PAID_PLAN`、未發布 422、綁通訊渠道一律常駐 `locked_reason`）；草稿固定冷啟動；
@@ -47,7 +50,7 @@
   （2026-09-01 起，含 `..`）、`list` 非遞迴且 folder 對帳規則、`GET /url` 404 是第二條對帳路徑、
   key ≤1024 bytes UTF-8、`url` 取不到是 `""` 不是 `null`
 - **Hosted App**（`hosted-apps.md`）：
-  - 建置引擎搬 **AWS CodeBuild**（ADR 0028；UAT 2026-09-05 起、prod 待 tag）：§1 表、§2 建置包絡
+  - 建置引擎搬 **AWS CodeBuild**（ADR 0028；UAT 2026-09-05、prod v1.13.0 起）：§1 表、§2 建置包絡
     改「整台 8 GiB、OOM 只在整台用盡」並在建置記憶體陷阱補按 8 GiB 重算的提醒；建置期 env 失敗提示
     指向「環境變數」頁建置階段（§4）
   - 容器 capabilities **`drop ALL` ＋恆補 `NET_BIND_SERVICE`**（ADR 0017 2026-09-05 修訂）、
@@ -63,10 +66,13 @@
     建置時限一種成因；新增「機器保留量已滿」列
   - **§5 Open Proxy 也在 Auth gate 執法範圍**（T66）：app 身分無 user，`restrict` 規則用到 `$user.*`
     即整列 deny——租戶開「依員工過濾」規則時 hosted app 直接 403；troubleshooting 新列
-  - **§3.2 `active` 語意收緊**（#1464，2026-09-04 main）：結清改等新 revision 真的接手，起不來落 `failed`；
-    §3.4 的 version marker 要求因 prod 未切換不放寬
+  - **§3.2 `active` 語意收緊**（#1464，prod v1.13.0 起）：結清改等新 revision 真的接手，起不來落 `failed`；
+    §3.4 的 version marker 要求因尚未實打驗證不放寬
   - §6 記 #1421 修掉的「已登入使用者被匿名枚舉佇列擋成 503」；§8 補 App 佔用表 `restartCount`／
     `lastTerminatedReason`「有狀況」標記與五種原因的白話對照（T48）
+  - 檔頭「部署落差」段改寫：prod＝v1.13.0，2026-09-01／02 的 404 清單標為已補齊的歷史紀錄，
+    另列兩條靠旗標不靠版本的能力；troubleshooting「端點 404」列改為以 prod `openapi.json` 為判準
+- `platform-behaviors.md` §12：`api-grants` 端點 v1.13.0 起 prod 已有（2026-09-01 的 404 紀錄改為歷史）
   - 檔頭部署落差段補 2026-09-07 main 三塊的判讀提示
 - **平台行為補遺**（`platform-behaviors.md`）：§1.5 proxy 面新增 `not_in`（第 12 個運算子）；
   §6.2 新段——深連結 `?next=` 承載 search+hash（2026-09-02 起 HashRouter 頁面狀態可分享）與
