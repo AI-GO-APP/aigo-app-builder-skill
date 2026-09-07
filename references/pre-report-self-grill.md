@@ -57,8 +57,12 @@
 - **Q2.2 token 狀態**：401＝過期、403＝權限。重新登入後症狀是否消失？
 - **Q2.3 權限層級**：這步需要 `system.admin`、`builder.access` 還是 `datacenter.schema_write`？
   這顆帳號有沒有？一般員工帳號的 403 是否其實是 `builder.access` 破口（`data-center.md` §7.5）？
+  **403 body 有沒有 `reason`／`rule_id`**？有＝租戶「資料存取規則」（Auth gate）擋的，不是
+  權限字串問題、app 端改 code 無解（`custom-app-dev-guide.md` §27；UAT on／prod off）。
 - **Q2.4 產品線與模式**：打的是 Custom App 還是 Hosted App 的端點？`internal`／`external`／
   `self_built` 的限制是否符合（internal 開不了匿名存取；`access_mode` 不可改）？
+  匿名／終端使用者拿 404 時：**平台核可了嗎**（`anonymous_access_approved_at`）？開發者預覽
+  看得到、用戶看不到正是「已開旗標未核可」的樣子（dev-guide §15.1）。
 - **Q2.5 乾淨環境對照**：同一個瀏覽器 profile 連開多支 app 交叉比對會被快取污染，
   「沒動過的 app 也壞了」**不是證據**。可信的對照只有兩種——無痕視窗／新 profile 開同一支 app，
   或新建一支 hello-world app（`troubleshooting.md`「查不到怎麼辦」第 4 點）。對照乾淨才往下走。

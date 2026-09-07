@@ -4,6 +4,64 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.30.0
+
+### 對齊平台 2026-09-01～09-07 main（v1.13.x）：Auth gate、匿名核可、timeout 上限、CodeBuild、per-app 資源
+
+平台 monorepo 一週內 merge 了 114 個 commit，逐條篩出對 app 開發者可見的行為變更，
+每條都核對過原始碼或 ADR／spec 才落文；**prod 尚未帶到的一律標「部署落差」**。
+
+- **租戶資料存取規則（Auth gate v1）**——新 `custom-app-dev-guide.md` **§27**：租戶自訂
+  「角色 × 表 × 動詞 → deny／`where_dsl` 列過濾／`hide_columns` 欄遮蔽」，由**平台**在資料函式層
+  執法。app 會撞到的形狀：403 body 帶 `reason`（`policy_denied`｜`hidden_column_write`｜
+  `policy_invalid`｜`runner_unavailable`｜`app_data_access_suspended`）＋`rule_id`；`restrict`
+  命中時 200 但少列少欄、hide 欄位不得出現在 `filters`／`sort`／`order_by`；封鎖時 runtime host
+  整頁「資料存取暫停」。**`POLICY_GATE_MODE` UAT＝on、prod＝off（2026-09-07）**。
+  與 `platform-behaviors.md` §12 的 app 軸權限閘是兩條軸，**403 有沒有 `reason` 是分辨鍵**
+  （SKILL.md 錯誤處理、self-grill Q2.3、troubleshooting 三列、CONTEXT.md 同步）。
+  §27.3 另記 v0 的 `auth_gate` 自律模板：它不在請求路徑上，且依賴的 `ctx.user_role_ids`
+  **runner 尚未接線**（分支未 merge）——今天退化成「無角色」，不要再擴 v0
+- **匿名存取要平台核可**——`custom-app-dev-guide.md` **§15.1**：開 `allow_anonymous_access`
+  ≠ 能對外服務；租戶端 `POST /apps/{id}/anonymous-access-request`（`builder.manage_access`）
+  送申請，三態（未申請／已送出／已核可）對應 `anonymous_access_requested_at`／`approved_at`；
+  **核可前匿名訪客與 app 使用者 token 都拿到與「App 不存在」同形的 404**，開發者租戶身分預覽不受
+  影響——「我測都正常、用戶說 404」正是這個狀態。無 SLA，計畫要列成「等平台」的一步
+  （SKILL.md Phase 1.5、`product-line-decision.md` §6、CONTEXT.md、self-grill Q2.4、troubleshooting）
+- **Action 執行逾時真的生效了**：manifest `timeout_ms` 1000～**120000** 自 #1518（2026-09-07）起
+  作為 runner ceiling（修正前恆 30 秒）。`custom-app-dev-guide.md` §7 新段；`event-triggers.md`
+  §1.6／§2.6 改口——**cron 實務上限 120 秒不是 280**（dispatcher 300 秒只是外層）；troubleshooting
+  「Action 超時」列改寫；prod 若仍 30 秒被切＝部署落差
+- **前端 `db.ts` 的 `update()` 動詞 PUT→PATCH**（#1416，2026-09-01）：舊模板送 PUT 恆回 405、
+  更新從未生效。SKILL.md 規則 12 加註、troubleshooting 新列
+- **503 帶 `quota_hint`**（#1437）：runner 不可達的 503 若租戶運算配額 ≥90% 會在 `detail` 後接配額
+  說明並帶頂層 `quota_hint`——不是 code 問題，SKILL.md 錯誤處理與 troubleshooting 各加一列
+- **Storage API 九個坑**——`custom-app-dev-guide.md` §12 新表（核自平台 `custom-app-storage.md`）：
+  413 兩來源（單檔 100 MB／整包 109 MiB）、401 在讀 body 前就回、路徑逃出前綴一律 403
+  （2026-09-01 起，含 `..`）、`list` 非遞迴且 folder 對帳規則、`GET /url` 404 是第二條對帳路徑、
+  key ≤1024 bytes UTF-8、`url` 取不到是 `""` 不是 `null`
+- **Hosted App**（`hosted-apps.md`）：
+  - 建置引擎搬 **AWS CodeBuild**（ADR 0028；UAT 2026-09-05 起、prod 待 tag）：§1 表、§2 建置包絡
+    改「整台 8 GiB、OOM 只在整台用盡」並在建置記憶體陷阱補按 8 GiB 重算的提醒；建置期 env 失敗提示
+    指向「環境變數」頁建置階段（§4）
+  - 容器 capabilities **`drop ALL` ＋恆補 `NET_BIND_SERVICE`**（ADR 0017 2026-09-05 修訂）、
+    gVisor 已拆除：§2 新列；`exec caddy: operation not permitted` 進 §10 與 troubleshooting
+  - **§4.1 per-app 執行上限 `resources`**（T35／T47）：`PUT /runtime-settings` 全量語意
+    **四欄→五欄**；四鍵 quantity 形狀、request 下限 50m／64Mi、limit 可留 null＝整台、
+    422 `RESOURCE_LIMIT_EXCEEDS_MACHINE`（帶 `hint_instance_type`）、403
+    `RESOURCES_REQUIRE_DEDICATED_NODES`；Builder App 無租戶 UI
+  - **記錄分頁改版**（§8、§11）：`GET /{id}/runtime-starts`（7 天內容器執行段＋`reason`
+    idle／rollout／crash／unknown，**idle 是推定**）、`GET …/runtime-starts/{pod_name}/logs`、
+    `POST /{id}/logs/interpret-line`；三支收 Deploy Token
+  - **租戶 app 數配額已移除**（T49，2026-09-07）：§10 的 429 `hosted_app_quota_exceeded` 只剩
+    建置時限一種成因；新增「機器保留量已滿」列
+  - 檔頭部署落差段補 2026-09-07 main 三塊的判讀提示
+- **平台行為補遺**（`platform-behaviors.md`）：§1.5 proxy 面新增 `not_in`（第 12 個運算子）；
+  §6.2 新段——深連結 `?next=` 承載 search+hash（2026-09-02 起 HashRouter 頁面狀態可分享）與
+  「找不到此應用」依身分三層；§12 末補人軸／app 軸兩條線的指引
+- troubleshooting 另補：整頁「資料存取暫停」、restrict 少列少欄是預期、前端 422 通用提示
+  （API `detail` 仍完整）、深連結落首頁＝部署落差、「找不到此應用」先問登入與租戶、
+  Hosted 記錄頁 `idle` 不是「沒問題」
+
 ## 1.29.0
 
 ### 回報：開單前查既有卡（preflight，第一階段只記錄）

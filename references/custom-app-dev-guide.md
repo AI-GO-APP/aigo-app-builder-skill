@@ -163,6 +163,13 @@ def execute(ctx):
 
 Action 也可由 Webhook 或 App 排程觸發——**兩者都要求 action 冪等**，見 `event-triggers.md`。
 
+**執行逾時（★ 2026-09-07 起口徑）**：`actions/manifest.json` 各 action 的 `timeout_ms`
+可設 **1000～120000**；平台發布時取所有 action 的最大值（底線 30000）當 runner 的 ceiling，
+實際生效＝`min(該 action 的 timeout_ms, ceiling)`。修正（#1518）前 ceiling 恆為 30000，
+manifest 寫 120000 也在 30 秒被切——**若在 prod 仍見 30 秒即逾時，是部署落差不是設定錯**。
+超過 120000 的宣告會被夾回 120000；webhook（90 秒）與排程（300 秒）的 dispatcher 外層上限
+另算（`event-triggers.md` §1.6／§2.6），兩道取小。逾時回 `status: "timeout"`，長工作仍要切批次。
+
 依權限分流（前端隱藏不算數，這裡才是強制點）：
 
 ```python
@@ -243,6 +250,20 @@ action 路徑約定不變：`actions/**.py` 是可呼叫 action（`action_name` 
 需 Custom App Token (`window.__APP_TOKEN__`)。單檔 100MB 上限。
 檔案落在 `{tenant_id}/{custom_app_id}/…` 前綴下，讀寫都被鎖在本 app 前綴內；
 簽章 URL 有效 1 小時，**存 path 不存 URL**（同 `data-center.md` §6 的 key 原則）。
+
+**光看端點不會知道的坑**（核自平台 `docs/integrations/custom-app-storage.md`，2026-09-04）：
+
+| 現象 | 實情 |
+|---|---|
+| `413` | **兩個來源**：端點自己「檔案超過上限」（單檔 100 MB）；全域 body 上界「請求內容超過上限」（`upload` 整包 **109 MiB**，非上傳端點 96 MiB，body 帶 `limit_bytes`）。都是零物件、重送同一份永遠不會過 |
+| `401` 立刻回、body 沒被讀 | 2026-09-03 起 token 簽章／到期在**讀 body 之前**就驗——token 過期不必先送完 100 MB；換新 token 重送安全 |
+| `403「無權存取此路徑」` | `path`／`folder` 正規化後逃出 `{tenant}/{app}/` 前綴（含 `..`、絕對路徑、NUL），四條端點一律 403（2026-09-01 起）。**自己拼過 `/../` 的呼叫端從這版起會壞**——folder 只用不含 `/`、`..` 的簡單名 |
+| `list` 看不到剛傳的檔 | `list` **非遞迴**（只列一層），且 `upload` 會清洗 `folder` 而 `list` 不清洗——對帳要帶**送出時同一個** `folder` |
+| `GET /url` 404 | 「這個 key 上沒有物件」——是第二條對帳路徑，不是認證擋掉；`DELETE /file` 冪等，不存在也回 200 |
+| key 太長 4xx | 最終 key（前綴＋uuid＋副檔名）≤ **1024 bytes UTF-8**，中文一字 3 bytes；輸入問題，重試無用 |
+| `url` 取不到 | 回的是 `""`（S3）或裸 key（本機），**不是 `null`**——判斷用 falsy |
+| `400` | 不只路徑過長：multipart 解析層也回 400（`Too many files.` 門檻 1、`Too many fields.` 門檻 8）——**讀 `detail`**，不要一律當「縮短 folder」 |
+| `500` | 兩個來源後置條件相反：相依層 500＝端點沒跑、**一定沒寫入**；端點自己的「上傳失敗」＝物件狀態未知、要對帳。看 `detail` 分辨 |
 
 ### 12.1 遷移情景：從本地把歷史檔案搬進 Storage（★ 憑證是關鍵）
 
@@ -332,13 +353,35 @@ POST /api/v1/members
 > 「公開 web 資產」需要自有網域與 SEO，該走 Hosted App
 > （`migration-workflow.md` §2.1 問題二的面向分流）。
 
-啟用條件：`allow_anonymous_access=true` + `is_public_readable=true`
+啟用條件：`allow_anonymous_access=true` + `is_public_readable=true` **＋ 平台核可**（見下）
 
 - GET `/api/v1/pub/data/{slug}/objects`
 - GET `/api/v1/pub/data/{slug}/objects/{table}/records`
 - POST `/api/v1/pub/proxy/{slug}/{table}/query`
 
 Rate Limit：120 次/分鐘 per IP。
+
+### 15.1 ★ 開旗標不等於能對匿名服務：還要平台核可（2026-09 起）
+
+匿名對外服務資格由**平台**核可（濫用防治），租戶端只能**申請**。三態在 Builder 的
+App 設定「存取」區塊看得到，也對應 app 物件的兩個唯讀欄位：
+
+| 狀態 | `anonymous_access_requested_at` | `anonymous_access_approved_at` | 匿名訪客看到 |
+|---|---|---|---|
+| 未申請 | null | null | 與「App 不存在」**逐字相同的 404**（刻意同形，不洩漏存在性） |
+| 已送出申請 | 有值 | null | 同上 404 |
+| 已核可 | 有值 | 有值 | `/pub/*` 正常服務 |
+
+- 申請端點：`POST /api/v1/apps/{app_id}/anonymous-access-request`（需 `builder.manage_access`）。
+  **先把 `allow_anonymous_access=true` 存檔、再送申請**（UI 也是這個順序，旗標沒存按鈕不亮）。
+  冪等：重送不覆寫首次時間，回 `{requested: true, requested_at}`；核可欄與核可人**不回給租戶**
+- 核可由平台營運在 ops console 操作，**沒有 SLA、也不會自動通過**；申請後把狀態告訴用戶，
+  請他們聯絡平台，**不要**拿「/pub 回 404」去查 slug 或重建 app
+- 同形 404 不只擋無 token 的匿名請求：**app 使用者 token（外部自助註冊帳號）同樣被擋**——
+  核可前 external app 的終端使用者登入後也載不出資料。開發者用租戶身分預覽自己未核可的 app
+  **不受影響**（那是正當流程），所以「我測都正常、用戶說 404」正是這個狀態
+- 核可後撤銷也是平台側動作；被撤銷回到同形 404
+- `internal` 開不了匿名（400），本節只對 `external`／`self_built`
 
 ## 16. 套件管理
 
@@ -1262,4 +1305,62 @@ DELETE /api/v1/builder/apps/{app_id}   （builder.access；實測回 200，之�
 ```
 
 不像自建表有兩段式確認——**打了就刪**。代用戶刪除前必須明確確認過。
+
+## 27. 租戶資料存取規則（Auth gate）：平台側人軸執法（2026-09 起）
+
+> 與 `platform-behaviors.md` §12 的「App API 權限閘」是**兩條軸**：§12 是 **app 軸**
+> （這支 app 宣告了哪些 API 群、audit 模式）；本節是**人軸**——租戶自己訂
+> 「哪個角色對哪張表能做什麼、看得到哪幾列／哪幾欄」，由**平台**在資料函式層執法，
+> app 不用也不該各自實作一套。
+
+**現況（2026-09-07）**：`POLICY_GATE_MODE` **UAT＝on、prod＝off**。prod 切 on 前規則只會被
+記錄（audit）不會生效；切 on 後本節全部成立。**新開發的 app 現在就按本節寫**，切 on 時才不用回頭救。
+
+### 27.1 規則長什麼樣、掛在哪
+
+- 規則掛在 **app 之下**（Builder `/builder/{app_id}`「資料存取規則」分頁；API
+  `/api/v1/apps/{app_id}/data-policy/rules`）或**租戶級**（`/api/v1/data-policy/rules`，
+  `app_id=NULL`，對本租戶所有 app 生效）。寫入需 `system.admin` 或 `builder.manage_access`
+- 每條規則：`subject_role_ids`（空＝所有人）× 表 × 動詞（read／create／update／delete／`*`）→
+  `effect=deny`，或 `effect=restrict` 帶 **`where_dsl`**（列過濾：`{field, op, value}` 清單，
+  `op` ∈ eq/ne/in/not_in/lt/lte/gt/gte/is_null，值可為 `$user.id`／`$user.employee_id`／
+  `$user.role_ids`／`$user.department_id`／`$user.manager_id`）與 **`hide_columns`**（欄遮蔽）。
+  另有 `kind=script` 的 Python 規則跑在租戶專屬 policy-runner（200 ms 逾時，app 碰不到）
+- 生命週期：建立時 `enabled=false`、`mode=audit`；切 `enforce` 前必過 dry-run（重放最近 100 筆
+  拒絕紀錄、錯誤 0 筆才准）。`GET /apps/{app_id}/data-policy/explain?role_ids=…` 回合成視圖
+  （每表每動詞 `open`｜`restricted`｜`denied`｜`unreferenced`），與執法走同一條求值路徑
+
+### 27.2 ★ app 會撞到什麼（寫 code 時就要接住）
+
+| 情況 | app 看到 |
+|---|---|
+| 命中 `deny`、或 `restrict` 的 `$user.*` 解不出（例如 app 身分、無員工列的假帳號） | **HTTP 403**，body `{reason: "policy_denied", rule_id}` |
+| 管理員按「封鎖此 app 的資料存取」 | 403 `reason: "app_data_access_suspended"`；**app runtime host 會整頁顯示「資料存取暫停」**，app 自己的畫面不會渲染 |
+| script 規則的 policy-runner 掛了且無快取（enforce） | 403 `reason: "runner_unavailable"` |
+| 規則引用了已刪欄位／不合法運算子（enforce） | 403 `reason: "policy_invalid"` |
+| create／update 的 payload **碰到** `hide_columns` 裡的欄位（碰＝違規，不論值） | 403 `reason: "hidden_column_write"`——先於 400／404 |
+| read 命中 `restrict` | **不報錯**：`where` AND 進查詢（`total` 也照套）、`hide` 欄位從回應消失；同時 hide 欄位**不能**出現在 `filters`／`sort`／`order_by`／search／`count_only` |
+| 所有可投影欄位都被 hide 蓋掉 | 403 `policy_invalid`（不會回空欄位的列） |
+
+- **403 body 的 `reason` 才是分辨鍵**：同樣 403，`builder.access` 破口（`data-center.md` §7.5）、
+  `ctx.erp` 白名單、Egress 都沒有 `reason`。有 `reason` ＝ 租戶規則擋的，**app 端改 code 無解**，
+  把 `rule_id` 轉給租戶管理員到「資料存取規則」分頁看
+- **規則是 per-app 的**：`principal.app_id` 認的是「這次呼叫走哪支 app 的資料入口」，同一張表
+  被兩支 app 引用要各自設規則——別假設別支 app 的限制會延伸過來
+- 前端要有降級：清單少了幾欄、少了幾列是**預期行為**，不是 bug；別把 hide 欄位寫死在
+  `order_by`／`filters`（會被判 policy_invalid）
+- Server Action 的 `ctx.db.*` 與前端 SDK 都在執法範圍；匯入、審批回呼、模板安裝走 system 身分不套人軸
+- **不要在 action 裡自己重做一套角色→表的判斷去「補強」**：規則歸租戶管、平台執法；action 只做
+  業務層分流（`ctx.user_permissions`），資料層交給 gate
+
+### 27.3 v0 的 app 側自律模板（`auth_gate`）——與 27.1 不是同一套
+
+marketplace 另有 `auth_gate`／`hrms_core_gated` 模板：把 `templates/auth_gate/actions/_shared/auth.py`
+複製進自己的 `actions/_shared/auth.py`，action 第一行 `auth.check(ctx, resource=…, verb=…,
+user_attrs=…)` 拿 `(allow, row_filter, columns)`，**row_filter 要自己接進 query**。
+它**不在請求路徑上、擋不了任何人**、`user_attrs` 平台不驗、規則表 `auth_rules` 任何
+`builder.access` 都能改——是自律模型，平台側 v1（27.1）才是執法點。
+⚠️ 它讀 `ctx.user_role_ids`，**runner 今天（2026-09-07 main）還沒有這個屬性**（接線分支未 merge），
+模組會退回空清單＝「沒有任何角色」，只有 `entity_id="*"` 的規則列會命中——方向是更嚴不是誤放行，
+但表示 v0 模板現階段**做不到依角色放行**。要人軸控管請等 v1 切 on，不要再擴 v0。
 

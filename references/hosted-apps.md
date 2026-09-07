@@ -20,6 +20,11 @@
   需要「讓新設定生效」時**等傳播**（§4），需要「重跑建置」時**重新上傳**（§3.2）
 - ✅ 2026-09-02 實測可用：`/open/data-center/*`（自建表記錄面，§5）、
   `GET|POST /api/v1/refs/apps/{整合 id}`（預設表引用，§5）
+- **2026-09-07 main 已 merge、prod 待下一次 `v*` tag** 的三塊（本檔已按 main 更新，
+  使用前先打一次確認）：① 建置引擎搬 **AWS CodeBuild**（§1／§2，UAT 自 2026-09-05 起）；
+  ② 記錄分頁改版——`GET /{id}/runtime-starts`「先前啟動」與 `POST /{id}/logs/interpret-line`（§8）；
+  ③ `runtime-settings` 多一欄 **`resources`**（per-app 執行上限，§4）——`PUT` 的全量語意
+  從四欄變**五欄**；租戶 app 數配額（舊 429「預設 5 支」）已整條移除（§10）
 - **判讀原則**：對著本檔宣稱的端點拿到 404 或回應缺欄位，**先懷疑部署落差**，
   不是文件錯也不是你打錯——隔幾天再試或問平台
 
@@ -28,7 +33,7 @@
 | | Custom App（本 skill 主流程） | Hosted App |
 |---|---|---|
 | 產物 | Builder 產的 React bundle（VFS + Shadow DOM） | **任意技術棧原始碼 → 容器映像** |
-| 建置 | 平台 esbuild | zbpack 自動偵測語言（免 Dockerfile；有 Dockerfile 就走 Dockerfile） |
+| 建置 | 平台 esbuild | zbpack 自動偵測語言（免 Dockerfile；有 Dockerfile 就走 Dockerfile）；**跑在 AWS CodeBuild（東京）叢集外**（2026-09-05 起，ADR 0028；prod 待 tag）——對開發者的差別只在建置包絡與 OOM 語意（§2） |
 | 執行 | 平台 runtime 內 | Knative 容器，**scale-to-zero** |
 | 網址 | 主站內 `/runtime/...` | `https://{slug}.deploy.ai-go.app`（可綁自訂網域） |
 | 取平台資料 | `ctx` SDK／前端 SDK | 注入的 `AIGO_*` env + Open Proxy REST |
@@ -55,10 +60,13 @@
 | **監聽 `$PORT`（平台注入）且綁 `0.0.0.0`**——★ 看的是**框架實際綁的介面**，不是有沒有讀 `$PORT`（見下） | `connection refused`／readiness probe 失敗／**ksvc ready 逾時但 runtime-logs 顯示已就緒** |
 | **單一前台行程**——不可 supervisord／pm2／compose 多服務／Procfile worker | precheck `daemon` Issue |
 | **必須提交 lockfile**（go.sum／pnpm-lock.yaml…） | `missing go.sum`／`ERR_PNPM_NO_LOCKFILE` |
-| 建置包絡 **2 CPU / 4 GiB**、預設 900 秒——★ 建置工具會依 CPU 數開多個 worker 各占一份 heap，4 GiB 不寬裕 | `OOMKilled`／`exit code 137`／timeout；**容器級 OOM 時日誌可能全空**（§8） |
+| 建置包絡：**CodeBuild 上是整台 `BUILD_GENERAL1_MEDIUM`（ARM，8 GiB）**，OOM 只在整台用盡時發生（ADR 0028）；prod 切換前仍是 k8s Job 的 **2 CPU / 4 GiB**。預設時限 900 秒。★ 建置工具會依 CPU 數開多個 worker 各占一份 heap，包絡再大也要限 worker 數 | `OOMKilled`／`exit code 137`／timeout；**容器級 OOM 時日誌可能全空**（§8） |
 | 不可是 monorepo／空目錄；無法辨識的目錄會 fallback 成 static 站 | precheck Issue／部署出來是靜態檔 |
+| **容器只保留 `NET_BIND_SERVICE` 一個 capability**（`drop ALL` 後恆補這一顆，2026-09-05 起；gVisor 已拆除，隔離靠 seccomp＋PSA baseline） | 執行檔帶其他 file capability（`setcap` 過的二進位）會 `exec …: operation not permitted`；只綁 <1024 埠的 caddy／nginx-unprivileged **現在可以**——若仍撞到即部署落差 |
 
-- 執行資源：單 app limits 約 **800m CPU / 1.6 GiB**；容器內可 root（隔離靠 gVisor）
+- 執行資源：共用池與免費租戶固定 **800m CPU / 1.6 GiB**（平台常數）；**專屬節點租戶**可在
+  `runtime-settings.resources` 自設（§4），沒填＝**整台**（一台機器扣掉平台保留後的全部）。
+  容器內可 root，但沒有任何 capability（上表）
 - 建置時可連的公網來源是**白名單**（npm/PyPI/Docker Hub 等）——私有 registry 會被擋
 
 **★ 綁定介面陷阱（2026-09-02 實測，Next.js 16 standalone）**：k8s 會把容器的
@@ -82,6 +90,9 @@ PORT 其實有聽。判讀與處置：
 並把 `NODE_OPTIONS=--max-old-space-size` 設在包絡的 **60–65%（4 GiB → 約 2560）**
 才穩定——**設太高反而變成無日誌的容器級 OOM**（V8 heap 之外還有原生記憶體與 worker；
 3072 在程式碼長大後就爆，降到 2560 即過）。其他框架依同一原理處理。
+**CodeBuild 上（UAT 2026-09-05 起、prod 待 tag）包絡是整台 8 GiB 且沒有 cgroup `--memory`**——
+OOM 只在整台用盡時發生，「4 GiB 的 60–65%」那組數字要按 8 GiB 重算（約 5000）；但「限單 worker」
+的原則不變，因為 CodeBuild 那台也是多 vCPU。哪一套生效看部署落差（檔頭）。
 
 ## 3. 部署
 
@@ -193,12 +204,36 @@ Custom App 線每次變更都要過 SKILL.md Phase 4.2 的驗證閘門；Hosted 
 - 🚨 **「build」不是 compile-only**：標 build 的值會寫進映像的 `ENV`，
   **出現在租戶可見的建置日誌**、也留在執行中行程——只該留在伺服器的機密**不要**標 build
 - 🚨 **`PUT /runtime-settings` 是全量替換不是 merge**：省略 `env_vars`＝清空、
-  省略 `always_on`＝關、省略 `persistent_disk`＝卸掛——
-  **四欄（env_vars／env_availability／always_on／persistent_disk）一律一起送**
+  省略 `always_on`＝關、省略 `persistent_disk`＝卸掛、省略 `resources`＝回平台預設——
+  **五欄（env_vars／env_availability／always_on／persistent_disk／resources）一律一起送**
+  （2026-09-07 main 起五欄；prod 尚未帶 `resources` 時送了會被忽略，不會 422）
+- 建置期 env 走 SSE-KMS 輸入物件（CodeBuild），不再落在 Job env；建置階段讀不到某顆 env 時，
+  平台的失敗提示會指向「環境變數」頁的**建置階段**——先核那顆有沒有標 `build`／`both`，
+  不是去查 Dockerfile
 - **`apply_state` 的正確讀法**（核自原始碼 schema 註解＋2026-09-02 實測）：只在 **PUT 回應**帶回，
   `GET` 恆為 `null`（不是退回去了）。`applied` 只表示「spec 已送達、現行版次已重送」，
   **不保證容器已換版**——PUT 走 `wait_ready=false`。要確認是否傳播完成，唯一可靠方法是
   **從 app 內讀一個無害變數**（例如加一顆 `APP_BUILD_MARKER`）；用「移除變數」測比新增乾淨
+
+### 4.1 per-app 執行上限 `resources`（★ 只有專屬節點租戶能設，2026-09-07 main）
+
+```json
+"resources": {"cpuRequest": "250m", "cpuLimit": "1000m", "memoryRequest": "256Mi", "memoryLimit": "2Gi"}
+```
+
+- 四鍵 camelCase、k8s quantity 字串（cpu `^[0-9]+(\.[0-9]+)?m?$`、memory `^[0-9]+(Mi|Gi)$`，
+  ≤32 字元）；`request ≤ limit`；request 下限 **50m／64Mi**；形狀錯 → 422
+- `cpuLimit`／`memoryLimit` 可**一起留 `null`**＝整台機器（T47 預設）；`resources` 整個省略＝平台常數
+- limit 超過租戶目前機型單台可用量 → **422 `RESOURCE_LIMIT_EXCEEDS_MACHINE`**（body 帶
+  `max_cpu`／`max_memory`／`hint_instance_type`＝最小裝得下的機型）——改小上限或請租戶到
+  運算資源頁換規格，不是重試
+- 免費租戶 → 403；**共用池（非專屬節點）租戶 → 403 `RESOURCES_REQUIRE_DEDICATED_NODES`**——
+  這條線上租戶要先在「運算資源」頁開專屬機器，app 端改不了
+- 租戶換小機型時平台會逐 app 檢查，超限的 app 會擋住換機型（422 帶 `apps[]`）——
+  遷入計畫裡把每支 app 的上限與機型一起定
+- `GET /{id}/resource-usage` 回設定值；租戶畫面「App 佔用」顯示**已保留（request×副本）**與
+  **目前使用**（metrics 取樣，可為「—」），兩者都不是計費口徑——上限不是浪費，實際使用低很正常
+- **Builder App（Custom App）沒有租戶 UI 可設**這組值（ops 直改 DB），本節只管 Hosted App
 
 ### ★ 遷入既有系統時要重新提供的 env 清單
 
@@ -336,6 +371,17 @@ Hosted App 讓其他 App 打 HTTP 過去——這是明文禁止的反模式，�
   （tail 1–1000 預設 200；`reason: scaled_to_zero` 也是 HTTP 200，不是錯誤）
 - **AI 解讀**：`POST /{id}/logs/interpret`——`source=build` 必帶 `deployment_id`
   且**不吃** tail/since/until/severity；`source=runtime` 相反。走 AI 額度（超額 429）
+- **記錄分頁改版（2026-09-07 main；prod 待 tag）**——三個子分頁「即時日誌／先前啟動／建置日誌」：
+  - `GET /{id}/runtime-starts`：最近 **7 天**每一次**容器執行段**（同一實例內容器重啟＝新的一段）
+    的起迄、時長與 `reason`：`idle` 閒置停止／`rollout` 版次更新／`crash` 異常結束
+    （`reason_evidence` 為 `container_restarted[:oom_killed]`）／`unknown` 已停止／`null` 執行中。
+    ⚠️ **`idle` 是推定不是觀測**（冷啟動＋非重啟＋無新版次證據的排除法），節點汰換也會被標成
+    閒置停止——別拿它當「app 沒問題」的證據；`crash` 才是有證據的異常
+  - `GET /{id}/runtime-starts/{pod_name}/logs`：單一實例的執行期 log；`pod_name` 只能是本 app
+    的實例名（前綴不符 422）。租戶面叫「實例／短 ID」，wire 欄位仍是 `pod_name`
+  - `POST /{id}/logs/interpret-line`：AI 解讀單行——只送定位（實例名＋行 hash），伺服器自己重抓
+  - 三支都收 Deploy Token；`reason` 對應的白話文案由平台給，回報用戶時照平台的說法
+    （「記憶體超過上限被停掉」「App 一直重啟」），不要自己講 OOM／pod
 - **活容器檔案／終端**（session-only）：`GET /{id}/console/instances` 先看有沒有活實例
   （`scaled_to_zero` 要先打一下 app 網址喚醒）；檔案讀寫上限：下載 10 MiB／寫入 5 MiB；
   終端 PTY idle 15 分鐘、上限 1 小時。**都是除錯用途**——寫入不持久（§7）
@@ -357,9 +403,12 @@ POST /{id}/domains/{domain_id}/verify   → pending_dns → pending_cert → act
 | 錯誤 | 含義 | 處置 |
 |---|---|---|
 | 403 `hosted_app_requires_paid_plan` | 免費檔不能用 Hosted App | 升級方案，重試無用 |
-| 429 `hosted_app_quota_exceeded` | 每租戶 app 上限（預設 **5**，刪除會釋放名額） | 刪不用的 app 或請平台調配額 |
-| 429（建置 timeout 上限） | `build_timeout_seconds` 超過平台上限（900） | 降回 ≤900 |
+| 429 `hosted_app_quota_exceeded` | **只剩一種成因：`build_timeout_seconds` 超過平台上限（900）**（`quota: max_build_duration_seconds`）。租戶 app 數上限（舊「預設 5 支」）已於 2026-09-07 整條移除——app 能裝幾支由專屬機器容量決定 | 降回 ≤900；若 prod 仍回 app 數超額＝部署落差，刪不用的 app 先過 |
 | 422（env／timeout 下限） | env 出界（§4）或 timeout <120 | 修參數 |
+| 422 `RESOURCE_LIMIT_EXCEEDS_MACHINE` | `resources` 的 limit 超過租戶機型單台可用量（§4.1） | 改小上限或換機型；body 的 `hint_instance_type` 是最小裝得下的規格 |
+| 403 `RESOURCES_REQUIRE_DEDICATED_NODES` | 共用池租戶送了 `resources` | 租戶先開專屬機器；app 端無解 |
+| 建置 failed、rollout 時 `exec /usr/bin/xxx: operation not permitted` | 執行檔帶 file capability（caddy／nginx-unprivileged 常見） | 只需 `NET_BIND_SERVICE` 的已由平台恆補（2026-09-05）——仍撞到＝部署落差；需要其他 cap 的二進位換掉 |
+| 副本起不來、`GET /tenant/compute` 的 `limit.reached=true`／事件 `exceeded quota` | 租戶機器的保留量已滿（不是本 app 的錯） | 引導租戶到「運算資源」頁加機器／尖峰加開，或降其他 app 的 request |
 | 503「建置管線尚未就緒」 | 平台側未就緒，整筆 rollback 不吃名額 | 稍後再試（不是你的問題） |
 | 409（redeploy） | 沒有可重跑的成功上傳 | 走完整上傳流程 |
 | 403（session-only 端點） | 用了 Deploy Token 打 §11 標 ❌ 的端點 | 換登入 session，**不是 bug** |
@@ -377,6 +426,7 @@ POST /{id}/domains/{domain_id}/verify   → pending_dns → pending_cert → act
 | `POST /`（建立）——session-only（ADR 0019，§3.1；固定 403 訊息） | ❌ |
 | `POST /{id}/deployments`／`GET .../deployments*`／`.../logs` | ✅ |
 | `POST /{id}/restart`／`GET /{id}/runtime-logs`／`POST /{id}/logs/interpret`（⚠️ restart／interpret prod 2026-09-02 仍 404） | ✅ |
+| `GET /{id}/runtime-starts`／`GET /{id}/runtime-starts/{pod_name}/logs`／`POST /{id}/logs/interpret-line`（§8；2026-09-07 main，prod 待 tag） | ✅ |
 | `GET|PUT /{id}/runtime-settings`／`GET /{id}/resource-usage` | ✅ |
 | `GET /{id}/preview`／`POST /{id}/preview/capture` | ✅ |
 | `POST /{id}/redeploy`（⚠️ prod 2026-09-02 仍 404）／`clone`／`PATCH /{id}`（改名）／`DELETE /{id}` | ❌ |
