@@ -202,6 +202,63 @@ def _compose_body(args: argparse.Namespace) -> str:
     return (args.body or "").strip()
 
 
+PREFLIGHT_LABEL = {
+    "fixed": "同症狀的卡已修復（Done）",
+    "tracking": "同症狀的卡處理中",
+    "none": "沒有同症狀的卡",
+}
+
+
+def _preflight(client: httpx.Client, token: str, title: str, body: str, tenant: str):
+    """
+    開單前查既有卡（CSM Manager #46／本 repo #43）：送出前先問伺服器
+    「同症狀是否已有卡、修好了沒」。
+
+    ★ 第一階段只查、只記，**不改流程**：不論 decision 是什麼都照常送出。
+    要等命中率看得到（伺服器每日統計「開單前查卡」那一行）才會開第二階段
+    ——已修復一句帶過、自動重試、續行。原因：伺服器端歸卡上線至今零命中實績，
+    誤命中的代價是 AI 對使用者說「修好了我直接繼續」然後重試失敗。
+
+    best-effort：任何失敗（連線、非 200、伺服器沒這個端點）都回 None，照常送出。
+    設 URFIT_TICKET_PREFLIGHT=0 可整個關掉。
+    """
+    if os.environ.get("URFIT_TICKET_PREFLIGHT", "1") == "0":
+        return None
+    try:
+        resp = _post(client, f"{_api_base()}/api/tickets/preflight", {
+            "title": title,
+            "content": body,
+            "site_key": tenant,
+        }, token)
+    except httpx.HTTPError as e:
+        print(f"ℹ️  開單前查卡略過（連線問題：{e}）")
+        return None
+    if resp.status_code != 200:
+        print(f"ℹ️  開單前查卡略過（HTTP {resp.status_code}）")
+        return None
+    data = resp.json()
+    decision = data.get("decision", "none")
+    match = data.get("match") or {}
+    extra = ""
+    if match:
+        extra = f"：{match.get('title', '')}（信心 {match.get('confidence')}"
+        extra += f"，修好於 {str(match.get('done_at', ''))[:10]}）" if match.get("done_at") else "）"
+    print(f"🔎 開單前查卡：{PREFLIGHT_LABEL.get(decision, decision)}{extra}——第一階段僅記錄，仍照常送出")
+    return data
+
+
+def _report_outcome(client: httpx.Client, token: str, preflight_id: str, outcome: str) -> None:
+    """回報 skill 照 decision 做了什麼（第一階段一律 submitted）。稽核用，失敗不影響回報。"""
+    try:
+        client.post(
+            f"{_api_base()}/api/tickets/preflight/{preflight_id}/outcome",
+            json={"outcome": outcome},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    except httpx.HTTPError:
+        pass
+
+
 def _upload_images(client: httpx.Client, token: str, paths: list) -> list:
     """逐張上傳截圖，回傳附件 key 清單。任何一張失敗就整筆中止（不建缺圖的卡）。"""
     if len(paths) > MAX_IMAGES:
@@ -244,17 +301,33 @@ def cmd_submit(args: argparse.Namespace) -> int:
         body = f"{body}\n\n## {RULED_OUT_HEADING}\n{ruled}"
 
     creds = derive_credentials(args.project)
+    title = args.title.strip()[:80]
+    content = body[:4000]
     with httpx.Client(timeout=60) as client:
         token = authenticate(client, creds)
+        # 開單前查既有卡（第一階段只記錄，見 _preflight）
+        pf = _preflight(client, token, title, content, creds["tenant"])
+        preflight_id = (pf or {}).get("preflight_id") or ""
         attachments = _upload_images(client, token, args.image or [])
-        resp = _post(client, f"{_api_base()}/api/tickets", {
-            "title": args.title.strip()[:80],
-            "content": body[:4000],
+        payload = {
+            "title": title,
+            "content": content,
             "source": "agent",
             "site_key": creds["tenant"],
             "client_msg_id": str(uuid.uuid4()),
             "attachments": attachments,
-        }, token)
+        }
+        # 帶 preflight_id 送出：伺服器據此直接附掛（tracking）或當復發處理，並把這張票
+        # 掛回那次判斷供稽核。伺服器不認這個 id（400／409）就退回不帶它再送一次——
+        # 查卡是加分項，不能反過來擋住回報
+        resp = _post(client, f"{_api_base()}/api/tickets",
+                     {**payload, "preflight_id": preflight_id} if preflight_id else payload, token)
+        if preflight_id and resp.status_code in (400, 409) and "preflight" in resp.text:
+            print(f"ℹ️  伺服器不接受 preflight_id（HTTP {resp.status_code}），改不帶它送出")
+            payload["client_msg_id"] = str(uuid.uuid4())
+            resp = _post(client, f"{_api_base()}/api/tickets", payload, token)
+        if resp.status_code == 201 and preflight_id:
+            _report_outcome(client, token, preflight_id, "submitted")
     if resp.status_code != 201:
         print(f"❌ 回報失敗（HTTP {resp.status_code}）：{resp.text[:200]}")
         return 1
