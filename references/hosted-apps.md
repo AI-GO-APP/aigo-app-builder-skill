@@ -24,7 +24,9 @@
   需要「讓新設定生效」時**等傳播**（§4），需要「重跑建置」時**重新上傳**（§3.2）
 - ✅ 2026-09-02 實測可用：`/open/data-center/*`（自建表記錄面，§5）、
   `GET|POST /api/v1/refs/apps/{整合 id}`（預設表引用，§5）
-- **v1.13.0 帶上 prod 的三塊**（程式面 openapi 已實查；行為面尚未在 prod 實打）：
+- **v1.13.0 帶上 prod 的三塊**（openapi 實查＋**2026-09-08 demo 租戶實打一輪**：靜態站 CodeBuild
+  建置 46 秒 active、caddy 起得來、`runtime-starts` 有資料、`resources` 在共用池回 403——本檔各節
+  標「實打」處即為實測）：
   ① 建置引擎搬 **AWS CodeBuild**（§1／§2；UAT 2026-09-05、prod 隨 v1.13.0 切換，平台 0907 漂移
   runbook 明記「prod 已切 CodeBuild」）；② 記錄分頁改版——`GET /{id}/runtime-starts`「先前啟動」與
   `POST /{id}/logs/interpret-line`（§8）；③ `runtime-settings` 多一欄 **`resources`**（per-app 執行上限，
@@ -69,7 +71,7 @@
 | **必須提交 lockfile**（go.sum／pnpm-lock.yaml…） | `missing go.sum`／`ERR_PNPM_NO_LOCKFILE` |
 | 建置包絡：**CodeBuild 整台 `BUILD_GENERAL1_MEDIUM`（ARM，8 GiB）**，OOM 只在整台用盡時發生（ADR 0028；UAT／prod 皆已切換）；v1.13.0 之前是 k8s Job 的 2 CPU / 4 GiB。預設時限 900 秒。★ 建置工具會依 CPU 數開多個 worker 各占一份 heap，包絡再大也要限 worker 數 | `OOMKilled`／`exit code 137`／timeout；**容器級 OOM 時日誌可能全空**（§8） |
 | 不可是 monorepo／空目錄；無法辨識的目錄會 fallback 成 static 站 | precheck Issue／部署出來是靜態檔 |
-| **容器只保留 `NET_BIND_SERVICE` 一個 capability**（`drop ALL` 後恆補這一顆，2026-09-05 起；gVisor 已拆除，隔離靠 seccomp＋PSA baseline） | 執行檔帶其他 file capability（`setcap` 過的二進位）會 `exec …: operation not permitted`；只綁 <1024 埠的 caddy／nginx-unprivileged **現在可以**（UAT 09-05、prod v1.13.0 起） |
+| **容器只保留 `NET_BIND_SERVICE` 一個 capability**（`drop ALL` 後恆補這一顆，2026-09-05 起；gVisor 已拆除，隔離靠 seccomp＋PSA baseline） | 執行檔帶其他 file capability（`setcap` 過的二進位）會 `exec …: operation not permitted`；只綁 <1024 埠的 caddy／nginx-unprivileged **現在可以**（UAT 09-05、prod v1.13.0 起；2026-09-08 prod 實打 zbpack static 站＝caddy 映像，rollout 成功） |
 
 - 執行資源：共用池與免費租戶固定 **800m CPU / 1.6 GiB**（平台常數）；**專屬節點租戶**可在
   `runtime-settings.resources` 自設（§4），沒填＝**整台**（一台機器扣掉平台保留後的全部）。
@@ -120,8 +122,10 @@ OOM 只在整台用盡時發生，上面「4 GiB 的 60–65%」是舊引擎的�
 
 ```
 POST /api/v1/hosted-apps  (create_deployment=true)   ← 登入 session（§3.1）；後續兩步 Deploy Token 即可
-  → 回 dispatch bundle {upload_token, deployd_upload_url, build_deadline_seconds, ...}
-POST {deployd_upload_url}  (原始碼 tarball + upload_token)
+  → 201 detail；dispatch bundle 在 latest_deployment.dispatch
+    {upload_token, deployd_upload_url, build_deadline_seconds, token_expires_at, ...}
+POST {deployd_upload_url}  ← multipart/form-data，第一個欄位必須叫 tarball（.tar.gz）；
+  header Authorization: Bearer {upload_token}；上限 200 MiB   → 202 {deployment_id}
   → 入建置佇列；排隊不吃建置時鐘
 輪詢 GET /hosted-apps/{id}/deployments/{deployment_id}
   → queued → building → active｜failed｜superseded
@@ -141,8 +145,11 @@ POST {deployd_upload_url}  (原始碼 tarball + upload_token)
   驗證新版時在回應加 version marker，別把舊版行為當成新版的 bug（2026-09-02 曾因此誤判）
 - **`active` 的語意已收緊**（#1464；prod v1.13.0 起）：結清改等**新 revision 真的接手**
   （WaitRevisionLive 三道判準），新 revision 起不來（如 exec EPERM）會落 `failed`，不再把舊 revision
-  的 Ready 誤報成 `active`。所以 `active`＝新版已在服務；仍留 version marker 是因為它能一併抓到
-  「路由到錯的 app」與「打到快取」，而且這條收緊尚未在 prod 實打驗證
+  的 Ready 誤報成 `active`。所以 `active`＝新版已在服務（2026-09-08 prod 實打：只含 `index.html` 的
+  tarball，`queued`→`building`→`active` 共 46 秒，`build_job_name` 形如
+  `codebuild:ap-northeast-1:aigo-hosted-build:<uuid>`，`active` 當下第一發 GET 就拿到帶 marker 的 200）；
+  仍留 version marker 是因為它能一併抓到「路由到錯的 app」與「打到快取」。
+  「起不來會落 failed」那一半（負向）未實打
 - 部署建議走 CLI（§3.3）；REST 流程留給 CLI 裝不了的環境
 
 ### 3.3 CLI（`aigo`，建議的部署路徑）
@@ -242,7 +249,9 @@ Custom App 線每次變更都要過 SKILL.md Phase 4.2 的驗證閘門；Hosted 
 - limit 超過租戶目前機型單台可用量 → **422 `RESOURCE_LIMIT_EXCEEDS_MACHINE`**（body 帶
   `max_cpu`／`max_memory`／`hint_instance_type`＝最小裝得下的機型）——改小上限或請租戶到
   運算資源頁換規格，不是重試
-- 免費租戶 → 403；**共用池（非專屬節點）租戶 → 403 `RESOURCES_REQUIRE_DEDICATED_NODES`**——
+- 免費租戶 → 403；**共用池（非專屬節點）租戶 → 403 `RESOURCES_REQUIRE_DEDICATED_NODES`**
+  （2026-09-08 prod 實打訊息：「共用池租戶不能自設執行上限（沿用平台常數）；請先在「機器」設定專屬節點」；
+  同一支 app 不帶 `resources` 的五欄 PUT 回 200 `apply_state: applied`，`GET` 回應已含 `resources` 鍵）——
   app 端改不了。專屬機器目前 `TENANT_DEDICATED_NODES=ops-only`（UAT／prod 同），**租戶自己在
   「運算資源」頁開不了**，要請平台替租戶開；沒開之前這個 403 是預期
 - 租戶換小機型時平台會逐 app 檢查，超限的 app 會擋住換機型（422 帶 `apps[]`）——
@@ -398,7 +407,9 @@ Hosted App 讓其他 App 打 HTTP 過去——這是明文禁止的反模式，�
   且**不吃** tail/since/until/severity；`source=runtime` 相反。走 AI 額度（超額 429）
 - **記錄分頁改版（v1.13.0，三支端點 prod openapi 已實查）**——三個子分頁「即時日誌／先前啟動／建置日誌」：
   - `GET /{id}/runtime-starts`：最近 **7 天**每一次**容器執行段**（同一實例內容器重啟＝新的一段）
-    的起迄、時長與 `reason`：`idle` 閒置停止／`rollout` 版次更新／`crash` 異常結束
+    的起迄、時長與 `reason`（2026-09-08 prod 實打回應形狀：`{app_id, since, starts:[{pod_name, run_index,
+    started_at, ended_at, time_source, line_count, revision_seq, reason, reason_evidence, source}]}`，
+    執行中那段 `ended_at`／`reason` 皆 `null`、`source: "live"`）：`idle` 閒置停止／`rollout` 版次更新／`crash` 異常結束
     （`reason_evidence` 為 `container_restarted[:oom_killed]`）／`unknown` 已停止／`null` 執行中。
     ⚠️ **`idle` 是推定不是觀測**（冷啟動＋非重啟＋無新版次證據的排除法），節點汰換也會被標成
     閒置停止——別拿它當「app 沒問題」的證據；`crash` 才是有證據的異常
@@ -458,7 +469,7 @@ POST /{id}/domains/{domain_id}/verify   → pending_dns → pending_cert → act
 | `GET /{id}/runtime-starts`／`GET /{id}/runtime-starts/{pod_name}/logs`／`POST /{id}/logs/interpret-line`（§8；v1.13.0，prod openapi 已實查） | ✅ |
 | `GET|PUT /{id}/runtime-settings`／`GET /{id}/resource-usage` | ✅ |
 | `GET /{id}/preview`／`POST /{id}/preview/capture` | ✅ |
-| `POST /{id}/redeploy`（⚠️ prod 2026-09-02 仍 404）／`clone`／`PATCH /{id}`（改名）／`DELETE /{id}` | ❌ |
+| `POST /{id}/redeploy`（⚠️ prod 2026-09-02 仍 404，v1.13.0 已補）／`clone`／`PATCH /{id}`（改名）／`DELETE /{id}`（回 `{status: deleted, teardown: completed}`，2026-09-08 實打） | ❌ |
 | `POST|DELETE /{id}/icon`／`PUT /{id}/access-settings` | ❌ |
 | `/{id}/credential/{provision|rotate|revoke}` | ❌ |
 | `/{id}/domains*`／`/{id}/ports*` | ❌ |

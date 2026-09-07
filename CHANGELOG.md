@@ -73,6 +73,24 @@ ops-only）與「程式在、行為未實打」的少數項目另行標明。
   - 檔頭「部署落差」段改寫：prod＝v1.13.0，2026-09-01／02 的 404 清單標為已補齊的歷史紀錄，
     另列兩條靠旗標不靠版本的能力；troubleshooting「端點 404」列改為以 prod `openapi.json` 為判準
 - `platform-behaviors.md` §12：`api-grants` 端點 v1.13.0 起 prod 已有（2026-09-01 的 404 紀錄改為歷史）
+
+### 2026-09-08 prod demo 租戶實打（自清，建的 app 全刪）
+
+以本版文字為腳本逐項對打，全部與文件一致，實測值回填到各節「實打」註記：
+
+- Custom App：manifest `timeout_ms: 120000` 的 `sleep(45)` action 成功（`duration_ms 45001`）；
+  發布前 `PATCH runtime-settings` 422 `RUNTIME_SETTINGS_REQUIRE_PUBLISHED`、發布後常駐開關 200；
+  新建 app 的 `src/db.ts` 已是 `PATCH`；internal 開匿名 400；external 開旗標後公開端點 404 與不存在
+  **逐位元組同形**、申請冪等、`requested_by` 不外露；規則 CRUD／enabled／mode／explain／decision-logs
+  ／decision-counts 全 2xx（`policy_gate_mode: off`）；storage 六個行為（含路徑逃出 403、刪除冪等、
+  刪後 404）；proxy `not_in` 200、`neq` 400
+- Hosted App：`index.html` tarball → CodeBuild（`build_job_name` `codebuild:ap-northeast-1:…`）46 秒
+  `active`、caddy 靜態站 200；`runtime-starts`／`runtime-logs` 有資料；`runtime-settings` GET 含
+  `resources`，帶 `resources` 的 PUT 403 `RESOURCES_REQUIRE_DEDICATED_NODES`、五欄 PUT 200；
+  `GET /tenant/compute/apps` 每列含 `restartCount`／`lastTerminatedReason`；刪除回 `teardown: completed`
+- 新增兩條文件沒寫清的坑：storage `path` 必須是完整 key（相對路徑 403 不是 404）、
+  `app-scoped-token` 打不了 `/ext/storage`（401）；`refs` 的 `columns` 空陣列＝之後查詢恆 400
+- 未實打（負向案例）：CodeBuild OOM／無日誌矩陣、rollout 起不來落 `failed`、gate on 時的 403 body（prod off）
   - 檔頭部署落差段補 2026-09-07 main 三塊的判讀提示
 - **平台行為補遺**（`platform-behaviors.md`）：§1.5 proxy 面新增 `not_in`（第 12 個運算子）；
   §6.2 新段——深連結 `?next=` 承載 search+hash（2026-09-02 起 HashRouter 頁面狀態可分享）與

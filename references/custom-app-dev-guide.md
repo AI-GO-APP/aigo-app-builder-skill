@@ -168,6 +168,8 @@ Action 也可由 Webhook 或 App 排程觸發——**兩者都要求 action 冪�
 實際生效＝`min(該 action 的 timeout_ms, ceiling)`。修正（#1518，prod v1.13.0 起）前 ceiling 恆為 30000，
 manifest 寫 120000 也在 30 秒被切。**ceiling 是在 publish 時寫進 runner 設定的**——v1.13.0 之前發布的
 app 仍帶舊的 30 秒 ceiling，**要 republish 一次**才會換上 manifest 的值；republish 後仍 30 秒被切才是平台問題。
+（2026-09-08 prod demo 租戶實打：新建 app、manifest `timeout_ms: 120000`、action `time.sleep(45)` →
+`status: success`、`duration_ms: 45001`；同 app 的 30000 action 第一發 503 冷啟動、20 秒後 200。）
 超過 120000 的宣告會被夾回 120000；webhook（90 秒）與排程（300 秒）的 dispatcher 外層上限
 另算（`event-triggers.md` §1.6／§2.6），兩道取小。逾時回 `status: "timeout"`，長工作仍要切批次。
 
@@ -265,6 +267,13 @@ action 路徑約定不變：`actions/**.py` 是可呼叫 action（`action_name` 
 | `url` 取不到 | 回的是 `""`（S3）或裸 key（本機），**不是 `null`**——判斷用 falsy |
 | `400` | 不只路徑過長：multipart 解析層也回 400（`Too many files.` 門檻 1、`Too many fields.` 門檻 8）——**讀 `detail`**，不要一律當「縮短 folder」 |
 | `500` | 兩個來源後置條件相反：相依層 500＝端點沒跑、**一定沒寫入**；端點自己的「上傳失敗」＝物件狀態未知、要對帳。看 `detail` 分辨 |
+| `path` 給相對路徑（`e2e/x.txt`）回 403 | **`path` 一律用 upload／list 回的完整 key**（`{tenant}/{app}/…` 開頭）；相對路徑會被判成逃出前綴 → 403「無權存取此路徑」，不是 404 |
+| 用 `POST /app-scoped-token/{id}` 的 token 打這組端點回 401「無效或已過期的 Token」 | 這組端點認的是 **app 使用者 token**（external app 自助註冊／登入的 `access_token`，或 bundle 注入的 `__APP_TOKEN__`），不是 app-scoped token（2026-09-08 實打） |
+
+2026-09-08 prod 實打（external app 終端使用者 token）：upload 200 回 `{path, url}`（S3 簽章 URL）；
+`list?folder=e2e` 回 `{folder, files:[{name, path}], count}`；不帶 folder 的 `list` 看不到子資料夾的檔
+（非遞迴）；`url?path=../../x` 與 `list?folder=..` 皆 403；`DELETE` 回 200 `{status: deleted}` 且重刪仍 200；
+刪後 `GET /url` 404「檔案不存在」。
 
 ### 12.1 遷移情景：從本地把歷史檔案搬進 Storage（★ 憑證是關鍵）
 
@@ -382,7 +391,11 @@ App 設定「存取」區塊看得到，也對應 app 物件的兩個唯讀欄�
   核可前 external app 的終端使用者登入後也載不出資料。開發者用租戶身分預覽自己未核可的 app
   **不受影響**（那是正當流程），所以「我測都正常、用戶說 404」正是這個狀態
 - 核可後撤銷也是平台側動作；被撤銷回到同形 404
-- `internal` 開不了匿名（400），本節只對 `external`／`self_built`
+- `internal` 開不了匿名（400「Internal App 不支援匿名存取」），本節只對 `external`／`self_built`
+- 2026-09-08 prod 實打（demo 租戶）：external app 發布＋開旗標後，`GET /builder/apps/public/{slug}`
+  與 `GET /pub/data/{slug}/objects` 都回 404 `{"detail": "App 不存在或尚未發布"}`，與不存在的 slug
+  **逐位元組相同**；申請兩次 `requested_at` 相同；app 物件回 `requested_at` 有值、`approved_at` null、
+  **沒有** `requested_by` 欄位；申請後公開端點仍 404
 
 ## 16. 套件管理
 
@@ -1330,7 +1343,12 @@ prod 切 on 前規則只會被記錄（audit）不會生效；切 on 後本節�
   另有 `kind=script` 的 Python 規則跑在租戶專屬 policy-runner（200 ms 逾時，app 碰不到）
 - 生命週期：建立時 `enabled=false`、`mode=audit`；切 `enforce` 前必過 dry-run（重放最近 100 筆
   拒絕紀錄、錯誤 0 筆才准）。`GET /apps/{app_id}/data-policy/explain?role_ids=…` 回合成視圖
-  （每表每動詞 `open`｜`restricted`｜`denied`｜`unreferenced`），與執法走同一條求值路徑
+  （每表每動詞 `open`｜`restricted`｜`denied`｜`unreferenced`），與執法走同一條求值路徑。
+  2026-09-08 prod 實打：`POST …/rules {resource_type: "dc_table", resource_id: "*", verb: "*",
+  kind: "declarative", effect: "deny"}` 201；`PATCH …/enabled {enabled: true}`、`PATCH …/mode
+  {mode: "enforce"}` 皆 200（零樣本仍准）；explain 回 `{policy_gate_mode, principal:{kind, role_ids},
+  verbs, rows:[{resource_type, resource_id, cells:[{verb, reference:{referenced, verb_granted},
+  scope:{api_group, granted}, rule, result}]}]}`
 - 被擋了看哪裡：`GET /apps/{app_id}/data-policy/decision-logs`（拒絕紀錄，含 audit 模式的 would_deny）、
   `GET /data-policy/decision-counts`（各 app 過去 24 小時 would_deny／would_restrict 計數）。
   租戶級規則的管理頁在 **`/dashboard/settings/data-policy`**（T69）；app 級在 Builder 分頁
@@ -1387,7 +1405,10 @@ PATCH /api/v1/builder/apps/{app_id}/runtime-settings   （builder.publish）
 ```
 
 - UI 在 Builder 列表的 App 設定 Dialog「執行模式」radio；權限與「能發布」同一把（`builder.publish`）
-- **免費租戶 403 `ALWAYS_ON_REQUIRES_PAID_PLAN`**（T43：免費方案不提供常駐）；**未發布 422** 不寫
+- **免費租戶 403 `ALWAYS_ON_REQUIRES_PAID_PLAN`**（T43：免費方案不提供常駐）；**未發布 422
+  `RUNTIME_SETTINGS_REQUIRE_PUBLISHED`「App 發布後才能設定執行模式」** 不寫
+  （2026-09-08 prod 實打：發布前 422、發布後 `{always_on: true, effective_mode: "always_on",
+  locked_reason: null, apply_state: "applied"}`，切回 false 即 `scale_to_zero`）
 - **綁了通訊渠道（messaging trigger）的 app 一律常駐**：`always_on=false` 照存但不生效，
   回 `locked_reason: "messaging_trigger"`，UI 鎖定不可切——trigger 要常駐收訊息
 - `apply_state` 是 k8s 重套結果，設定已落 DB；`failed` 不代表沒存，稍後 publish 會再套

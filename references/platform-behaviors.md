@@ -93,7 +93,10 @@ queryAdvanced(table, {
 - **最危險的一格是 proxy 的靜默整表**：「找 contacted 階段」查成「整表第一列」不會有任何訊號，
   下游就在錯的列上寫資料。proxy 查詢寫完先用一個必然不存在的值打一次，回整表就是形狀錯
 - `neq`、`!=`、`equals`、`contains`、`between` 在 proxy 面都是 400——`contains` 是 records 面的字；
-  `not_in` 是 2026-09 才加進 proxy 面的第 12 個運算子（prod v1.13.0 起）
+  `not_in` 是 2026-09 才加進 proxy 面的第 12 個運算子（prod v1.13.0 起；2026-09-08 實打
+  `{"column":"state","op":"not_in","value":["cancel","draft"]}` 回的列 state 全非那兩值，
+  `neq` 仍 400「不支援的運算子: neq」）。另：`POST /refs/apps/{id}` 的 `columns` 給空陣列會建成功，
+  但之後 proxy 查詢一律 400「未授權任何欄位」——引用要明列欄位
 - records 面 `gte`／`lte` 對 `date`／`datetime` 的字串值（如 `"2020-01-01"`）：
   **2026-09-03 測試租戶實測 200**，已可用；若在其他租戶撞到 500 `DataError` 先懷疑部署落差
 
