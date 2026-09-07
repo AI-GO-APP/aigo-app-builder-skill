@@ -81,8 +81,8 @@ queryAdvanced(table, {
 | 端點 | `GET /data-center/tables/{key}/records`（`ctx.db.query_table`／`queryTable`；Hosted 容器內加 `/open`） | `POST /proxy/{app}/{table}/query`（`queryAdvanced`；Hosted 容器內 `/open/proxy/{table}/query`） |
 | 過濾位置 | query string `filters=[…]` | body `filters: […]` |
 | 項目鍵名 | `field` / `op` / `value` | **`column`** / `op` / `value` |
-| 合法運算子 | `eq` `contains` `gte` `lte`（依欄位型別再限縮：text 只有 eq/contains） | `eq` `ne` `gt` `gte` `lt` `lte` `like` `ilike` **`in`** `is_null` `is_not_null` |
-| **`in`** | ❌ | ✅ |
+| 合法運算子 | `eq` `contains` `gte` `lte`（依欄位型別再限縮：text 只有 eq/contains） | `eq` `ne` `gt` `gte` `lt` `lte` `like` `ilike` **`in`** **`not_in`**（2026-09 起，value 必須是陣列） `is_null` `is_not_null` |
+| **`in`**／`not_in` | ❌ | ✅ |
 | OR | ❌ | ❌ |
 | 不合法運算子 | **422 列出合法集合** | 400「不支援的運算子」 |
 | 錯鍵名 | 422「需要 field/op/value 三個鍵」 | 400「不合法的欄位名稱: 」（欄位名是空字串） |
@@ -92,7 +92,11 @@ queryAdvanced(table, {
 
 - **最危險的一格是 proxy 的靜默整表**：「找 contacted 階段」查成「整表第一列」不會有任何訊號，
   下游就在錯的列上寫資料。proxy 查詢寫完先用一個必然不存在的值打一次，回整表就是形狀錯
-- `not_in`、`neq`、`!=`、`equals`、`contains`、`between` 在 proxy 面都是 400——`contains` 是 records 面的字
+- `neq`、`!=`、`equals`、`contains`、`between` 在 proxy 面都是 400——`contains` 是 records 面的字；
+  `not_in` 是 2026-09 才加進 proxy 面的第 12 個運算子（prod v1.13.0 起；2026-09-08 實打
+  `{"column":"state","op":"not_in","value":["cancel","draft"]}` 回的列 state 全非那兩值，
+  `neq` 仍 400「不支援的運算子: neq」）。另：`POST /refs/apps/{id}` 的 `columns` 給空陣列會建成功，
+  但之後 proxy 查詢一律 400「未授權任何欄位」——引用要明列欄位
 - records 面 `gte`／`lte` 對 `date`／`datetime` 的字串值（如 `"2020-01-01"`）：
   **2026-09-03 測試租戶實測 200**，已可用；若在其他租戶撞到 500 `DataError` 先懷疑部署落差
 
@@ -310,6 +314,15 @@ https://{tenant}.ai-go.app/runtime/{slug}
 - `src/db.json` **恆為 `{}`**，即使 Data Reference 都註冊成功——它是執行期注入檔、
   不存在 VFS。要確認引用狀態請查 `GET /api/v1/refs/apps/{app_id}`，不要看 `db.json`。
 
+**深連結與「找不到此應用」（2026-09-02 起）**：分享 `/runtime/{slug}?x=1#/page` 給未登入的人，
+登入後會落回**原本那一頁**——導轉鏈以單一 query 參數 `next` 承載 `search+hash`（pathname 不當
+導向目標，落點仍由平台產生器出）。所以 **HashRouter 的頁面狀態可以分享**，不必自己把
+hash 塞進 localStorage 補救（prod v1.13.0 起）。同一批把「應用不存在」改成**依身分三層**：
+匿名／token 失效 → 通用訊息＋「登入後查看」（刻意不區分「不存在」與「未發布」）；已登入同租戶且
+草稿存在 → 「此應用尚未發布」（`check-access` 回 `state: "unpublished"`）；已登入但查不到（不存在或
+跨租戶，同形）→ 通用訊息。用戶回報「打開是找不到此應用」時先問他**登入了沒、是不是同租戶**，
+再決定往「沒發布」或「網址錯」查。
+
 ---
 
 ## 7. Server Action 必須發布後才可呼叫
@@ -514,9 +527,9 @@ export function currentIdentity(): { userId: string; email: string; tenantId: st
 各有自己的訊息）。只擋新建、不回溯既有表。撞到地板名**沒有事後補救管道**，
 建表規格階段就要避開（→ `data-center.md` §1）。
 
-> ⚠️ **2026-09-01 實測：`GET /api/v1/apps/{app_id}/api-grants` 在 prod 回 404**
-> ——授權管理後端已 merge 尚未部署，本節的「準備動作」目前做不了，先記著等它上線。
-> 保留表名 409 也尚未生效（實測仍可建成，見 `data-center.md` §1）。
+> ⚠️ 2026-09-01 實測 `GET /api/v1/apps/{app_id}/api-grants` 在 prod 回 404——**v1.13.0（2026-09-07）
+> 起 prod openapi 已有此端點**，本節的「準備動作」現在做得了。保留表名 409 當時實測尚未生效
+> （仍可建成，見 `data-center.md` §1），v1.13.0 後**未重測**，一律自律避開。
 
 **enforce 前的準備（寫 code 時就做，不要等）**：
 
@@ -534,3 +547,7 @@ export function currentIdentity(): { userId: string; email: string; tenantId: st
 > enforce 切換時程未定（manifest 明寫「MODE 一律維持 audit」直到既有 app 的
 > 前端呼叫面補宣告完畢）。本節的意義是：**新開發的 app 從現在起就把 API 權限面板
 > 對齊實際呼叫面**，enforce 落地時才不用回頭救。
+
+> ⚠️ **本節是 app 軸；另有一條人軸——租戶「資料存取規則」（Auth gate v1）**，由平台在
+> 資料函式層執法、403 body 帶 `reason`／`rule_id`，**UAT 已 on、prod 仍 off**（2026-09-07）。
+> 兩軸獨立疊加，403 有沒有 `reason` 是分辨鍵 → `custom-app-dev-guide.md` §27。

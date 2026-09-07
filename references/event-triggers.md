@@ -156,6 +156,12 @@ def execute(ctx):
 超過就是必然逾時 → 事件重投 → 重複執行。長工作要在 action 裡快速收下、
 寫進自建表，再交給排程慢慢處理。
 
+⚠️ **上表是 dispatcher 的外層上限；runner 內層另有 ceiling**（2026-09-07 起）：ceiling ＝
+manifest 全部 action `timeout_ms` 的最大值，夾在 30000～**120000**；實際生效＝兩道取小。
+所以 cron 的「280 秒」今天實際只到 **120 秒**（宣告再大也被夾回），設計批次大小時以 120 秒算。
+修正（#1518，prod v1.13.0 起）前 ceiling 恆 30 秒；ceiling 在 publish 時寫入，**舊 app 要 republish
+一次才換上新值**（`custom-app-dev-guide.md` §7）。
+
 ### 1.7 Meta（FB／IG／WhatsApp）訂閱驗證
 
 平台自動處理 GET 的 `hub.mode=subscribe` 驗證，你不需要寫 code。
@@ -260,6 +266,8 @@ def execute(ctx):
 ### 2.6 ★ 執行上限 280 秒
 
 - action 的 `timeout_ms` **超過 280000 會收到警告**，超過 300000 **必定失敗**。
+- ★ 但 runner 內層 ceiling 最高 **120000**（§1.6 末段）：宣告 280000 也在 120 秒被 soft timeout
+  切掉、回 `status: "timeout"`。**實務上限是 120 秒，不是 280**；280 只是 dispatcher 不會先斷線。
 - 長任務要自己切批次：每次處理 N 筆、把進度存回自建表，靠下一次觸發接續。
 - 不支援「跑很久的任務」是設計取捨，不是缺陷。
 

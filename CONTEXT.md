@@ -105,4 +105,9 @@ SDK 雙軌並存所以存量 app 不會壞；舊模型與端點尚未移除。
   `self_built`（第三方自建應用，走 API Key 存取 Proxy）
 - **匿名存取**：功能旗標（`allow_anonymous_access` + `is_public_readable`），走 `/pub/*` 端點。
   **不是 access_mode 的一種**，而且**只有 `external` / `self_built` 可以啟用**——
-  `internal` app 開匿名存取回 400。
+  `internal` app 開匿名存取回 400。**開旗標≠可對外服務**：還要送
+  `POST /apps/{id}/anonymous-access-request` 申請並由**平台核可**，核可前匿名訪客拿到與
+  「App 不存在」同形的 404（三態：未申請／已送出／已核可，`custom-app-dev-guide.md` §15.1）。
+- **資料存取規則（Auth gate）**：租戶自訂「角色 × 表 × 動詞 → deny／列過濾／欄遮蔽」，
+  由平台在資料層執法，403 body 帶 `reason`／`rule_id`。UAT on／prod off（2026-09-07）。
+  與「App API 權限閘」（app 軸、audit 模式）是兩條軸（`custom-app-dev-guide.md` §27）。

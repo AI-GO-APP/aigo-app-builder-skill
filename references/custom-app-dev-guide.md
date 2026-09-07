@@ -163,6 +163,16 @@ def execute(ctx):
 
 Action 也可由 Webhook 或 App 排程觸發——**兩者都要求 action 冪等**，見 `event-triggers.md`。
 
+**執行逾時（★ 2026-09-07 起口徑）**：`actions/manifest.json` 各 action 的 `timeout_ms`
+可設 **1000～120000**；平台發布時取所有 action 的最大值（底線 30000）當 runner 的 ceiling，
+實際生效＝`min(該 action 的 timeout_ms, ceiling)`。修正（#1518，prod v1.13.0 起）前 ceiling 恆為 30000，
+manifest 寫 120000 也在 30 秒被切。**ceiling 是在 publish 時寫進 runner 設定的**——v1.13.0 之前發布的
+app 仍帶舊的 30 秒 ceiling，**要 republish 一次**才會換上 manifest 的值；republish 後仍 30 秒被切才是平台問題。
+（2026-09-08 prod demo 租戶實打：新建 app、manifest `timeout_ms: 120000`、action `time.sleep(45)` →
+`status: success`、`duration_ms: 45001`；同 app 的 30000 action 第一發 503 冷啟動、20 秒後 200。）
+超過 120000 的宣告會被夾回 120000；webhook（90 秒）與排程（300 秒）的 dispatcher 外層上限
+另算（`event-triggers.md` §1.6／§2.6），兩道取小。逾時回 `status: "timeout"`，長工作仍要切批次。
+
 依權限分流（前端隱藏不算數，這裡才是強制點）：
 
 ```python
@@ -243,6 +253,27 @@ action 路徑約定不變：`actions/**.py` 是可呼叫 action（`action_name` 
 需 Custom App Token (`window.__APP_TOKEN__`)。單檔 100MB 上限。
 檔案落在 `{tenant_id}/{custom_app_id}/…` 前綴下，讀寫都被鎖在本 app 前綴內；
 簽章 URL 有效 1 小時，**存 path 不存 URL**（同 `data-center.md` §6 的 key 原則）。
+
+**光看端點不會知道的坑**（核自平台 `docs/integrations/custom-app-storage.md`，2026-09-04）：
+
+| 現象 | 實情 |
+|---|---|
+| `413` | **兩個來源**：端點自己「檔案超過上限」（單檔 100 MB）；全域 body 上界「請求內容超過上限」（`upload` 整包 **109 MiB**，非上傳端點 96 MiB，body 帶 `limit_bytes`）。都是零物件、重送同一份永遠不會過 |
+| `401` 立刻回、body 沒被讀 | 2026-09-03 起 token 簽章／到期在**讀 body 之前**就驗——token 過期不必先送完 100 MB；換新 token 重送安全 |
+| `403「無權存取此路徑」` | `path`／`folder` 正規化後逃出 `{tenant}/{app}/` 前綴（含 `..`、絕對路徑、NUL），四條端點一律 403（2026-09-01 起）。**自己拼過 `/../` 的呼叫端從這版起會壞**——folder 只用不含 `/`、`..` 的簡單名 |
+| `list` 看不到剛傳的檔 | `list` **非遞迴**（只列一層），且 `upload` 會清洗 `folder` 而 `list` 不清洗——對帳要帶**送出時同一個** `folder` |
+| `GET /url` 404 | 「這個 key 上沒有物件」——是第二條對帳路徑，不是認證擋掉；`DELETE /file` 冪等，不存在也回 200 |
+| key 太長 4xx | 最終 key（前綴＋uuid＋副檔名）≤ **1024 bytes UTF-8**，中文一字 3 bytes；輸入問題，重試無用 |
+| `url` 取不到 | 回的是 `""`（S3）或裸 key（本機），**不是 `null`**——判斷用 falsy |
+| `400` | 不只路徑過長：multipart 解析層也回 400（`Too many files.` 門檻 1、`Too many fields.` 門檻 8）——**讀 `detail`**，不要一律當「縮短 folder」 |
+| `500` | 兩個來源後置條件相反：相依層 500＝端點沒跑、**一定沒寫入**；端點自己的「上傳失敗」＝物件狀態未知、要對帳。看 `detail` 分辨 |
+| `path` 給相對路徑（`e2e/x.txt`）回 403 | **`path` 一律用 upload／list 回的完整 key**（`{tenant}/{app}/…` 開頭）；相對路徑會被判成逃出前綴 → 403「無權存取此路徑」，不是 404 |
+| 用 `POST /app-scoped-token/{id}` 的 token 打這組端點回 401「無效或已過期的 Token」 | 這組端點認的是 **app 使用者 token**（external app 自助註冊／登入的 `access_token`，或 bundle 注入的 `__APP_TOKEN__`），不是 app-scoped token（2026-09-08 實打） |
+
+2026-09-08 prod 實打（external app 終端使用者 token）：upload 200 回 `{path, url}`（S3 簽章 URL）；
+`list?folder=e2e` 回 `{folder, files:[{name, path}], count}`；不帶 folder 的 `list` 看不到子資料夾的檔
+（非遞迴）；`url?path=../../x` 與 `list?folder=..` 皆 403；`DELETE` 回 200 `{status: deleted}` 且重刪仍 200；
+刪後 `GET /url` 404「檔案不存在」。
 
 ### 12.1 遷移情景：從本地把歷史檔案搬進 Storage（★ 憑證是關鍵）
 
@@ -332,13 +363,39 @@ POST /api/v1/members
 > 「公開 web 資產」需要自有網域與 SEO，該走 Hosted App
 > （`migration-workflow.md` §2.1 問題二的面向分流）。
 
-啟用條件：`allow_anonymous_access=true` + `is_public_readable=true`
+啟用條件：`allow_anonymous_access=true` + `is_public_readable=true` **＋ 平台核可**（見下）
 
 - GET `/api/v1/pub/data/{slug}/objects`
 - GET `/api/v1/pub/data/{slug}/objects/{table}/records`
 - POST `/api/v1/pub/proxy/{slug}/{table}/query`
 
 Rate Limit：120 次/分鐘 per IP。
+
+### 15.1 ★ 開旗標不等於能對匿名服務：還要平台核可（2026-09 起）
+
+匿名對外服務資格由**平台**核可（濫用防治），租戶端只能**申請**。三態在 Builder 的
+App 設定「存取」區塊看得到，也對應 app 物件的兩個唯讀欄位：
+
+| 狀態 | `anonymous_access_requested_at` | `anonymous_access_approved_at` | 匿名訪客看到 |
+|---|---|---|---|
+| 未申請 | null | null | 與「App 不存在」**逐字相同的 404**（刻意同形，不洩漏存在性） |
+| 已送出申請 | 有值 | null | 同上 404 |
+| 已核可 | 有值 | 有值 | `/pub/*` 正常服務 |
+
+- 申請端點：`POST /api/v1/apps/{app_id}/anonymous-access-request`（需 `builder.manage_access`）。
+  **先把 `allow_anonymous_access=true` 存檔、再送申請**（UI 也是這個順序，旗標沒存按鈕不亮）。
+  冪等：重送不覆寫首次時間，回 `{requested: true, requested_at}`；核可欄與核可人**不回給租戶**
+- 核可由平台營運在 ops console 操作，**沒有 SLA、也不會自動通過**；申請後把狀態告訴用戶，
+  請他們聯絡平台，**不要**拿「/pub 回 404」去查 slug 或重建 app
+- 同形 404 不只擋無 token 的匿名請求：**app 使用者 token（外部自助註冊帳號）同樣被擋**——
+  核可前 external app 的終端使用者登入後也載不出資料。開發者用租戶身分預覽自己未核可的 app
+  **不受影響**（那是正當流程），所以「我測都正常、用戶說 404」正是這個狀態
+- 核可後撤銷也是平台側動作；被撤銷回到同形 404
+- `internal` 開不了匿名（400「Internal App 不支援匿名存取」），本節只對 `external`／`self_built`
+- 2026-09-08 prod 實打（demo 租戶）：external app 發布＋開旗標後，`GET /builder/apps/public/{slug}`
+  與 `GET /pub/data/{slug}/objects` 都回 404 `{"detail": "App 不存在或尚未發布"}`，與不存在的 slug
+  **逐位元組相同**；申請兩次 `requested_at` 相同；app 物件回 `requested_at` 有值、`approved_at` null、
+  **沒有** `requested_by` 欄位；申請後公開端點仍 404
 
 ## 16. 套件管理
 
@@ -1262,4 +1319,103 @@ DELETE /api/v1/builder/apps/{app_id}   （builder.access；實測回 200，之�
 ```
 
 不像自建表有兩段式確認——**打了就刪**。代用戶刪除前必須明確確認過。
+
+## 27. 租戶資料存取規則（Auth gate）：平台側人軸執法（2026-09 起）
+
+> 與 `platform-behaviors.md` §12 的「App API 權限閘」是**兩條軸**：§12 是 **app 軸**
+> （這支 app 宣告了哪些 API 群、audit 模式）；本節是**人軸**——租戶自己訂
+> 「哪個角色對哪張表能做什麼、看得到哪幾列／哪幾欄」，由**平台**在資料函式層執法，
+> app 不用也不該各自實作一套。
+
+**現況（2026-09-07）**：規則 API、explain、拒絕紀錄、Builder 分頁等**程式面已隨 v1.13.0 上 prod**
+（openapi 實查），但執法開關 `POLICY_GATE_MODE` **UAT＝on、prod＝off**（核自 k8s manifest）。
+prod 切 on 前規則只會被記錄（audit）不會生效；切 on 後本節全部成立。**新開發的 app 現在就按本節寫**，切 on 時才不用回頭救。
+
+### 27.1 規則長什麼樣、掛在哪
+
+- 規則掛在 **app 之下**（Builder `/builder/{app_id}`「資料存取規則」分頁；API
+  `/api/v1/apps/{app_id}/data-policy/rules`）或**租戶級**（`/api/v1/data-policy/rules`，
+  `app_id=NULL`，對本租戶所有 app 生效）。寫入需 `system.admin` 或 `builder.manage_access`
+- 每條規則：`subject_role_ids`（空＝所有人）× 表 × 動詞（read／create／update／delete／`*`）→
+  `effect=deny`，或 `effect=restrict` 帶 **`where_dsl`**（列過濾：`{field, op, value}` 清單，
+  `op` ∈ eq/ne/in/not_in/lt/lte/gt/gte/is_null，值可為 `$user.id`／`$user.employee_id`／
+  `$user.role_ids`／`$user.department_id`／`$user.manager_id`）與 **`hide_columns`**（欄遮蔽）。
+  另有 `kind=script` 的 Python 規則跑在租戶專屬 policy-runner（200 ms 逾時，app 碰不到）
+- 生命週期：建立時 `enabled=false`、`mode=audit`；切 `enforce` 前必過 dry-run（重放最近 100 筆
+  拒絕紀錄、錯誤 0 筆才准）。`GET /apps/{app_id}/data-policy/explain?role_ids=…` 回合成視圖
+  （每表每動詞 `open`｜`restricted`｜`denied`｜`unreferenced`），與執法走同一條求值路徑。
+  2026-09-08 prod 實打：`POST …/rules {resource_type: "dc_table", resource_id: "*", verb: "*",
+  kind: "declarative", effect: "deny"}` 201；`PATCH …/enabled {enabled: true}`、`PATCH …/mode
+  {mode: "enforce"}` 皆 200（零樣本仍准）；explain 回 `{policy_gate_mode, principal:{kind, role_ids},
+  verbs, rows:[{resource_type, resource_id, cells:[{verb, reference:{referenced, verb_granted},
+  scope:{api_group, granted}, rule, result}]}]}`
+- 被擋了看哪裡：`GET /apps/{app_id}/data-policy/decision-logs`（拒絕紀錄，含 audit 模式的 would_deny）、
+  `GET /data-policy/decision-counts`（各 app 過去 24 小時 would_deny／would_restrict 計數）。
+  租戶級規則的管理頁在 **`/dashboard/settings/data-policy`**（T69）；app 級在 Builder 分頁
+- `where_dsl` 的 `field` 引用主鍵 `id`：ERP 面 read 自 T72（2026-09-07）起隱含放行（除非 `id` 同時被
+  hide）；**write 面仍不放行 `id`／`created_at`／`updated_at`**（落地值不經綁定參數，fail-closed 判
+  `policy_invalid`）——「只准改近期建立的列」這類規則 read 通、write 403 是設計
+- 產品定位（ADR 0029，2026-08-18 定案）：AI GO 是**租戶自擔授權責任的 PaaS**——規則由租戶訂、
+  平台執法；app 開發者的責任是把 403 接好、不是替租戶決定誰能看什麼
+
+### 27.2 ★ app 會撞到什麼（寫 code 時就要接住）
+
+| 情況 | app 看到 |
+|---|---|
+| 命中 `deny`、或 `restrict` 的 `$user.*` 解不出（例如 app 身分、無員工列的假帳號） | **HTTP 403**，body `{reason: "policy_denied", rule_id}` |
+| 管理員按「封鎖此 app 的資料存取」 | 403 `reason: "app_data_access_suspended"`；**app runtime host 會整頁顯示「資料存取暫停」**，app 自己的畫面不會渲染 |
+| script 規則的 policy-runner 掛了且無快取（enforce） | 403 `reason: "runner_unavailable"` |
+| 規則引用了已刪欄位／不合法運算子（enforce） | 403 `reason: "policy_invalid"` |
+| create／update 的 payload **碰到** `hide_columns` 裡的欄位（碰＝違規，不論值） | 403 `reason: "hidden_column_write"`——先於 400／404 |
+| read 命中 `restrict` | **不報錯**：`where` AND 進查詢（`total` 也照套）、`hide` 欄位從回應消失；同時 hide 欄位**不能**出現在 `filters`／`sort`／`order_by`／search／`count_only` |
+| 所有可投影欄位都被 hide 蓋掉 | 403 `policy_invalid`（不會回空欄位的列） |
+
+- **403 body 的 `reason` 才是分辨鍵**：同樣 403，`builder.access` 破口（`data-center.md` §7.5）、
+  `ctx.erp` 白名單、Egress 都沒有 `reason`。有 `reason` ＝ 租戶規則擋的，**app 端改 code 無解**，
+  把 `rule_id` 轉給租戶管理員到「資料存取規則」分頁看
+- **規則是 per-app 的**：`principal.app_id` 認的是「這次呼叫走哪支 app 的資料入口」，同一張表
+  被兩支 app 引用要各自設規則——別假設別支 app 的限制會延伸過來
+- 前端要有降級：清單少了幾欄、少了幾列是**預期行為**，不是 bug；別把 hide 欄位寫死在
+  `order_by`／`filters`（會被判 policy_invalid）
+- Server Action 的 `ctx.db.*` 與前端 SDK 都在執法範圍；匯入、審批回呼、模板安裝走 system 身分不套人軸
+- **不要在 action 裡自己重做一套角色→表的判斷去「補強」**：規則歸租戶管、平台執法；action 只做
+  業務層分流（`ctx.user_permissions`），資料層交給 gate
+
+### 27.3 v0 的 app 側自律模板（`auth_gate`）——與 27.1 不是同一套
+
+marketplace 另有 `auth_gate`／`hrms_core_gated` 模板：把 `templates/auth_gate/actions/_shared/auth.py`
+複製進自己的 `actions/_shared/auth.py`，action 第一行 `auth.check(ctx, resource=…, verb=…,
+user_attrs=…)` 拿 `(allow, row_filter, columns)`，**row_filter 要自己接進 query**。
+它**不在請求路徑上、擋不了任何人**、`user_attrs` 平台不驗、規則表 `auth_rules` 任何
+`builder.access` 都能改——是自律模型，平台側 v1（27.1）才是執法點。
+⚠️ 它讀 `ctx.user_role_ids`，**runner 今天（2026-09-07 main）還沒有這個屬性**（接線分支未 merge），
+模組會退回空清單＝「沒有任何角色」，只有 `entity_id="*"` 的規則列會命中——方向是更嚴不是誤放行，
+但表示 v0 模板現階段**做不到依角色放行**。要人軸控管請等 v1 切 on，不要再擴 v0。
+
+## 28. 執行模式：冷啟動／常駐（`always_on`，租戶自選；v1.13.0 起，prod openapi 已實查）
+
+已發布 app 的 runner 預設 **scale-to-zero**：閒置後縮到 0，下一次呼叫 action 要等 pod 拉起
+（第一發明顯慢、甚至逾時）。租戶可把單支 app 切成**常駐**（隨時保留一個實例）：
+
+```http
+PATCH /api/v1/builder/apps/{app_id}/runtime-settings   （builder.publish）
+{"always_on": true}
+→ {"app_id", "always_on", "effective_mode": "always_on"|"scale_to_zero",
+   "locked_reason": null|"messaging_trigger", "apply_state": "applied"|"skipped"|"failed"}
+```
+
+- UI 在 Builder 列表的 App 設定 Dialog「執行模式」radio；權限與「能發布」同一把（`builder.publish`）
+- **免費租戶 403 `ALWAYS_ON_REQUIRES_PAID_PLAN`**（T43：免費方案不提供常駐）；**未發布 422
+  `RUNTIME_SETTINGS_REQUIRE_PUBLISHED`「App 發布後才能設定執行模式」** 不寫
+  （2026-09-08 prod 實打：發布前 422、發布後 `{always_on: true, effective_mode: "always_on",
+  locked_reason: null, apply_state: "applied"}`，切回 false 即 `scale_to_zero`）
+- **綁了通訊渠道（messaging trigger）的 app 一律常駐**：`always_on=false` 照存但不生效，
+  回 `locked_reason: "messaging_trigger"`，UI 鎖定不可切——trigger 要常駐收訊息
+- `apply_state` 是 k8s 重套結果，設定已落 DB；`failed` 不代表沒存，稍後 publish 會再套
+- 草稿（draft runner）**固定冷啟動**，本設定只作用於已發布 runner
+- 常駐會佔租戶機器的保留量（運算資源頁「App 佔用」卡把常駐 app 的副本 0 也列出來）；
+  共用池租戶要考慮 ResourceQuota，撞牆症狀見 SKILL.md 錯誤處理的 503 `quota_hint`
+- **per-app CPU／記憶體上限（`runner_resources`）沒有租戶 UI**——Builder App 這組值由 ops 直改 DB；
+  Hosted App 才有 `resources` 自設（`hosted-apps.md` §4.1）
+- 何時建議常駐：使用者面對面操作、第一發逾時會被當成壞掉的 app；純排程／批次 app 不必
 

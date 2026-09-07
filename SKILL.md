@@ -342,6 +342,7 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
      （新建取 §1.0 的面向＋邊界命中；遷入取 §2.0 的 stack 形狀，對照表在 `migration-workflow.md` §2.1）
    - **不可逆與硬前提**：`access_mode` 由模板決定、建立後不可改 → **app 等本計畫確認後才建**；
      `internal` 不能開匿名（400）→「內部工具想給訪客看一頁」要在此刻攤開；
+     external 開匿名**還要平台核可、無 SLA**（dev-guide §15.1）→ 排程時列成「等平台」的一步；
      拿不準 Custom vs Hosted 給 `hosted-apps.md` §1 差異表選，拿不準 internal vs external 回頭問，
      **不可用預設值帶過**
    - 判走 Hosted App 的 app → `references/hosted-apps.md`，不走本 skill 的 Phase 2–4；
@@ -473,6 +474,9 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
 10. **Server-Side Actions**：Python，放在 `actions/` 目錄，定義 `execute(ctx)` 函式
 11. **Shadow DOM 限制**：`confirm()` / `alert()` / `prompt()` 不可用 → 改用 React state 或 react-hot-toast
 12. **前端 `db.ts` 的 db.update() Bug**：需用 `{"data": {...}}` 包裝 payload（直接 fetch，不走 SDK）
+    - ⚠️ **2026-09-01 前注入的 `db.ts` 送的是 `PUT`，資料代理只收 `PATCH`——`update()` 恆回 405、
+      更新從未生效**（#1416 修正 SDK 模板）。既有 app 若 `src/db.ts` 仍是 `method: 'PUT'` 版本，
+      要換成平台最新模板（Builder 重新注入）或直接 fetch 用 `PATCH`；不要把 405 當成權限問題查
 13. **前端 `db.ts` 的 db.insert() Bug**：同上，需用 `{"data": {...}}` 包裝
     - ⚠️ **只適用前端**。Server Action 的 `ctx.db.insert(table, data)` 收**扁平 dict**，
       包裝反而會被濾光並回 400。自建表的 `insert_row` / `update_row` 同樣收扁平 dict
@@ -671,6 +675,10 @@ def execute(ctx):
 ```
 
 > `ctx.db` **不提供結構操作**——action 執行期無法建表或改欄，這是刻意的能力邊界。
+> 執行逾時：manifest `timeout_ms` 1000～**120000** 現在真的生效（prod v1.13.0 前恆被切在 30 秒；
+> 舊 app 要 **republish** 才換上新值），排程 action 實務上限也是 120 秒——
+> `references/custom-app-dev-guide.md` §7、`event-triggers.md` §2.6。
+> 資料層 403 若 body 帶 `reason`／`rule_id`＝租戶「資料存取規則」擋的，改 code 無解 → dev-guide §27。
 
 **呼叫外部 API：一律走 `ctx.http.call(<egress-slug>, <path>)` 閘道**，
 **不要**直接 `import httpx / requests / urllib.request`——runner pod 是
@@ -826,7 +834,10 @@ Hosted App 線（不走 Phase 2–4）：
 > **不要自行推測修法**。多數症狀有明確成因，猜測通常會改錯地方。
 
 常見狀態碼的語義分野：**403** 權限（分 `system.admin` / `builder.access` 兩種，
-降級動作不同）｜**409** 配額或衝突｜**422** 輸入不合法｜**400** 業務規則拒絕。
+降級動作不同；body 帶 `reason`／`rule_id` 則是租戶資料存取規則，見 dev-guide §27）｜
+**409** 配額或衝突｜**422** 輸入不合法｜**400** 業務規則拒絕｜
+**503「app runner 暫時不可用」且 body 帶 `quota_hint`**＝租戶運算配額吃緊（pod 建不出來），
+**不是 code 問題**——把 `quota_hint` 原文轉給用戶、引導到「運算資源」頁或找管理員，別改 action。
 
 ### Action 對外呼叫失敗（★ 別急著改 code）
 
@@ -890,7 +901,7 @@ uv run --project scripts python scripts/report_issue.py submit "一句話標題"
 | 檔案 | 內容 |
 |------|------|
 | `CONTEXT.md` | ★ 術語表——預設表／自建表兩大類＋四個機制詞（含稱謂對照：舊稱 SaaS 表已停用） |
-| `references/custom-app-dev-guide.md` | 核心 API 規格與架構理念 |
+| `references/custom-app-dev-guide.md` | 核心 API 規格與架構理念；**§15.1 匿名存取的平台核可三態**、§12 Storage 坑表、**§27 租戶資料存取規則（Auth gate：403 帶 `reason` 的來源）**、§28 冷啟動／常駐（`always_on`） |
 | `references/data-center.md` | 自建表完整規格（型別、配額、權限、SDK）＋ 延伸欄位（§10） |
 | `references/event-triggers.md` | Webhook 與 App 排程（冪等要求、宣告、限制） |
 | `references/product-line-decision.md` | **Phase 1.5 判產品線與模式時（兩條路共用 SSOT）**：預設 Custom App 與偏離訊號、Custom App 能力邊界核對表、兩問四象限、混合方案分工、不可逆前提、app 分配表 |
@@ -899,6 +910,6 @@ uv run --project scripts python scripts/report_issue.py submit "一句話標題"
 | `references/troubleshooting.md` | **出錯時**：錯誤速查表 |
 | `references/pre-report-self-grill.md` | **回報平台問題前（必走）**：預設平台正確、六輪自審排除樹、送出條件、已排除清單 |
 | `references/issue-reporting.md` | **回報平台問題時**：BDD 撰寫規範、指令、進度追蹤 |
-| `references/platform-behaviors.md` | **實測行為補遺**：DB Proxy 分頁與筆數上限、`custom_data` 不可伺服器端過濾、TIMESTAMP 格式、seed 表唯讀、`ctx.erp` 白名單、空渲染偵測、API 權限閘 |
+| `references/platform-behaviors.md` | **實測行為補遺**：DB Proxy 分頁與筆數上限、`custom_data` 不可伺服器端過濾、TIMESTAMP 格式、seed 表唯讀、`ctx.erp` 白名單、深連結與「找不到此應用」三層（§6.2）、空渲染偵測、API 權限閘（app 軸；人軸見 dev-guide §27） |
 | `references/hosted-apps.md` | **Hosted App（「自訂 App」）產品線**：與 Custom App 的邊界、應用形狀硬規則、部署 API、**部署後驗證閘門（§3.4＝Phase 4.2 的等價物）**、env 規則、錯誤碼對照——Phase 1.5 判斷走這條線或混合方案時讀 |
 | `references/data-operations.md` | **資料操作模式（不開發 app）**：四條使用者身分資料面與權限閘、**寫入閘門（§3.5，正式資料不可逆）**、模組 REST 慣例、匯出白名單、Meta 值域、出錯與回報出口（§7）——源頭意圖判成「資料操作」時讀 |
