@@ -4,8 +4,10 @@
 # ~/.codex/config.toml（全域）或 <repo>/.codex/config.toml（專案，需該專案已被信任）。
 # Windows 請用 python，macOS / Linux 用 python3。
 #
-# 腳本只在有新版時才輸出；SessionStart hook 的 stdout 會被當作 developer context
+# 遠端較新時腳本會直接把本機所有已註冊安裝強制同步到遠端 main（不詢問、不保留本地修改）。
+# 腳本只在實際同步（或同步失敗）時才輸出；SessionStart hook 的 stdout 會被當作 developer context
 # 注入對話，所以無更新時保持靜默很重要。
+# timeout 設 120：同步要 git fetch 或下載 main.zip，10 秒不夠；沒新版時仍是 3 秒內結束。
 
 [[hooks.SessionStart]]
 matcher = "startup|resume"
@@ -13,5 +15,5 @@ matcher = "startup|resume"
 [[hooks.SessionStart.hooks]]
 type = "command"
 command = 'python "<SKILL_DIR>/scripts/check_update.py"'
-timeout = 10
-statusMessage = "檢查 aigo-builder Skill 更新"
+timeout = 120
+statusMessage = "檢查並同步 aigo-builder Skill 更新"

@@ -4,7 +4,7 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
-## 1.28.0
+## 1.29.0
 
 ### 回報：開單前查既有卡（preflight，第一階段只記錄）
 
@@ -20,6 +20,39 @@
 - best-effort：查卡任何失敗都靜靜略過，不影響回報；`URFIT_TICKET_PREFLIGHT=0` 可關
 - SKILL.md 與 `references/issue-reporting.md` 明寫：**不要據那一行自行決定不報或告訴使用者
   已修好**
+
+## 1.28.0
+
+### 更新覆蓋規範改為強制同步：發現遠端較新即覆蓋本機所有安裝，不徵詢使用者
+
+**行為變更（使用者端）**：`scripts/check_update.py` 從「發現新版→提示→由 AI 詢問是否更新」
+改為「發現新版→直接把本機所有已註冊安裝強制同步到遠端 main」。本地修改、分岔的 commit、
+多出來的檔案一律被遠端取代；不問、不等回覆。舊版腳本仍會先問一次——那是舊版的行為，
+同意之後就進入本規範。
+
+- **git 安裝**：`git fetch origin main`（origin 不可用時直接用官方 URL）→
+  `git reset --hard FETCH_HEAD` → `git clean -fd`（不加 `-x`，gitignore 的 `.venv/`、`.aigo/`
+  不動；`.claude/` 另外排除，裡面可能有 worktree）。git 指令失敗（沒裝 git）退回 zip 鏡像
+- **複製式安裝（skills CLI）**：不再只印 `npx skills update` 指令——下載遠端 `main.zip`
+  鏡像覆蓋，遠端有的全寫入，本地多出來的刪除（`.git`／`.venv`／`.aigo`／`.claude`／`.env`／
+  `__pycache__`／`node_modules` 例外）。先在暫存目錄整包展開驗證，再動安裝目錄，不會半套
+- **唯一不碰的是開發用副本**：本地版本高於遠端、或 git 副本不在 `main`／`master` 分支，
+  視為正在改 skill 的工作區（維護者已 bump 未發布、功能分支、worktree），略過並標示
+  「開發副本，略過」。這是保護未合併的工作，不是給使用者留本地修改的開關
+- **節流語意改動**：原本抑制「同一組版本差 3 小時內重複提示」，現在改抑制「同一份安裝對
+  同一個遠端版本 3 小時內同步失敗後重試」；同步成功後本地＝遠端自然不再觸發。
+  狀態檔 `installs[path].last_result` 改為 `last_sync`（`remote`／`ok`／`at`）
+- **旗標**：預設就是同步全部；新增 `--check-only`（只報告，維護者／CI 用）；
+  `--apply`／`--apply-all` 仍接受但等同預設。新增環境變數 `AIGO_UPDATE_STATE_FILE`
+  改狀態檔位置（測試用）
+- **輸出**：只在「已同步」或「失敗」時出聲；失敗列出手動指令，含破壞性變更時加警語。
+  stdout 導向管線時改 UTF-8、編不出的字元換 `?`——修掉 Windows cp950 主控台印 CHANGELOG
+  裡的 `≤` 直接炸掉、且炸在同步完成之後的問題
+- **SKILL.md Phase -1 改寫**：agent 的工作從「告知並詢問」改為「重新讀取 SKILL.md、告知
+  版本落差與變更摘要」；明文禁止為了保住本地修改而跳過本階段或改用 `--check-only`。
+  改 skill 內容走 repo 的 PR，本機副本只能是遠端 main 的鏡像
+- **hook 範本** `timeout` 10 → 120：同步要 fetch 或下載 zip；沒新版時仍 3 秒內結束
+- `pre-report-self-grill.md` Q1.1 對齊：仍落後只剩「失敗」與「開發副本」兩種可能
 
 ## 1.27.0
 

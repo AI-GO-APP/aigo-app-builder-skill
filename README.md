@@ -82,22 +82,32 @@ skill 本身沒有任何租戶或 app 專屬內容，**不要 by app 或 by 租�
 
 ## 保持更新
 
-Skill 內含版本標記（`VERSION`）與更新檢查腳本（`scripts/check_update.py`），
-比對本地與 GitHub 上的 `VERSION`，有新版才提示。腳本零相依（只用 Python 標準函式庫、
-不經 uv），離線或逾時一律靜默略過。節流 3 小時：遠端版本抓一次後快取
-（狀態存在 `~/.aigo/update_check.json`），同一組版本差 3 小時內只提示一次；
-**版本比對每次都做**，不受節流影響。
+Skill 內含版本標記（`VERSION`）與更新腳本（`scripts/check_update.py`），
+比對本地與 GitHub 上的 `VERSION`；**遠端較新時直接把本機所有已註冊安裝強制同步到
+遠端 main，不詢問、不保留本地修改**。腳本零相依（只用 Python 標準函式庫、不經 uv），
+離線或逾時一律靜默略過。節流 3 小時：遠端版本抓一次後快取（狀態存在
+`~/.aigo/update_check.json`），同步失敗的安裝 3 小時內不重試；**版本比對每次都做**，
+不受節流影響。
 
-**多安裝同步**：本機每份安裝執行檢查時會把自身路徑登記進共用狀態檔，
-累積成安裝清單。任一安裝偵測到新版時會列出其他落後的已註冊安裝，並提供
-`--apply-all` 一次更新所有 git 安裝（複製式安裝只列指令不代動）。
+**強制同步的做法**：git 安裝（`git clone` 來的）執行 `git fetch origin main` →
+`git reset --hard FETCH_HEAD` → `git clean -fd`（gitignore 的 `.venv/`、`.aigo/` 不動）；
+用 `npx skills add` 裝的複製式安裝則下載遠端 `main.zip` 鏡像覆蓋——遠端有的檔案全部寫入，
+本地多出來的檔案刪除（`.git`／`.venv`／`.aigo`／`.claude`／`.env` 例外）。
+**你在安裝目錄裡做的任何修改都會被覆蓋**；要改 skill 內容請對本 repo 開 PR。
+
+**唯一不碰的是開發用副本**：本地版本高於遠端（維護者已 bump 尚未發布），或 git 副本
+不在 `main`／`master` 分支（功能分支、worktree），腳本視為正在改 skill 的工作區而略過。
+這是保護維護者未合併的工作，不是給使用者保留本地修改的開關。
+
+**多安裝同步**：本機每份安裝執行檢查時會把自身路徑登記進共用狀態檔，累積成安裝清單；
+任一安裝發現新版時，清單裡所有落後的安裝一起被同步。
 限制：只認得「至少跑過一次檢查」的安裝——從未在任何 session 觸發過的副本無從發現。
 
-**任何 agent 都適用（預設）**：`SKILL.md` 的 Phase -1 會在每次 Skill 觸發時執行檢查，
-有新版時由 AI 告知你並詢問是否更新。缺點是 `SKILL.md` 已載入 context，更新後需重新讀取
-才會在當回合生效。
+**任何 agent 都適用（預設）**：`SKILL.md` 的 Phase -1 會在每次 Skill 觸發時執行腳本，
+同步完成後由 AI 重新讀取 `SKILL.md` 並告知你版本落差與變更摘要（告知，不是徵詢）。
+缺點是 `SKILL.md` 已載入 context，同步後需重新讀取才會在當回合生效。
 
-**Claude Code / Codex（推薦加裝）**：改用 SessionStart hook，在 Skill 載入**之前**完成檢查，
+**Claude Code / Codex（推薦加裝）**：改用 SessionStart hook，在 Skill 載入**之前**完成同步，
 沒有上述時序問題。範本在 `resources/hooks/`，把 `<SKILL_DIR>` 換成本機 skill 路徑後合併進設定：
 
 | Agent | 設定檔 | 範本 |
@@ -105,18 +115,16 @@ Skill 內含版本標記（`VERSION`）與更新檢查腳本（`scripts/check_up
 | Claude Code | `~/.claude/settings.json` 或 `<專案>/.claude/settings.json` | `resources/hooks/claude-code.settings.example.json` |
 | Codex CLI（>= v0.124.0） | `~/.codex/config.toml` 或 `<repo>/.codex/config.toml` | `resources/hooks/codex.config.example.toml` |
 
-手動檢查與更新：
+手動執行：
 
 ```bash
-python scripts/check_update.py --force      # 忽略節流立即檢查（macOS/Linux 用 python3）
-python scripts/check_update.py --json       # 機器可讀輸出
-python scripts/check_update.py --apply      # git 安裝：就地 pull --ff-only（僅本安裝）
-python scripts/check_update.py --apply-all  # 更新註冊表裡所有落後的 git 安裝
+python scripts/check_update.py               # 檢查並同步（macOS/Linux 用 python3）；沒動作就沒輸出
+python scripts/check_update.py --force       # 忽略節流（含失敗重試抑制）
+python scripts/check_update.py --json        # 機器可讀輸出，含每份安裝的同步結果
+python scripts/check_update.py --check-only  # 只報告不同步（維護者／CI 用）
 ```
 
-`--apply`／`--apply-all` 只對 git 安裝實際更新；用 `npx skills add` 安裝的複製式安裝
-會印出 `npx skills update` 讓你自己執行。任一情況都**不會**覆寫你的本地修改
-（`--ff-only` 遇到分岔或髒工作區會直接失敗）。
+`--apply`／`--apply-all`（1.27.x 以前的旗標）仍接受，行為等同預設。
 
 > 維護者注意：改動 Skill 內容後要同步 bump `VERSION` 並在 `CHANGELOG.md` 補一節，
 > 否則使用者端不會收到更新提示。
