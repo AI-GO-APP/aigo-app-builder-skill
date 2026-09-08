@@ -41,7 +41,11 @@
 > |------|-----------|------|
 > | **資料層（ORM／SQL／DB driver 呼叫）** | **全部改寫成 Open Proxy REST**（`$AIGO_API_TOKEN` 打 `/api/v1/open/...`）——資料一律遷入平台的表（預設引用＋自建），原 DB 退場；改寫前同樣要先完成逐欄映射 | hosted-apps.md §7.1 |
 >
-> 另要盤 `hosted-apps.md` §2 的應用形狀硬規則、§4 環境變數。
+> 另要盤 `hosted-apps.md` §2 的應用形狀硬規則、§4 環境變數，以及 **§3.0 `always_on` 決策閘**：
+> 上表「背景排程」「Realtime／WebSocket」兩列的原專案現況就是決策閘前兩題的答案——排程若寫在
+> 容器裡（cron／APScheduler／queue worker）才需要常駐，能改成平台排程的就改、常駐維持 `false`；
+> 第三題（冷啟動容忍秒數）要另外問 owner。結論寫成 `常駐＝關（預設）`／`常駐＝開；理由；退場條件`，
+> 抄進 app 分配表該列。
 > 盤點時把原專案所有「開 DB 連線／下 SQL」的位置列成清單，這份清單就是改寫工作量的依據。
 > ⚠️ **DB 與 storage 不得自立成 Hosted App**（含 PostgREST 類 REST 包裝，
 > SKILL.md 規則 32）——原專案若有 docker-compose 帶 db／redis service，

@@ -9,8 +9,9 @@ report_issue.py — 平台問題回報（直達 AI GO 開發團隊的 Scrum Boar
     uv run python scripts/report_issue.py submit "一句話標題" \
         --expected "預期行為" --actual "實際結果" --steps "重現步驟" \
         --ruled-out "已排除清單（回報前自審紀錄，每行一項）" \
+        --user-confirmed \
         --image 截圖1.png --image 截圖2.png
-    uv run python scripts/report_issue.py submit "標題" --body-file report.md   # 內文須含「已排除」段
+    uv run python scripts/report_issue.py submit "標題" --body-file report.md --user-confirmed  # 內文須含「已排除」段
     uv run python scripts/report_issue.py list
     uv run python scripts/report_issue.py show <ticket_id>
 
@@ -23,6 +24,10 @@ report_issue.py — 平台問題回報（直達 AI GO 開發團隊的 Scrum Boar
 回報前自審閘門（references/pre-report-self-grill.md）：
 預設平台必定正確、失敗是自己操作有誤。`submit` 必須帶 `--ruled-out`（已排除清單，
 至少三項、每項有證據），或 `--body-file` 內文含「已排除」段落；缺少即拒收、不建卡。
+
+送出確認（SKILL.md「問題回報」第 4–5 步）：
+自審通過後 agent 要先把摘要拿給使用者、問要不要提交；使用者同意才帶 `--user-confirmed` 送出。
+缺少同樣拒收、不建卡。旗標的真假 CLI 驗不了，靠對話裡的摘要與問句可稽核。
 """
 
 import argparse
@@ -162,6 +167,26 @@ SELF_GRILL_SUMMARY = """\
 """ % RULED_OUT_MIN_ITEMS
 
 
+USER_CONFIRM_HEADING = "送出確認"
+USER_CONFIRM_LINE = "使用者已看過摘要（症狀／預期 vs 實際／重現／已排除清單）並同意送出。"
+USER_CONFIRM_SUMMARY = """\
+❌ 拒收：缺 --user-confirmed。自審通過不等於可以送——送出與否由使用者決定，問的人是 agent：
+   1. 先把摘要拿給使用者（references/pre-report-self-grill.md §3 的固定格式）：
+        【疑似平台問題】<症狀一句>
+        預期：… ／ 實際：… ／ 重現：… ／ 已排除：…
+        要不要提交給開發團隊？
+   2. 使用者說「送」→ 原指令加 --user-confirmed 重送
+   3. 使用者說「不送」→ 自審紀錄留在專案，不送
+   沒問過就帶 --user-confirmed ＝ 替使用者決定，是最嚴重的違規。
+"""
+
+
+def _check_user_confirmed(args: argparse.Namespace) -> None:
+    """送出確認閘門：使用者未點頭就不建卡。"""
+    if not getattr(args, "user_confirmed", False):
+        raise RuntimeError(USER_CONFIRM_SUMMARY)
+
+
 def _ruled_out_text(args: argparse.Namespace) -> str:
     """--ruled-out / --ruled-out-file 的內容；沒給回空字串。"""
     if getattr(args, "ruled_out_file", None):
@@ -299,6 +324,9 @@ def cmd_submit(args: argparse.Namespace) -> int:
     ruled = _check_self_grill(args, body)
     if ruled:
         body = f"{body}\n\n## {RULED_OUT_HEADING}\n{ruled}"
+    # ★ 送出確認閘門：自審通過後要先問使用者，使用者同意才建卡（SKILL.md「問題回報」第 4–5 步）
+    _check_user_confirmed(args)
+    body = f"{body}\n\n## {USER_CONFIRM_HEADING}\n{USER_CONFIRM_LINE}"
 
     creds = derive_credentials(args.project)
     title = args.title.strip()[:80]
@@ -403,6 +431,8 @@ def main() -> int:
                           help=f"★ 已排除清單（回報前自審紀錄，每行一項、至少 {RULED_OUT_MIN_ITEMS} 項）；"
                                "缺少即拒收，見 references/pre-report-self-grill.md")
     p_submit.add_argument("--ruled-out-file", help="從檔案讀已排除清單")
+    p_submit.add_argument("--user-confirmed", action="store_true",
+                          help="★ 使用者已看過摘要並同意送出（SKILL.md「問題回報」第 4 步）；缺少即拒收")
     p_submit.set_defaults(func=cmd_submit)
 
     p_list = sub.add_parser("list", help="列出自己回報過的問題與目前狀態")

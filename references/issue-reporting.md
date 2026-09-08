@@ -6,7 +6,17 @@
 
 > ★ **回報前必走 `pre-report-self-grill.md`**：預設平台必定正確、失敗是自己操作有誤。
 > 六輪自審把每個分支用證據排除、寫得出「已排除清單」才有資格回報；不確定就不報。
-> `submit` 沒帶 `--ruled-out` 會拒收。
+> `submit` 沒帶 `--ruled-out` 或 `--user-confirmed` 會拒收。
+
+## 使用者流程（agent 主動推進，使用者只做最後一個決定）
+
+| 步 | 誰 | 做什麼 |
+|----|----|--------|
+| 1 觸發 | agent，**自動** | 下方「要回報」任一條成立就進自審；不等使用者要求、不先問「要不要查」、不反覆重試 |
+| 2 自審 | agent | `pre-report-self-grill.md` 六輪，每題指令＋輸出 |
+| 3 判定 | agent | 非平台問題 → 修或等，只跟使用者說結論；前沿有待查 → 交紀錄、問「要不要繼續追」；兩條件成立 → 第 4 步 |
+| 4 詢問 | agent 問、使用者答 | 先給摘要（症狀、預期 vs 實際、重現、已排除清單）再問「要不要提交給開發團隊？」；**不得替使用者決定** |
+| 5 送出 | agent | 同意 → `submit … --ruled-out … --user-confirmed`；不同意 → 紀錄留在專案，不送 |
 
 ## 什麼時候回報
 
@@ -30,7 +40,7 @@
 3. **確認平台有沒有既有路徑**：想要的能力可能已存在於別的入口（例如型別檢查在 Builder AI 的
    `check_types`、值域在 Meta API）——「API 沒提供」要先查 `references/` 與 openapi 再說
 4. 以上都排除、且症狀能在乾淨環境重現 → 再走 `pre-report-self-grill.md` 的六輪自審（本清單是它的速覽），
-   把證據濃縮成已排除清單帶 `--ruled-out` 回報
+   把證據濃縮成已排除清單，**先拿摘要問使用者**，同意後帶 `--ruled-out` ＋ `--user-confirmed` 回報
 
 ## 怎麼寫（★ BDD：描述行為，不是開藥方）
 
@@ -42,6 +52,8 @@
 4. **環境／補充**——租戶、app_id、發生時間、request_id（有就給）
 5. **已排除清單**（`--ruled-out`）——自審紀錄濃縮，每行一項、至少三項：版本／身分／契約／
    生命週期／文件／重現各自排除了什麼、憑什麼證據。開發團隊靠這段 30 秒 triage
+6. **送出確認**（`--user-confirmed`）——不是內容，是旗標：代表第 4 步已做、使用者說了「送」。
+   卡片末尾會多一段「送出確認」，讓開發團隊知道這張卡經過人點頭
 
 **不要寫**：技術建議、猜測的 root cause、指定的修法或實作方式
 （「建議把 X 改成 Y」「應該是 Z 沒做好」）。行為描述才可驗證；
@@ -65,7 +77,7 @@
 ## 指令
 
 ```bash
-# 提交（建議用結構化參數，會自動組成 BDD 格式）；--ruled-out 必填，缺少即拒收
+# 提交（建議用結構化參數，會自動組成 BDD 格式）；--ruled-out 與 --user-confirmed 必帶，缺少即拒收
 uv run --project scripts python scripts/report_issue.py submit "一句話標題" \
   --expected "預期行為" --actual "實際結果（含錯誤原文）" \
   --steps "重現步驟" --context "租戶/app_id/時間" \
@@ -74,16 +86,17 @@ uv run --project scripts python scripts/report_issue.py submit "一句話標題"
 契約：…
 生命週期：…
 文件：…
-重現：…"
+重現：…" \
+  --user-confirmed    # 使用者看過摘要並同意送出後才帶
 # 已排除清單較長時：--ruled-out-file ruled_out.txt
 
 # UI／畫面問題請附截圖（--image 可重複，最多 10 張；png/jpg/webp/gif 單張 ≤8MB）
 # 圖片會內嵌在開發團隊的卡片裡
 uv run --project scripts python scripts/report_issue.py submit "標題" \
-  --expected "…" --actual "…" --ruled-out "…" --image 截圖1.png --image 截圖2.png
+  --expected "…" --actual "…" --ruled-out "…" --user-confirmed --image 截圖1.png --image 截圖2.png
 
 # 內文較長時寫進檔案（內文必須含「已排除」段落，否則拒收）
-uv run --project scripts python scripts/report_issue.py submit "標題" --body-file report.md
+uv run --project scripts python scripts/report_issue.py submit "標題" --body-file report.md --user-confirmed
 
 # 追蹤：清單（含狀態）／單筆詳情（含官方回覆）
 uv run --project scripts python scripts/report_issue.py list

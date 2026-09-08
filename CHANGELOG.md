@@ -4,6 +4,37 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.33.0
+
+### `always_on` 決策閘補齊結構化落點；問題回報改為「自動自審 → 主動詢問 → 同意才送」
+
+**一、常駐（`always_on`）四處縫隙**（1.32.0 的 §3.0 只有文字規則、部署與計畫裡沒有格子）：
+
+- **部署與驗證有格子了**：`hosted-apps.md` §3.2 明寫部署流程不碰 `always_on`（預設 `false`，判 `true` 才在
+  `active` 後 PUT）、§3.3 註明常駐不在 CLI deploy 指令裡、開之前必過 §3.0；**§3.4 驗證表新增「常駐設定」列**——
+  `GET runtime-settings` 讀回 `always_on` 必須等於 §3.0 決策、讀到 `true` 要拿得出理由與退場條件；
+  驗證後決策表新增「讀回 `true` 但無決策紀錄」出口；「全部通過」列改成交付說明附 version marker ＋ 常駐狀態一句；
+  §3.0 補上計畫／交付說明的落點；§7「需要常駐就開」舊句改為指回 §3.0；SKILL.md Phase 5 速查同步
+- **需求模板與 app 分配表有欄位了**：`new_app_requirements_template.md` 新 **§四.1 Hosted 常駐決策**
+  （三個業務問題＋換算＋結論格式，沒填＝關）、需求形狀結論加常駐行、app 分配表註明 Hosted 列附常駐結論；
+  SKILL.md 1.5 產出同步；`project_deconstruction_template.md` Hosted 線註記：背景排程／WebSocket 兩列就是決策閘前兩題
+- **Custom App 線立場對齊**：dev-guide §28「何時建議常駐」改寫——Builder App 只剩「冷啟動容忍秒數」一題，
+  「第一發慢」本身不是理由、agent 不自行開、不把「要不要常駐」丟給 owner；`troubleshooting.md`「閒置後第一發慢」列
+  不再直接給 `always_on: true` 當解法，先問容忍秒數
+
+**二、問題回報的使用者流程**（設計原則不變：預設平台正確、六輪自審、不確定就不報；改的是「誰推進、誰決定」）：
+
+- SKILL.md「問題回報」新增**固定五步**：① 觸發條件成立即**自動**自審（不等使用者要求、不先問要不要查）
+  ② 六輪自審 ③ 判定——非平台問題只說結論不問送不送、前沿有待查問的是「要不要繼續追」、兩條件成立進 ④
+  ④ **agent 主動給摘要並問使用者要不要提交**（不得替使用者決定）⑤ 同意才 `submit`；
+  「錯誤處理」與 `troubleshooting.md`「查不到怎麼辦」第 3 步改為自動接入這條流程
+- `pre-report-self-grill.md` 檔頭寫明自動啟動、§3 寫死問法（摘要格式＋問句）、§5 工具層強制加旗標；
+  `issue-reporting.md` 加「使用者流程」五步表、BDD 第 6 項「送出確認」
+- **`report_issue.py submit` 新增必帶 `--user-confirmed`**：代表第 ④ 步已做且使用者同意，缺少即拒收不建卡
+  （與 `--ruled-out` 同一層，排在它之後、取憑證之前）；卡片末尾附「送出確認」段。旗標的真假 CLI 驗不了，
+  靠對話裡留下的摘要與問句可稽核。離線驗證：缺 `--ruled-out` 先擋、缺 `--user-confirmed` 再擋、
+  兩者齊備才走到連線（`URFIT_TICKET_API` 指向不可達位址，未建卡）
+
 ## 1.32.0
 
 ### issue #38 五條逐一 prod 驗證後修復；issue #40 `always_on` 決策閘落地

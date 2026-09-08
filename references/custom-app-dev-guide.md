@@ -1436,5 +1436,9 @@ PATCH /api/v1/builder/apps/{app_id}/runtime-settings   （builder.publish）
   共用池租戶要考慮 ResourceQuota，撞牆症狀見 SKILL.md 錯誤處理的 503 `quota_hint`
 - **per-app CPU／記憶體上限（`runner_resources`）沒有租戶 UI**——Builder App 這組值由 ops 直改 DB；
   Hosted App 才有 `resources` 自設（`hosted-apps.md` §4.1）
-- 何時建議常駐：使用者面對面操作、第一發逾時會被當成壞掉的 app；純排程／批次 app 不必
+- **何時建議常駐（預設不開；與 `hosted-apps.md` §3.0 同一套立場）**：Builder App 的 action 是
+  request/response，沒有「容器內排程」與「長連線」兩題（平台排程是入站請求會喚醒 runner；綁通訊渠道的
+  平台自己鎖常駐），所以**只剩一題**——問 owner「閒置後第一個人打開要等 N 秒能不能接受」，問出實際秒數，
+  容忍不了才開並寫下依據；「第一發慢」本身不是理由，純排程／批次 app 不開。agent 不自行開、
+  也不把「要不要常駐」丟給 owner 選；開了在交付說明留一句「常駐＝開，理由 X；退場條件 Y」
 
