@@ -105,6 +105,9 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
 - 角色 id 從 `GET /members/roles` 取；寫入前把「角色名 → id」對照印給用戶確認。
 - 開發者自己有 `builder.access` 也**不再無條件繞過**白名單（action／compile 端點已收緊）——
   測試時把自己的角色放進名單，或用 owner 帳號。
+- 2026-09-08 測試租戶實打：兩條線設定後 GET 立即讀回一致；錯的角色 id 兩線同一句 400「角色不存在或不屬於此租戶：<id>」；
+  Custom 送非 UUID 400「access_role_ids 含無效的角色 ID（需為 UUID 格式）」；Hosted `public`＋角色 422
+  「public visibility 不可搭配 access_role_ids」。受限帳號側的 404 未實打（§8）。
 
 ## 4. 邀請：批次建連結的固定流程
 
@@ -137,6 +140,11 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
 - 其餘前綴走 `/register?token=…&redirect=…`；**不指定落點的受邀者會落在 `/dashboard`**——
   對只有 app 角色的外部人員那是他沒權限的地方，**邀請外部人員一律指定落點**
 - 重寄（`resend-invite`）省略 `redirect_url` 會沿用上一張的落點
+- **`POST /members` 與 `POST /invitations` 在 `send_email:false` 下是同一件事**（★ 實打）：都只建邀請、回
+  `token`＋`chat_invite_link`，`POST /members` 回應的 `id`／`user_id` 是 `null`——受邀者註冊完成前**沒有成員列**，
+  之後要改角色（`PUT /members/{id}`）或重寄（`resend-invite`）都要先從 `GET /members` 找到他的 id
+- 批次名單的 slug 一律用 app 的**自動 slug**（`GET /builder/apps/{id}` 的 `slug`，12 位十六進位），
+  不用 `url_name`——後者可含中文，會被 422 擋
 
 ## 5. 角色 CRUD 流程
 
@@ -149,8 +157,12 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
 ```
 
 - `is_system_role=true` 的角色不可刪；同租戶角色名唯一（409）。
-- 改既有角色的 `permissions` 會**立即影響所有掛該角色的人**——改前列出人數
-  （`GET /api/v1/members` 依 `role_ids` 過濾）。
+- 改既有角色的 `permissions` 會**立即影響所有掛該角色的人**——改前看 `GET /members/roles` 回的
+  `user_count`（★ 實打有此欄）；`access_whitelist_count` 是有多少支 app 把它放進白名單。
+- 刪角色會**連帶從各 app 的 `access_role_ids` 清掉**，回應帶 `access_whitelist_cleaned`／`access_whitelist_locked`
+  計數（★ 實打）——刪外部角色前先確認沒有 app 只靠它放行，否則那些 app 會退回「全租戶成員可開」。
+- `system.admin` 帳號**可以**改系統角色（`is_system_role=true`）的 permissions（★ 實打 200）——腳本不要碰它們，
+  §3.5 閘門在這裡尤其重要。
 - 權限字串以 `aigo_data.py me` 印出的清單為準，不手抄；拿不到的字串（不在呼叫者權限內）
   建角色會 403（§8）。
 
@@ -185,16 +197,45 @@ auth-proxy 驗過登入後，先剝掉 client 自帶的所有 `X-Aigo-*` header�
 - 使用者表上跟著人走的業務欄位（偏好、等級、標籤…）拆出來存自建表，以**平台 user id** 當 key。
 - 原系統的「群組／角色」表 → 對映成平台角色（§5），不要建成自建表。
 
-## 8. 403 怎麼讀
+## 8. 回應怎麼讀（2026-09-08 測試租戶擁有者帳號實打；★ 標記＝實測字串）
+
+**成功回應的形狀**（拿來寫驗證，不要猜）：
+
+| 端點 | 實測 |
+|---|---|
+| `GET /members/roles` | ★ `{items: [{id, name, comment, permissions[], is_system_role, sequence, category, user_count, access_whitelist_count}]}`——`user_count` 是掛此角色的人數，改權限前看這格 |
+| `POST /members/roles` | ★ 201，回角色物件（無 `user_count`） |
+| `POST /invitations` | ★ 200 `{token, chat_invite_link, user_id: null}`；落點 `/app-login/{slug}` 時連結形狀 `https://<租戶>.ai-go.app/app-login/{slug}?token=…`，不帶落點時 `…/register?token=…` |
+| `GET /invitations` | ★ `{items: [{email, name, role_ids[], status, expires_at, invited_by_id, token, chat_invite_link}]}`；同 email 重發後**舊那張 `status` 變 `expired`**（不是 `revoked`）；`expires_at` ＝ 建立時間＋48h |
+| `DELETE /invitations/{token}` | ★ 204 無 body |
+| `POST /members`（`send_email:false`） | ★ 200，但 **`id` 與 `user_id` 都是 `null`**——受邀者註冊前沒有成員列，`PUT /members/{id}` 改角色要等他註冊完成；回應同樣帶 `token` 與 `chat_invite_link`（落點照 `redirect_url`） |
+| `PATCH /builder/apps/{id}/settings` | ★ 200 回整個 app 物件（含 `vfs_state`，很大——驗證只看 `access_role_ids`） |
+| `PUT /hosted-apps/{id}/access-settings` | ★ 200 回 hosted app 物件，`visibility`／`access_role_ids` 立即生效；`POST /hosted-apps` 不帶 `visibility` 時預設 `public` |
+| `DELETE /members/roles/{id}` | ★ 200 `{detail: "已刪除", access_whitelist_cleaned, access_whitelist_locked}`——平台會把該角色從各 app 的 `access_role_ids` 清掉並回計數 |
+
+**錯誤回應對照**：
 
 | 症狀 | 意思 | 處置 |
 |---|---|---|
+| `POST /members/roles` 400 ★「不允許的權限：xxx」 | 權限字串不存在（**不是**子集規則；子集規則才 403） | 字串以 `aigo_data.py me` 或既有角色的 `permissions` 為準，不手抄 |
+| `POST /members/roles` 409 ★「資料重複：相同的唯一值已存在。」 | 同租戶角色名重複 | 先 `GET /members/roles` 查，重用既有角色 |
+| `POST /members/roles`／帶 `role_ids` 的邀請 403 | 目標角色的 permissions 不是呼叫者權限的子集，或想鑄造的權限超出自己所有（後端子集規則） | 印出兩邊 permissions 差集給用戶看；請更高權限者操作，**不要**改用別的角色硬塞 |
+| 邀請／白名單帶角色 id 400 ★「角色不存在或不屬於此租戶：<id>」 | `role_ids`／`access_role_ids` 裡的 id 錯（三個端點同一句：`POST /invitations`、`PATCH /builder/apps/{id}/settings`、`PUT /hosted-apps/{id}/access-settings`） | 角色 id 一律從 `GET /members/roles` 取，不從別的租戶或舊筆記抄 |
+| `PATCH /builder/apps/{id}/settings` 400 ★「access_role_ids 含無效的角色 ID（需為 UUID 格式）」 | 送了角色名或非 UUID | 名 → id 先對照 |
+| `POST /invitations` 422 ★「邀請落點不可含 ? 或 #（連結尾端要接 token，會互相衝突）」／★「邀請落點不在允許清單內：/app-login/、/runtime/、/customApp/、/builder/、/dashboard/、/onboarding、/hosted-app-handoff/」／★「邀請落點只允許英數字與 / - _ . ~」 | `redirect_url` 形狀不合（fail-closed） | 照 §4 白名單組落點；slug 用 app 的自動 slug（純 ASCII），不要用含中文的 `url_name` |
+| `POST /invitations` 422 ★「invitations require either user_id or email」 | 沒給 `email` 也沒給 `user_id` | 一人一筆，email 必填 |
+| `DELETE /invitations/{token}` 404 ★「Invitation not found.」 | token 不存在或已被新邀請作廢清掉 | 用 `GET /invitations` 現查 |
+| `DELETE /members/roles/{id}` 404 ★「角色不存在」 | id 錯或已刪 | — |
+| `PATCH /builder/apps/{id}/settings {allow_anonymous_access: true}` 400 ★「Internal App 不支援匿名存取」 | internal 開匿名 | 匿名頁拆 Hosted public（`product-line-decision.md` §6），不是換模式 |
+| `PUT /hosted-apps/{id}/access-settings` 422 ★「public visibility 不可搭配 access_role_ids」 | `public` 帶了非空白名單 | 要限角色就 `internal`；`public` 時 `access_role_ids` 送 `[]` |
 | `POST /invitations` 403 | 呼叫者沒有 `system.invitations` | 換 `POST /members`（需 `hr.member_manage`）或請管理員授權 |
-| 帶 `role_ids` 的邀請／指派 403 | 目標角色的 permissions 不是呼叫者權限的子集，或角色不屬本租戶 | 印出兩邊 permissions 差集給用戶看；請更高權限者操作，**不要**改用別的角色硬塞 |
-| `POST /members/roles` 403 | 想鑄造的 permissions 超出呼叫者權限 | 同上 |
 | 用 Deploy Token／`AIGO_API_TOKEN`／app token 打任何本檔端點 401／403 | 憑證體系不對（§2） | 換登入者 JWT，不是 bug |
-| 使用者開 app 拿 404「App 不存在」 | 角色不在 `access_role_ids` 內、或 app 未發布 | 先查白名單再查發布狀態；不是路由問題 |
+| 使用者開 app 拿 404「App 不存在」 | 角色不在 `access_role_ids` 內、或 app 未發布 | 先查白名單再查發布狀態；不是路由問題（受限帳號側的 404 形狀**未實打**，核自 `core/permissions.py`） |
 | 403 body 帶 `reason`／`rule_id` | 租戶資料存取規則擋的（人軸） | `custom-app-dev-guide.md` §27；外部人員角色特別注意 `$user.employee_id` 類規則 |
+
+未實打（測試租戶只有擁有者帳號）：子集規則的 403 本體、受限帳號開 app 的 404、`PUT /members/{id}` 改角色、
+`resend-invite`（要有已存在的成員列）。這幾條的行為核自 `core/permissions.py`（`assert_can_grant_roles`／
+`ensure_app_visible`）與 `api/members.py`。
 
 ## 9. 這條線不做的事
 

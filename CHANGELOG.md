@@ -35,18 +35,37 @@
   改成「人一律成為租戶成員」三列。**`new_app_requirements_template.md`** §一改盤使用者群、新增授權架構表
 - **`custom-app-dev-guide.md`**：§1 模式說明、§14 加定位註記（只對例外 app 有意義、無邀請／預建／角色）、
   §14.1 指向 member-admin、§26.1 模板表改「internal 預設、external 例外」
-- **`data-operations.md`**：§1 加成員／角色列；§5 匯入節改寫——`/api/v1/imports` 是批次灌資料**首選**：
-  csv／xlsx／json、≤20 檔、單檔 50 MB、總量 200 MB、單來源 10 萬列；目標可為既有預設表、**既有自建表**、
-  **自動新建自建表**（prod `IMPORT_TIER3_WRITE_ENABLED`／`IMPORT_TIER2_EAV_ENABLED` 皆已開，核自 k8s manifest）；
-  四步 API 流程；引導用戶「匯出檔案丟給 AI IDE」而不是給 DB 連線字串
+- **`data-operations.md`**：§1 加成員／角色列；§5 匯入節改寫——`/api/v1/imports` 是**預設表**批次灌資料的首選：
+  csv／xlsx／json、≤20 檔、單檔 50 MB、總量 200 MB、單來源 10 萬列；狀態機（**PUT mapping 定稿＝立刻派送**，
+  execute 只是重派）、`table_required_columns` 必填預警、retarget 只能在候選集內、同檔重匯不去重；
+  **自建表目標（`self_built_table`／`new_table`）在 prod 被 import-worker 靜默 parked**（旗標只給 API pod，
+  worker 沒有）→ 自建表改走本地腳本；引導用戶「匯出檔案丟給 AI IDE」而不是給 DB 連線字串
 - `data-center.md` §7 兩處、`CONTEXT.md` App 模式、`README.md` Phase 1.5、`verification-details.md`
   第 6／7 項、`troubleshooting.md` 新增三列（特定使用者 404、邀請／建角色 403 子集規則、外部人員
   `policy_denied`）同步立場
 - **`scripts/aigo_data.py`** `permission_for` 補 invitations／members／roles／access-settings／settings 五組
   推估（離線測試通過）
 
-未實打：本版端點與權限全部核自原始碼，測試租戶只有擁有者帳號，`access_role_ids` 的 404 行為與
-外部角色的 `policy_denied` 未用受限帳號實測。
+### 2026-09-08 測試租戶實打（擁有者帳號；建的角色／app／hosted app／匯入資料全部清掉）
+
+- **角色**：`GET /members/roles` 回 `{items}` 含 `user_count`／`access_whitelist_count`；建 201；同名 409
+  「資料重複：相同的唯一值已存在。」；不存在的權限字串 **400**「不允許的權限：xxx」（不是 403）；
+  刪角色回 `access_whitelist_cleaned`／`locked` 計數；`system.admin` 可改系統角色（200）
+- **邀請**：`POST /invitations` 回 `{token, chat_invite_link, user_id: null}`，落點 `/app-login/{slug}` 直達；
+  `redirect_url` 三種 422 字串（含 `?`／`#`、不在白名單、含中文）；缺 email 422「invitations require either
+  user_id or email」；不存在的角色 400「角色不存在或不屬於此租戶：<id>」；同 email 重發舊張 `status: expired`、
+  `expires_at`＝48h；`DELETE` 204、不存在 404「Invitation not found.」；**`POST /members` 不寄信時回 `id: null`**
+  （受邀者註冊前沒有成員列）
+- **白名單**：Custom `PATCH /builder/apps/{id}/settings` 200 讀回一致；非 UUID 400「access_role_ids 含無效的角色 ID
+  （需為 UUID 格式）」；internal 開匿名 400「Internal App 不支援匿名存取」。Hosted `PUT /access-settings`
+  `internal`＋角色 200；`public`＋角色 **422「public visibility 不可搭配 access_role_ids」**
+- **匯入**：existing_table（suppliers）3 列 10 秒 `completed`；self_built_table 與 new_table **parked**（見上）；
+  必填欄缺值整批 `failed`＋逐列 `error_detail`；副檔名不支援回 200 但 job `failed`；同檔重匯 6 列不去重；
+  worker 冷啟動 40 秒～1.5 分鐘
+- `aigo_data.py perm-check` 五組新路徑推估與實際權限一致
+
+未實打（測試租戶只有擁有者帳號）：子集規則 403 本體、受限帳號開 app 的 404、`PUT /members/{id}`、
+`resend-invite`、外部角色的 `policy_denied`、tier-2 欄位落延伸欄位——皆核自原始碼。
 
 
 ## 1.30.1

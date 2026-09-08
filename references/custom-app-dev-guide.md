@@ -362,7 +362,8 @@ POST /api/v1/members
 - `POST /members/{id}/resend-invite` 同樣支援；重寄時省略 `redirect_url`
   會沿用該成員上一張邀請的落點（重寄是冪等修復動作）
 - `send_email=false` 時平台不寄信，呼叫端要自己轉交回應裡的 `chat_invite_link`，
-  且受邀者註冊多一道信箱驗證
+  且受邀者註冊多一道信箱驗證；此時回應的 `id`／`user_id` 是 **`null`**（2026-09-08 實打）——
+  受邀者註冊前沒有成員列，UI 不要拿回應的 `id` 去做後續操作
 
 ## 15. 匿名存取 API（/pub/* 端點）
 

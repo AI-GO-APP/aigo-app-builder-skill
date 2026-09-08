@@ -338,7 +338,10 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
   `internal`（需登入 AI GO）。**`internal` ＋ `access_role_ids=[]` ＝ 全租戶已登入成員**；填角色 id
   就只放行那些角色；`public` 下 `access_role_ids` 必須為空（DB CHECK）。需 `hosted_apps.deploy`，
   再收窄到 app 的 `created_by`／admin。**internal app 沒有預覽截圖**。
-  角色從哪來、外部人員怎麼進租戶 → `member-admin.md` §1／§3／§4
+  角色從哪來、外部人員怎麼進租戶 → `member-admin.md` §1／§3／§4。
+  2026-09-08 測試租戶實打：`POST /hosted-apps {create_deployment:false}` 註冊後即可設定；`internal`＋角色 200
+  且 GET 立即讀回；`public`＋非空角色 **422「public visibility 不可搭配 access_role_ids」**；不存在的角色
+  **400「角色不存在或不屬於此租戶：<id>」**
 - **有登入者就是 `internal`**——員工、外部經銷商、客戶都是租戶成員，用 `access_role_ids` 分流；
   `public` 只給沒有登入者的公開站，或當 Custom App 後端時（§5.1）
 - **容器收到的身分**（proxy 驗過後注入，先剝掉 client 自帶的同名 header）：`X-Aigo-User-Id`、
