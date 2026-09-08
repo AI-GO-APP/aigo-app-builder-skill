@@ -130,7 +130,7 @@ app；或問「我有沒有權限看某表」。這條線的權限是使用者�
    - 列出每張表的實體名、顯示名、欄位結構
    - 這一步的目的是**避免重複建表**：兩個 app 各建一張「客戶」表 = 資料分裂成兩份
 7. **盤點既有排程**（若 app 已上線）
-   - `GET /api/v1/app-crons`（`aigo_review.py` 的 `fetch_app_crons()`），
+   - `GET /api/v1/builder/apps/{app_id}/crons`（`aigo_review.py` 的 `fetch_app_crons()`；App 開發面，`builder.access` 可讀），
      確認有哪些排程綁在本 app 的 action 上
    - republish 或改動 action 名稱前必須知道這些，否則會把排程觸發到自動暫停
 8. **盤點對外呼叫與 Egress**（若 code 內有 `ctx.http.call` 或 `import httpx` 等對外請求）
@@ -353,7 +353,9 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
    - **Hosted 當 Custom 的後端**（常駐進程接在 Custom 介面後面）→ Hosted 設 `public` ＋ 自驗簽章，
      `internal` 的 proxy 會把 Server Action 的呼叫導去登入（`product-line-decision.md` §5）
    - 判走 Hosted App 的 app → `references/hosted-apps.md`，不走本 skill 的 Phase 2–4；
-     「Hosted = 整套搬」指程式不指資料，業務資料一律落平台的表（`hosted-apps.md` §7.1）
+     「Hosted = 整套搬」指程式不指資料，業務資料一律落平台的表（`hosted-apps.md` §7.1）；
+     **部署前必過 `hosted-apps.md` §3.0 的 `always_on` 決策閘**——預設 `false`，只有容器內自跑排程／長連線／
+     冷啟動業務上不可接受三種情況才開，問 owner 的是業務問題不是「要不要常駐」
    - **產出：app 分配表**（每個 app 一列，寫進計畫、確認後照表建 app）
      `| alias | 產品線 | 模式（模板 slug / visibility） | 負責的功能群 | 拆分理由 |`
      ——預設情況就是一列 `| <alias> | Custom | starter-internal | 全部 | — |`
@@ -580,7 +582,9 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
     - **最小間隔與條數依付費檔分層**，超限回 400（`event-triggers.md` §2.4）
     - **重疊會被跳過**（`skipped` 是預期常態不是錯誤）
     - **自動暫停後不會自動恢復**——⚠️ republish 之後要提醒用戶檢查
-      `/dashboard/settings/app-crons` 的排程狀態（`event-triggers.md` §2.8）
+      Builder 該 App「排程」分頁的排程狀態（`GET /builder/apps/{app_id}/crons`；`event-triggers.md` §2.8）。
+      排程的建立與權限走 App 開發面（`builder.app_cron_manage`），不要把開發者導去 `/dashboard/settings/app-crons`
+      （那個入口只有 `system.admin`／`settings.write` 看得到；`event-triggers.md` §2.1）
 23. **角色／權限沿用平台，不要自建一套**（★ 強制）
     - Internal app 前端用 `src/user.ts`（`hasPermission` / `hasAnyPermission` /
       `isAdmin` / `getRoles`），資料是 Runtime 注入的登入者權限快照，

@@ -4,6 +4,36 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.32.0
+
+### issue #38 五條逐一 prod 驗證後修復；issue #40 `always_on` 決策閘落地
+
+每條先對 2026-09-08 的 prod（openapi 實查、測試租戶實打、或 prod tag v1.13.1 原始碼）確認為真才改：
+
+- **#38-1 `check_update.py` Python 3.9 啟動即 TypeError**（★ `uv run --python 3.9` 重現）：補
+  `from __future__ import annotations`，3.9 與 3.14 皆通過 `--check-only`
+- **#38-2 排程入口與權限鍵**（★ prod openapi 有 `/api/v1/builder/apps/{app_id}/crons` 全組＋`/crons/quota`，
+  測試租戶實打 200）：`event-triggers.md` §2.1 改成兩入口對照表——**App 開發面**（Builder 該 App「排程」分頁；
+  讀 `builder.access`、寫 `builder.app_cron_manage` **或** `settings.write`）為預設，租戶營運面
+  `/dashboard/settings/app-crons`（只有 `system.admin`／`settings.write` 看得到）不再是開發者的入口；
+  §2.2 流程與端點表改走 App 開發面並加 `quota` 端點；403 改「印平台原文、請管理員加
+  `builder.app_cron_manage`」。修正 issue 內一句誤報：`settings.write`／`settings.read` **存在**於平台權限表
+  （`permission_registry.py`），`/api/v1/app-crons` 確實要它——問題是開發者角色通常沒有，且測試租戶的
+  「開發人員」「開發主管」系統角色也沒有 `builder.app_cron_manage`（只能唯讀）。
+  `scripts/aigo_review.py` `fetch_app_crons()` 有 app_id 時改打 App 開發面端點；SKILL.md 規則 22／Phase 0 同步
+- **#38-3 Data Reference 刪除路徑**（★ prod 實打：`DELETE /api/v1/refs/{ref_id}` 204、再刪 404「引用不存在」；
+  `DELETE /refs/apps/{app_id}/{ref_id}` 404「Not Found」）：dev-guide §20.4 加第 6 步，含 `PATCH /refs/{ref_id}`
+- **#38-4 `/api/v1/open/*` 限流**（核自 prod tag v1.13.1 `rate_limit.py`：`OPEN_API_RATE_LIMIT = 600`，桶鍵＝API Key、
+  認證後才計；未實打 600 發）：`hosted-apps.md` §5、dev-guide §23.6 節奏、troubleshooting 新列
+- **#38-5 Hosted 單請求 300 秒與 max-scale 2**（核自 prod tag v1.13.1 `orchestrate/runtime.go`：`timeoutSeconds: 300`、
+  `DefaultMaxScale = "2"`；未實機打滿 300 秒）：`hosted-apps.md` §2 硬規則表新增兩列、§1 適合欄加註；
+  `product-line-decision.md` §2 邊界表同步；troubleshooting 兩列
+- **#40 `always_on` 決策閘**（★ prod openapi `HostedAppRuntimeSettingsUpdate.always_on` `default: false`）：
+  `hosted-apps.md` **新 §3.0**——預設 `false`、三種才開（容器內自跑排程／長連線／冷啟動業務上不可接受）、
+  「平台排程 ≠ 需要常駐」、問 owner 業務問題不問「要不要常駐」、開了寫退場條件；SKILL.md 1.5 Hosted 分支
+  加必過此閘；troubleshooting 新列「沒人用卻一直有實例」
+
+
 ## 1.31.1
 
 ### 自建表匯入 parked 已回報平台

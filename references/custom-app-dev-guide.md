@@ -770,6 +770,10 @@ Phase 1.5 實作計畫時：
 4. 在 AI GO Builder 後台將選定的預設表加入 Data Reference
 
 5. 用 GET /api/v1/refs/apps/{app_id} 確認引用已包含所需的表
+
+6. 要移除引用：DELETE /api/v1/refs/{ref_id}（ref_id 從第 5 步的清單取；204，再刪 404「引用不存在」）
+   ⚠️ 不是 DELETE /api/v1/refs/apps/{app_id}/{ref_id}——那條路徑不存在，回 404「Not Found」
+   （2026-09-08 prod 實打）。改欄位／權限用 PATCH /api/v1/refs/{ref_id}
 ```
 
 > **重要**：`available-tables` 僅列出可用表名，實際將表加入 App 的 Data Reference 需在 AI GO Builder 後台操作。
@@ -1033,6 +1037,10 @@ def execute(ctx):
   超時中斷後你不知道停在哪
 - 本地腳本記錄斷點（已成功的批次序號 / 最後一筆外部 ID），失敗可續傳
 - 匯入 action 對「同一批重送」要冪等（以外部 ID 查重），否則斷點續傳會重複建資料
+- **Hosted App 線（Open Proxy）另有限流**：`/api/v1/open/*` **每分鐘 600 次、桶鍵＝該 app 的 API Key**
+  （整支 app 共用，`rate_limit.py` `OPEN_API_RATE_LIMIT`，核自 prod tag v1.13.1）；超過回 429 帶
+  `X-RateLimit-Limit`。逐列寫入 16,000 列＝至少 27 分鐘，估時程與分批節奏要把這條算進去
+  （`hosted-apps.md` §5）
 
 一次性遷移結束後，把只為遷移建立的 egress 外部服務與金鑰**清掉**，不要留白名單。
 

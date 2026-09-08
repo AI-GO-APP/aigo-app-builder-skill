@@ -179,31 +179,44 @@ manifest 全部 action `timeout_ms` 的最大值，夾在 30000～**120000**；�
 排程是後台的一列 DB 資料，與 app 的發布生命週期**脫鉤**。
 你不會在 code 裡「宣告」排程——你寫的只有被排程觸發的那個 action。
 
-管理位置：`/dashboard/settings/app-crons`，或 REST `/api/v1/app-crons`。
+**兩個入口管同一份資料，授權不同**（核自 `builder_app_crons.py`／`app_crons.py`／`Sidebar.tsx`，
+2026-09-08 prod 實打）：
+
+| 入口 | 給誰 | 端點 | 讀 | 寫 |
+|---|---|---|---|---|
+| **App 開發面（★ 預設走這條）** | app 開發者 | Builder →該 App →「排程」分頁；REST `/api/v1/builder/apps/{app_id}/crons` | `builder.access`（能看到 app 即可） | `builder.app_cron_manage` **或** `settings.write`（`system.admin` 直通） |
+| 租戶營運面 | 租戶管理員 | `/dashboard/settings/app-crons`；REST `/api/v1/app-crons` | `settings.read` | `settings.write` |
+
+- `/dashboard/settings/app-crons` 這個選單**只有 `system.admin` 或 `settings.write` 看得到**——把開發者引導去那裡
+  等於要他去要管理員權限（issue #38 的實際案例：租戶因此多開了一個 admin）。開發者的路是 Builder 分頁
+- 兩把權限字串都在平台權限表裡（`permission_registry.py`），但**租戶的系統角色未必帶**：測試租戶的
+  「開發人員」「開發主管」兩個系統角色都沒有 `builder.app_cron_manage`，只能唯讀。403 時**印平台回的原文**，
+  請管理員把 `builder.app_cron_manage` 加進開發者的角色，**不要**叫用戶去要 `system.admin`
 
 ### 2.2 Agent 的建立流程
 
 ```
 1. Phase 1.5 計畫中列出「排程需求表」：
    | 排程名稱 | 觸發哪個 action | 頻率 | 時區 | 固定 params |
-   → 交用戶確認（含 tier 限制是否放得下）
+   → 交用戶確認（含 tier 限制是否放得下：先 GET /builder/apps/{app_id}/crons/quota）
 
-2. POST /api/v1/app-crons   （權限 settings.write）
+2. POST /api/v1/builder/apps/{app_id}/crons   （builder.app_cron_manage 或 settings.write）
    ├─ 201 → 完成
-   └─ 403 → 輸出可照抄的排程規格，引導用戶到
-            /dashboard/settings/app-crons 自建
+   └─ 403 → 印出平台原文；輸出可照抄的排程規格，請管理員把
+            builder.app_cron_manage 加進開發者角色（或由管理員在
+            Builder 該 App「排程」分頁代建）
 ```
 
-| 操作 | 端點 |
-|---|---|
-| 列表／建立 | `GET` / `POST /api/v1/app-crons` |
-| 讀／改／刪 | `GET` / `PATCH` / `DELETE /api/v1/app-crons/{cron_id}` |
-| 啟停 | **`PATCH`** `/api/v1/app-crons/{cron_id}/toggle` |
-| 立即執行一次 | `POST /api/v1/app-crons/{cron_id}/run-now` |
+| 操作 | App 開發面端點（`/api/v1/builder/apps/{app_id}` 前綴） | 租戶營運面對應 |
+|---|---|---|
+| 列表／建立 | `GET` / `POST .../crons` | `GET` / `POST /api/v1/app-crons` |
+| 配額用量（★ 規劃時先查） | `GET .../crons/quota` → `{is_paid, app_used, app_limit, tenant_used, tenant_limit, min_interval_minutes}`（實打：付費 `app_limit: null`、`tenant_limit: 50`、`min_interval_minutes: 5`） | — |
+| 讀／改／刪 | `GET` / `PATCH` / `DELETE .../crons/{cron_id}` | 同形 `/api/v1/app-crons/{cron_id}` |
+| 啟停 | **`PATCH`** `.../crons/{cron_id}/toggle` | 同形 |
+| 立即執行一次 | `POST .../crons/{cron_id}/run-now` | 同形 |
 
 ⚠️ **暫停中的排程 run-now 回 400**——要先 `PATCH .../toggle` 重啟才能手動觸發。
-
-讀取需 `settings.read`，寫入需 `settings.write`。
+app 不可見（不在 `access_role_ids` 內）時整組端點回 404「app 不存在」，不是 403。
 
 ### 建立的 payload 形狀（★ 欄位名不要猜）
 
@@ -292,7 +305,7 @@ manifest 全部 action `timeout_ms` 的最大值，夾在 30000～**120000**；�
 - **一律需要人工重啟。**
 
 ⚠️ **這對開發流程的直接影響**：unpublish 一個帶排程的 app，或改名／刪掉被排程的 action，
-會在兩次觸發後把排程停掉。**每次 republish 之後，要提醒用戶去 `/dashboard/settings/app-crons`
+會在兩次觸發後把排程停掉。**每次 republish 之後，要提醒用戶去 Builder 該 App「排程」分頁（或 `GET /builder/apps/{app_id}/crons`）
 檢查排程狀態並視需要重啟。**
 
 ### 2.9 漏跑語義：coalesce，不補跑

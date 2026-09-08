@@ -27,7 +27,7 @@
 
 | 需求 | Custom App 做得到嗎 | 命中時的走向 |
 |---|---|---|
-| 常駐進程、WebSocket、SSE 長連線 | ❌ Server Action 是 request/response | **Hosted** |
+| 常駐進程、WebSocket、SSE 長連線 | ❌ Server Action 是 request/response | **Hosted**（但 Hosted 也有單請求 300 秒上限＋最多 2 實例——長連線要自動重連、狀態不留行程內，`hosted-apps.md` §2；常駐要過 §3.0 決策閘） |
 | 單次工作 > 90 秒（webhook）／> 280 秒（排程） | ❌ 逾時（`event-triggers.md` §1.6／§2.6） | 切批次；切不了 → **Hosted** |
 | 自選後端框架／語言（Go、Rails、Next.js API routes…） | ❌ 後端只有 Python `execute(ctx)` | **Hosted** |
 | 自有網域、SEO、整站匿名瀏覽 | ❌ `/pub` 只給少數公開頁（dev-guide §15） | **Hosted**（`hosted-apps.md` §9 綁網域） |
