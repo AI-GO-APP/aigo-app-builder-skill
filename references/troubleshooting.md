@@ -48,6 +48,11 @@
 | pub/ API 403 | 確認 `allow_anonymous_access=true`；且**只有 `external` / `self_built` 能啟用匿名**，`internal` app 開不了——「內部工具想給訪客看一頁」拆成 Hosted public，不是把 app 改 external |
 | **特定使用者開 app 拿 404「App 不存在」，別人正常** | 他的角色不在 app 的 `access_role_ids` 白名單內（fail-closed，刻意與查無此 app 同形、不用 403）。Custom：`PATCH /builder/apps/{id}/settings`；Hosted：`PUT /hosted-apps/{id}/access-settings`。先查白名單再查發布狀態；外部人員（經銷商／客戶）同樣是租戶成員，把他們的角色加進名單即可 → `member-admin.md` §3 |
 | **`POST /invitations`／建角色／指派角色回 403，帳號明明有 `hr.member_manage`** | 後端子集規則：目標角色的 permissions 不是呼叫者權限的子集（例如想派「系統管理員」）、或建角色時要求的權限字串超出自己所有。印出差集給用戶，請更高權限者操作；不要換角色硬塞 → `member-admin.md` §2／§8 |
+| **建排程回 403，帳號有 `builder.access`** | 寫排程要 `builder.app_cron_manage` 或 `settings.write`（`builder.access` 只能讀）。印平台原文、請管理員把 `builder.app_cron_manage` 加進開發者角色；**不要**導去 `/dashboard/settings/app-crons`（只有 admin／`settings.write` 看得到）、更不要要 `system.admin` → `event-triggers.md` §2.1 |
+| **Hosted App 打 `/api/v1/open/*` 回 429** | 每分鐘 600 次、桶鍵＝該 app 的 API Key（整支 app 共用）。看 `X-RateLimit-Limit`，分批放慢；遷入逐列寫入先用 600/min 估時程 → `hosted-apps.md` §5 |
+| **Hosted App 的 WebSocket／SSE 每 5 分鐘斷一次；>300 秒的請求 504** | ksvc 單請求 300 秒上限（平台常數）。client 做自動重連＋斷點續傳；長任務切批次或改背景工作 → `hosted-apps.md` §2 |
+| **Hosted App 使用者「登入後一半請求變未登入」、in-process 佇列處理一半消失** | max-scale 2、無 sticky session，行程內狀態不跨實例。session／佇列／快取落平台的表或 `/data` → `hosted-apps.md` §2 |
+| **Hosted App 沒人用卻一直有實例在跑** | `always_on` 被開了。照 `hosted-apps.md` §3.0 決策閘問一次業務問題，皆否就 `PUT runtime-settings` 關掉（五欄一起送） |
 | **匯入 job `completed` 但 `imported_count: 0`，`sources[].status: "parked"`、無錯誤訊息** | 目標是自建表（`self_built_table`／`new_table`）——prod 的 import-worker 沒有 tier-3 旗標，靜默 park（API 回的 `tier3_write_enabled: true` 是另一顆 pod 的值）。改走本地腳本逐筆寫自建表；**已回報平台（2026-09-08）**，不必重複開單 → `data-operations.md` §5 |
 | **匯入 job `failed`、每列「寫入失敗：必填欄位缺值（非空約束）」** | 目標預設表的必填欄沒對到來源欄——定稿前看 mapping 回應的 `table_required_columns`；已定稿改不了（PUT／retarget 409），補欄後重新上傳。CHECK 值域用 `aigo_data.py meta table` 查 → `data-operations.md` §5 |
 | **`PUT /imports/{job}/mapping` 或 `retarget` 回 409「job 狀態 'x' 不可覆核定稿／不可切表重跑」** | 只有 `awaiting_mapping_review` 能改；PUT 一送出就派送 worker 寫入，不是「存草稿」。要改對應只能重新上傳 → `data-operations.md` §5 |

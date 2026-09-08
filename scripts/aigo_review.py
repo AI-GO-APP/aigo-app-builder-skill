@@ -56,14 +56,18 @@ def fetch_custom_tables(base_url: str, token: str):
 def fetch_app_crons(base_url: str, token: str, app_id: str = "") -> list[dict]:
     """盤點既有 App 排程（★ Phase 0 步驟 7）。
 
-    回傳 list＝成功；**None＝盤點失敗**（多半是缺 settings.read）。
+    回傳 list＝成功；**None＝盤點失敗**。
+    有 app_id 時走 **App 開發面** `GET /api/v1/builder/apps/{app_id}/crons`
+    （只要看得到 app 即可讀，`builder.access`）；沒有 app_id 才退回租戶營運面
+    `GET /api/v1/app-crons`（需 `settings.read`，一般開發者多半沒有）——issue #38。
     republish 或改動 action 名稱前必須知道有哪些排程綁在上面——
     action 消失連續 2 次會讓排程被自動暫停，且不會自動恢復。
     """
     import httpx
+    url = (f"{base_url}/api/v1/builder/apps/{app_id}/crons" if app_id
+           else f"{base_url}/api/v1/app-crons")
     try:
-        resp = httpx.get(f"{base_url}/api/v1/app-crons",
-                         headers={"Authorization": f"Bearer {token}"}, timeout=30)
+        resp = httpx.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30)
         resp.raise_for_status()
         crons = resp.json()
         if isinstance(crons, dict):
@@ -71,7 +75,7 @@ def fetch_app_crons(base_url: str, token: str, app_id: str = "") -> list[dict]:
         if not isinstance(crons, list):
             return None
         if app_id:
-            crons = [c for c in crons if str(c.get("app_id")) == str(app_id)]
+            crons = [c for c in crons if str(c.get("app_id", app_id)) == str(app_id)]
         return crons
     except (httpx.HTTPError, ValueError):
         return None

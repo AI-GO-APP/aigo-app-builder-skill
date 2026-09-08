@@ -46,7 +46,7 @@
 | 執行 | 平台 runtime 內 | Knative 容器，**scale-to-zero** |
 | 網址 | 主站內 `/runtime/...` | `https://{slug}.deploy.ai-go.app`（可綁自訂網域） |
 | 取平台資料 | `ctx` SDK／前端 SDK | 注入的 `AIGO_*` env + Open Proxy REST |
-| 適合 | 平台內業務介面、直接吃租戶資料 | 遷入整套既有服務、自選框架、常駐進程、WebSocket |
+| 適合 | 平台內業務介面、直接吃租戶資料 | 遷入整套既有服務、自選框架、常駐進程、WebSocket（★ 單請求 300 秒上限＋最多 2 實例，§2——長連線要重連、狀態不能留在行程內） |
 
 ### ★ 命名地雷（先讀，讀錯會改錯 API）
 
@@ -71,6 +71,8 @@
 | **必須提交 lockfile**（go.sum／pnpm-lock.yaml…） | `missing go.sum`／`ERR_PNPM_NO_LOCKFILE` |
 | 建置包絡：**CodeBuild 整台 `BUILD_GENERAL1_MEDIUM`（ARM，8 GiB）**，OOM 只在整台用盡時發生（ADR 0028；UAT／prod 皆已切換）；v1.13.0 之前是 k8s Job 的 2 CPU / 4 GiB。預設時限 900 秒。★ 建置工具會依 CPU 數開多個 worker 各占一份 heap，包絡再大也要限 worker 數 | `OOMKilled`／`exit code 137`／timeout；**容器級 OOM 時日誌可能全空**（§8） |
 | 不可是 monorepo／空目錄；無法辨識的目錄會 fallback 成 static 站 | precheck Issue／部署出來是靜態檔 |
+| **單一請求上限 300 秒**（ksvc `timeoutSeconds=300`，平台常數，核自 prod tag v1.13.1 `orchestrate/runtime.go`）——SSE／WebSocket 長連線**滿 300 秒必斷**，長任務不能在一個請求裡跑完 | 長連線每 5 分鐘斷一次；client 沒做自動重連就「偶爾失聯」；>300 秒的匯出／報表請求 504 |
+| **最多 2 個實例**（`max-scale=2`，平台常數，同上出處）——**行程內狀態（記憶體 session、in-process 佇列、本機快取）不跨實例共享**，也沒有 sticky session | 使用者「登入後一半請求變未登入」、佇列消費一半不見；狀態一律落平台的表或 `/data`（§7） |
 | **容器只保留 `NET_BIND_SERVICE` 一個 capability**（`drop ALL` 後恆補這一顆，2026-09-05 起；gVisor 已拆除，隔離靠 seccomp＋PSA baseline） | 執行檔帶其他 file capability（`setcap` 過的二進位）會 `exec …: operation not permitted`；只綁 <1024 埠的 caddy／nginx-unprivileged **現在可以**（UAT 09-05、prod v1.13.0 起；2026-09-08 prod 實打 zbpack static 站＝caddy 映像，rollout 成功） |
 
 - 執行資源：共用池與免費租戶固定 **800m CPU / 1.6 GiB**（平台常數）；**專屬節點租戶**可在
@@ -106,6 +108,28 @@ OOM 只在整台用盡時發生，上面「4 GiB 的 60–65%」是舊引擎的�
 ⚠️ 新引擎下的 OOM／無日誌失敗矩陣**尚未在 prod 實打**（平台 T15 也列為待驗），撞到時先照 §8 順序處理。
 
 ## 3. 部署
+
+### 3.0 `always_on` 決策閘（★ 部署前必過；預設 `false`，開了就佔叢集資源）
+
+平台預設 **scale-to-zero**（`runtime-settings.always_on` 在 prod openapi 的 `default: false`，2026-09-08 實查），
+開常駐是**主動動作**：那支 app 會永遠佔一個實例的保留量，沒人用也在扣叢集資源（issue #40 的實例：
+一支 `always_on=true` 的 app 日誌裡只有啟動與健康檢查、零真實請求）。**agent 不得自己決定開，
+也不得把「要不要常駐」直接丟給 owner 選**——非技術 owner 答不出來、也不知道成本落在誰身上。
+問業務問題，由 agent 換算：
+
+| 問 owner 的業務問題 | 答「是」的意思 | 設定 |
+|---|---|---|
+| 「這個系統**自己**有沒有東西要定時跑？」（容器內 cron／APScheduler／背景執行緒／佇列消費者） | 縮到零時沒有任何入站請求會把它叫醒（§7）——背景工作會停 | `true` |
+| 「有沒有要**一直連著**的東西？」（WebSocket／SSE／長輪詢；注意單請求 300 秒上限，§2） | 沒實例就沒連線 | `true` |
+| 「第一個人打開時等 **N 秒**能不能接受？」——要問出實際容忍秒數，不要預設「快比較好」 | 容忍不了冷啟動（實測數十秒等級） | `true`，並寫下依據 |
+| 以上皆否 | 純網頁／API、有人用才需要在 | **`false`**（預設，不要動） |
+
+- **最容易誤判的一條**：Custom App 的**平台排程**（`event-triggers.md` §2）是平台時鐘打進來的入站請求，
+  會喚醒縮到零的 runner，**不需要**常駐（dev-guide §28）。只有把排程器寫在 Hosted 容器裡的才需要
+- 開了就要在計畫與交付說明各留一句：「常駐＝開，理由是 X；退場條件 Y（例如改成平台排程後關掉）」
+- 設定方式：`PUT /{id}/runtime-settings` 五欄一起送（§4）；共用池／免費租戶的常駐可能被平台方案擋
+- Dashboard 直接建站的 owner 不會經過本 skill——遇到「不知道為什麼開著」的常駐 app，
+  先照上表問一次，答案皆否就關掉
 
 ### 3.1 憑證：Deploy Token vs 登入 session
 
@@ -287,6 +311,10 @@ Hosted App 容器**只帶平台注入的 `AIGO_*`**，原系統的 env 一顆都
   不出現在任何 API 回應
 - 容器內：`Authorization: Bearer $AIGO_API_TOKEN` 打 `$AIGO_PLATFORM_API_URL/api/v1/open/...`
 - ⚠️ `AIGO_PLATFORM_API_URL` 是**叢集內部位址**——本機開發要改打公開租戶網域
+- **限流：`/api/v1/open/*` 每分鐘 600 次，桶鍵＝這把 API Key（整支 app 共用，不分端點、不分實例）**
+  （`rate_limit.py` `OPEN_API_RATE_LIMIT = 600`，核自 prod tag v1.13.1）。超過回 429，`X-RateLimit-Limit`
+  寫的是擋住這一發的那個桶。遷入案逐列打 Open Proxy 時用它估時程：16,408 列 ≥ 28 分鐘，
+  分批要留餘裕給 app 本身的讀取（`custom-app-dev-guide.md` §23.6）
 - ★ **兩個資料平面都要加 `/open` 前綴**（2026-09-02 容器內實測；`open_data_center` router
   核自原始碼）——`data-center.md` §7 速查表的路徑是**登入使用者 token 的平面**，
   用 `AIGO_API_TOKEN` 照抄必 **401 `Invalid authentication token`**（訊息會把你導向憑證方向，

@@ -45,6 +45,7 @@ check_update.py — Skill 自我更新（多安裝感知、發現新版即強制
     （--apply／--apply-all 仍接受，等同預設行為，保留給舊文件相容）
 """
 
+from __future__ import annotations  # Python 3.9 相容：`str | None` 註記延遲求值（issue #38）
 import argparse
 import io
 import json
