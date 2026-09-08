@@ -127,6 +127,9 @@ OOM 只在整台用盡時發生，上面「4 GiB 的 60–65%」是舊引擎的�
 - **最容易誤判的一條**：Custom App 的**平台排程**（`event-triggers.md` §2）是平台時鐘打進來的入站請求，
   會喚醒縮到零的 runner，**不需要**常駐（dev-guide §28）。只有把排程器寫在 Hosted 容器裡的才需要
 - 開了就要在計畫與交付說明各留一句：「常駐＝開，理由是 X；退場條件 Y（例如改成平台排程後關掉）」
+  ——計畫的落點是**需求盤點表 §四.1 ＋ app 分配表該列**（`new_app_requirements_template.md`），
+  交付說明的落點是 **§3.4「全部通過」那行**；§3.4 部署後會 `GET runtime-settings` 讀回核對，
+  讀到 `true` 卻拿不出這句＝未通過
 - 設定方式：`PUT /{id}/runtime-settings` 五欄一起送（§4）；共用池／免費租戶的常駐可能被平台方案擋
 - Dashboard 直接建站的 owner 不會經過本 skill——遇到「不知道為什麼開著」的常駐 app，
   先照上表問一次，答案皆否就關掉
@@ -175,6 +178,9 @@ POST {deployd_upload_url}  ← multipart/form-data，第一個欄位必須叫 ta
   仍留 version marker 是因為它能一併抓到「路由到錯的 app」與「打到快取」。
   「起不來會落 failed」那一半（負向）未實打
 - 部署建議走 CLI（§3.3）；REST 流程留給 CLI 裝不了的環境
+- **部署流程本身不碰 `always_on`**：新建 app 的常駐預設就是 `false`，deploy／redeploy 也不會改它。
+  只有 §3.0 判 `true` 的 app 才在 `active` 之後 `PUT /{id}/runtime-settings` 五欄一起送（§4）；
+  判 `false` 的什麼都不用做——但 §3.4 仍要讀回確認（Dashboard 那端隨時可能有人手動開）
 
 ### 3.3 CLI（`aigo`，建議的部署路徑）
 
@@ -205,6 +211,8 @@ curl -fsSL https://raw.githubusercontent.com/AI-GO-APP/aigo-cli-releases/main/in
 - **exit code**：`0` 成功／`1` 業務失敗（401、配額 429、建置 failed、superseded——
   重試前先修因）／`2` 用法錯／`3` 連不上 backend（可重試）
 - 尚未接 CLI 的操作（刪除、網域、檔案／終端等 §11 標 ❌ 的面）→ Dashboard 或 REST
+- **常駐不在 deploy 指令裡**：`--help` 有沒有 runtime-settings／常駐相關子命令以它為準；沒有就走
+  REST `PUT /{id}/runtime-settings`（§4）或 Dashboard。無論哪條路，**開之前都要先過 §3.0**；關掉不需要過閘
 
 ### 3.4 部署後驗證閘門（★ 未通過不得對外交付）
 
@@ -218,15 +226,17 @@ Custom App 線每次變更都要過 SKILL.md Phase 4.2 的驗證閘門；Hosted 
 | 變更範圍 | 先等 | 必驗項目 |
 |---|---|---|
 | **只改 env／持久碟** | **1–6 分鐘**傳播（§4）；延遲窗內驗證會誤判成沒生效 | ① `GET /{id}/runtime-settings` 讀回確認值 ② 實測**依賴那顆 env 的路徑**（登入、OAuth 導向、第三方呼叫），不是只看設定頁 |
+| **常駐設定**（首次部署、改 runtime-settings、接手既有 app 的第一次驗證都要做） | — | ① `GET /{id}/runtime-settings` 讀回 `always_on`，**必須等於 §3.0 的決策**（沒過閘＝`false`）② 讀到 `true` 就要拿得出計畫裡那句「常駐＝開，理由 X；退場條件 Y」，拿不出來視同未通過 |
 | **程式碼變更**（deploy／redeploy） | 建置完成 | ① `deployments/{id}` 狀態 `active`（不是 `queued`／`building`／`failed`／`superseded`）② **version marker**：回應帶得到本次版本識別 ③ 主要路由各打一次拿 200 ④ `runtime-logs` **看得到請求進來**——pod `Running`、框架顯示 Ready 卻整段沒有請求 = 探針連不上（§2 綁定介面陷阱） |
-| **首次部署／遷入既有系統** | 同上 | 上列全部 ＋ §4「遷入 env 清單」逐顆核 ＋ 持久化落點（§7：容器檔案不持久，資料要落平台）＋ 取平台資料的路徑（§5：容器內要 `/open` 前綴、隨附整合要加引用） |
+| **首次部署／遷入既有系統** | 同上 | 上列全部（**含常駐設定列**）＋ §4「遷入 env 清單」逐顆核 ＋ 持久化落點（§7：容器檔案不持久，資料要落平台）＋ 取平台資料的路徑（§5：容器內要 `/open` 前綴、隨附整合要加引用） |
 | **自訂網域** | DNS／憑證 | `POST /{id}/domains/{domain_id}/verify` 走到 `active`（§9；**session-only，Deploy Token 打不了**），再用**該網域**重跑一次主要路由，不是只驗 `*.ai-go.app` |
 
 **驗證後決策**：
 
 | 結果 | 下一步 |
 |---|---|
-| 全部通過 | 可交付；把 version marker 的值記給用戶當對照基準 |
+| 全部通過 | 可交付；交付說明附 version marker 的值（對照基準）＋**常駐狀態一句**：`常駐＝關（預設）` 或 `常駐＝開，理由 X；退場條件 Y` |
+| `always_on` 讀回 `true` 但沒有決策紀錄 | 回 §3.0 問一次業務問題；皆否 → `PUT runtime-settings` 關掉（五欄一起送）再驗一次；有一項是 → 補寫理由與退場條件到計畫與交付說明 |
 | 建置 `failed` 且日誌全空 | **原樣重送一次**（偶發型），再失敗往建置記憶體查 → §8 |
 | ksvc ready 逾時但 runtime-logs 顯示已就緒 | 綁定介面陷阱 → §2，不要改 PORT |
 | 改動「沒生效」 | 先確認上一次 rollout 成功（失敗＝對外還是舊版）→ §3.2；只改 env 就再等滿傳播窗 → §4 |
@@ -396,7 +406,8 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
 | 平台資料（Open Proxy 寫入的自建表等） | ✅ 在平台側 |
 
 - **複製（clone）不複製 `/data` 內容**，也不複製 Deploy Token 與部署歷史
-- 縮到零**不會**因排程或背景工作自動喚醒——需要常駐就開 `always_on`
+- 縮到零**不會**因**容器內**的排程或背景工作自動喚醒——這正是 §3.0 決策閘的第一題；
+  要開 `always_on` 先過閘，不要看到這句就開（平台排程是入站請求，會喚醒，不算）
 
 ### 7.1 遷入既有服務時：資料一律遷入平台，原 DB 退場
 

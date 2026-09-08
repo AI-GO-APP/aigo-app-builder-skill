@@ -359,6 +359,8 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
    - **產出：app 分配表**（每個 app 一列，寫進計畫、確認後照表建 app）
      `| alias | 產品線 | 模式（模板 slug / visibility） | 負責的功能群 | 拆分理由 |`
      ——預設情況就是一列 `| <alias> | Custom | starter-internal | 全部 | — |`
+     ——判走 Hosted 的列，拆分理由欄後附常駐決策：`常駐＝關（預設）`，或 `常駐＝開；理由 X；退場條件 Y`
+     （`hosted-apps.md` §3.0 三問的結果，問答填在需求盤點表 §四.1；§3.4 部署後會讀回核對）
 
 1.7. **授權架構選型**（★ 強制；SSOT 在 `references/member-admin.md` §1，兩條路共用）
    - **立場**：AI GO 帳號體系是內外人員共用的——凡要登入的人都是租戶成員，用**角色**分「能做什麼」、
@@ -851,7 +853,7 @@ if (file) downloadFile(file);
   上述全部 + 角色白名單實測（用不在 `access_role_ids` 內的帳號開 app 應 404）+ 匿名存取（僅判進 external 的 app）
 
 Hosted App 線（不走 Phase 2–4）：
-  deploy/redeploy → ✅ hosted-apps.md §3.4 部署後驗證閘門（未通過不得對外交付）
+  deploy/redeploy → ✅ hosted-apps.md §3.4 部署後驗證閘門（含讀回 `always_on`＝§3.0 決策；未通過不得對外交付）
 
 資料操作線（不開發 app）：
   寫入前 → ✅ data-operations.md §3.5 寫入閘門（估影響面 → 備份 → 試一筆 → 用戶確認）
@@ -861,6 +863,8 @@ Hosted App 線（不走 Phase 2–4）：
 
 > 任何一步失敗、或收到非預期狀態碼 → 先查 `references/troubleshooting.md`，
 > **不要自行推測修法**。多數症狀有明確成因，猜測通常會改錯地方。
+> 查無此症、或照表處理仍卡死 → **自動**進入下方「問題回報」的五步流程
+> （先自審、確認是平台問題後才問使用者送不送），不要反覆重試、不要繞道硬改。
 
 常見狀態碼的語義分野：**403** 權限（分 `system.admin` / `builder.access` 兩種，
 降級動作不同；body 帶 `reason`／`rule_id` 則是租戶資料存取規則，見 dev-guide §27）｜
@@ -896,11 +900,28 @@ Hosted App 線（不走 Phase 2–4）：
 > ★ **預設平台必定正確；開發或使用失敗，預設是自己的 Agent 操作有誤。**
 > 回報前**必須**走完 `references/pre-report-self-grill.md` 的六輪自審：每個分支都要有
 > 指令＋輸出的證據排除「是我錯」，前沿為空、且純 API 可穩定重現（或 5xx／硬阻斷）
-> 才算平台問題。**不確定就不報**——把自審紀錄交給使用者決定；送出前仍要使用者確認。
-> `submit` 沒帶 `--ruled-out` 會被拒收，不建卡。
+> 才算平台問題。**不確定就不報。送出與否由使用者決定，但問的人是 agent。**
+> `submit` 沒帶 `--ruled-out` 或 `--user-confirmed` 會被拒收，不建卡。
+
+**使用者流程（固定五步；agent 主動推進，使用者只做最後一個決定）**：
+
+1. **自動觸發**：`troubleshooting.md` 查無此症、照表處理仍卡死、實測與 `references/` 明文不符、
+   端點 5xx／流程被硬阻斷——任一成立就**自動**進入六輪自審。不必使用者要求、不先問「要不要查」、
+   不反覆重試、不繞道硬改
+2. **自審**：照 `pre-report-self-grill.md` 六輪逐題跑指令留證據；一次只審一個症狀
+3. **判定**：
+   - 不是平台問題（app 側／部署落差／文件缺口／平台刻意設計）→ 直接修或等，
+     **跟使用者說結論即可，不問送不送**
+   - 前沿還有「待查」→ 不確定就不報：把自審紀錄與缺的證據交給使用者，
+     問的是「要不要繼續追」，不是「要不要送」
+   - 兩個送出條件成立（`pre-report-self-grill.md` §3）→ 進第 4 步
+4. **主動問使用者要不要送**：先給一段摘要——症狀一句、預期 vs 實際、重現步驟、已排除清單——
+   再問「要不要提交給開發團隊？」（有 AskUserQuestion 就用它）。**不得替使用者決定送或不送**
+5. **同意 → 送出**：`submit … --ruled-out … --user-confirmed`；
+   不同意 → 自審紀錄留在專案（例如 `docs/issues/<日期>-<症狀>.md`），不送
 
 遇到「平台自身」的問題——實測與文件不符、troubleshooting 查無此症或照表仍卡死、
-被平台缺陷擋住流程——自審通過後**直接回報給開發團隊**，不要繞道硬改：
+被平台缺陷擋住流程——走完五步、使用者點頭後**直接回報給開發團隊**，不要繞道硬改：
 
 ```bash
 uv run --project scripts python scripts/report_issue.py submit "一句話標題" \
@@ -911,7 +932,9 @@ uv run --project scripts python scripts/report_issue.py submit "一句話標題"
 生命週期：…
 文件：…
 重現：…" \
-  --image 截圖.png   # UI 問題附截圖（可重複，最多 10 張），會內嵌在卡片裡
+  --user-confirmed \
+  --image 截圖.png   # UI 問題附截圖（可重複，最多 10 張），會內嵌在卡片裡；
+                      # --user-confirmed 只在第 4 步已做、使用者說了「送」之後才帶
 ```
 
 - 憑證重用 `~/.aigo/.env`，零設定；在 AI IDE 內直接執行，不開任何 UI、
@@ -920,6 +943,8 @@ uv run --project scripts python scripts/report_issue.py submit "一句話標題"
   **不要**替用戶提出技術建議或實作方式——完整規範見 `references/issue-reporting.md`
 - ★ `--ruled-out` 是自審紀錄濃縮成的**已排除清單**（每行一項、至少三項），會附在卡片裡
   讓開發團隊快速 triage；寫不出這段就代表還沒排除完
+- ★ `--user-confirmed` 代表第 4 步已做且使用者同意；缺少即拒收。CLI 驗不了旗標真假，
+  靠的是對話裡留下的摘要與問句可稽核——沒問過就帶，是本節最嚴重的違規
 - 追蹤進度與官方回覆：`report_issue.py list`／`show <ticket_id>`
 - `submit` 會先做**開單前查既有卡**並印一行結果（同症狀的卡已修復／處理中／沒有）。
   **第一階段只記錄，不改流程**——不論結果都照常送出，不要據此自行決定不報或跟使用者
