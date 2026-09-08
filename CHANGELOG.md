@@ -4,6 +4,15 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.31.1
+
+### 自建表匯入 parked 已回報平台
+
+- `data-operations.md` §5 與 `troubleshooting.md`：自建表目標（`self_built_table`／`new_table`）在 prod 被 import-worker
+  靜默 parked 一事，2026-09-08 已走 `pre-report-self-grill.md` 六輪自審（含平台 UI「確認定稿並開始匯入」對照，
+  UI 同樣 parked）後以 `report_issue.py` 回報平台——文件加註「已回報，不必重複開單」，修好前照本地腳本繞法
+
+
 ## 1.31.0
 
 ### 授權架構選型成為計畫必含項：內外人員共用帳號體系、以角色區分；external 收成匿名頁例外；成員／角色 playbook（issue #48）
