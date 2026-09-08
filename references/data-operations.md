@@ -108,7 +108,8 @@
       **import-worker 只 `envFrom backend-env`，旗標在 worker 上是預設 false**；mapping 回應的
       `tier3_write_enabled: true` 是 API pod 的值，會誤導。**自建表匯入改走本地腳本**：
       `aigo_data_center.py insert_record` 逐筆，或 dev-guide §23.2 的 Server Action 批次；
-      回報平台時附 job id 與 `sources[].status`。憑證／金流類敏感表在 denylist，映射不到
+      **已回報平台（2026-09-08，含平台 UI 對照：UI「確認定稿並開始匯入」同樣 parked）**，不必重複開單；
+      修好前遇到同症狀就照上面走本地腳本。憑證／金流類敏感表在 denylist，映射不到
   - **流程與狀態機**（★）：`POST /imports`（multipart，回 job＋profiling，`awaiting_mapping_review`）
     → `POST /{job}/suggest-mapping`（建議＋`candidate_tables`＋**`table_required_columns`**）
     → 要換表就 `POST /{job}/mapping/retarget {source_id, target_ref}`（只能換到 `candidate_tables` 內的表，
