@@ -168,7 +168,7 @@ Action 也可由 Webhook 或 App 排程觸發——**兩者都要求 action 冪�
 實際生效＝`min(該 action 的 timeout_ms, ceiling)`。修正（#1518，prod v1.13.0 起）前 ceiling 恆為 30000，
 manifest 寫 120000 也在 30 秒被切。**ceiling 是在 publish 時寫進 runner 設定的**——v1.13.0 之前發布的
 app 仍帶舊的 30 秒 ceiling，**要 republish 一次**才會換上 manifest 的值；republish 後仍 30 秒被切才是平台問題。
-（2026-09-08 prod demo 租戶實打：新建 app、manifest `timeout_ms: 120000`、action `time.sleep(45)` →
+（2026-09-08 prod 測試租戶實打：新建 app、manifest `timeout_ms: 120000`、action `time.sleep(45)` →
 `status: success`、`duration_ms: 45001`；同 app 的 30000 action 第一發 503 冷啟動、20 秒後 200。）
 超過 120000 的宣告會被夾回 120000；webhook（90 秒）與排程（300 秒）的 dispatcher 外層上限
 另算（`event-triggers.md` §1.6／§2.6），兩道取小。逾時回 `status: "timeout"`，長工作仍要切批次。
@@ -259,8 +259,8 @@ action 路徑約定不變：`actions/**.py` 是可呼叫 action（`action_name` 
 | 現象 | 實情 |
 |---|---|
 | `413` | **兩個來源**：端點自己「檔案超過上限」（單檔 100 MB）；全域 body 上界「請求內容超過上限」（`upload` 整包 **109 MiB**，非上傳端點 96 MiB，body 帶 `limit_bytes`）。都是零物件、重送同一份永遠不會過 |
-| `401` 立刻回、body 沒被讀 | 2026-09-03 起 token 簽章／到期在**讀 body 之前**就驗——token 過期不必先送完 100 MB；換新 token 重送安全 |
-| `403「無權存取此路徑」` | `path`／`folder` 正規化後逃出 `{tenant}/{app}/` 前綴（含 `..`、絕對路徑、NUL），四條端點一律 403（2026-09-01 起）。**自己拼過 `/../` 的呼叫端從這版起會壞**——folder 只用不含 `/`、`..` 的簡單名 |
+| `401` 立刻回、body 沒被讀 | 2026-09-04 起（#1441）token 簽章／到期在**讀 body 之前**就驗——token 過期不必先送完 100 MB；換新 token 重送安全 |
+| `403「無權存取此路徑」` | `path`／`folder` 正規化後逃出 `{tenant}/{app}/` 前綴（含 `..`、絕對路徑、NUL），四條端點一律 403（2026-09-02 起，#1371）。**自己拼過 `/../` 的呼叫端從這版起會壞**——folder 只用不含 `/`、`..` 的簡單名 |
 | `list` 看不到剛傳的檔 | `list` **非遞迴**（只列一層），且 `upload` 會清洗 `folder` 而 `list` 不清洗——對帳要帶**送出時同一個** `folder` |
 | `GET /url` 404 | 「這個 key 上沒有物件」——是第二條對帳路徑，不是認證擋掉；`DELETE /file` 冪等，不存在也回 200 |
 | key 太長 4xx | 最終 key（前綴＋uuid＋副檔名）≤ **1024 bytes UTF-8**，中文一字 3 bytes；輸入問題，重試無用 |
@@ -378,7 +378,7 @@ App 設定「存取」區塊看得到，也對應 app 物件的兩個唯讀欄�
 
 | 狀態 | `anonymous_access_requested_at` | `anonymous_access_approved_at` | 匿名訪客看到 |
 |---|---|---|---|
-| 未申請 | null | null | 與「App 不存在」**逐字相同的 404**（刻意同形，不洩漏存在性） |
+| 未申請 | null | null | 與「App 不存在或尚未發布」**逐字相同的 404**（刻意同形，不洩漏存在性；發終端使用者憑證的 auth 入口回的字串是「App 不存在」——同 404、字串不同，判斷用狀態碼不要比字串） |
 | 已送出申請 | 有值 | null | 同上 404 |
 | 已核可 | 有值 | 有值 | `/pub/*` 正常服務 |
 
@@ -392,7 +392,7 @@ App 設定「存取」區塊看得到，也對應 app 物件的兩個唯讀欄�
   **不受影響**（那是正當流程），所以「我測都正常、用戶說 404」正是這個狀態
 - 核可後撤銷也是平台側動作；被撤銷回到同形 404
 - `internal` 開不了匿名（400「Internal App 不支援匿名存取」），本節只對 `external`／`self_built`
-- 2026-09-08 prod 實打（demo 租戶）：external app 發布＋開旗標後，`GET /builder/apps/public/{slug}`
+- 2026-09-08 prod 實打（測試租戶）：external app 發布＋開旗標後，`GET /builder/apps/public/{slug}`
   與 `GET /pub/data/{slug}/objects` 都回 404 `{"detail": "App 不存在或尚未發布"}`，與不存在的 slug
   **逐位元組相同**；申請兩次 `requested_at` 相同；app 物件回 `requested_at` 有值、`approved_at` null、
   **沒有** `requested_by` 欄位；申請後公開端點仍 404
@@ -1367,7 +1367,7 @@ prod 切 on 前規則只會被記錄（audit）不會生效；切 on 後本節�
 | script 規則的 policy-runner 掛了且無快取（enforce） | 403 `reason: "runner_unavailable"` |
 | 規則引用了已刪欄位／不合法運算子（enforce） | 403 `reason: "policy_invalid"` |
 | create／update 的 payload **碰到** `hide_columns` 裡的欄位（碰＝違規，不論值） | 403 `reason: "hidden_column_write"`——先於 400／404 |
-| read 命中 `restrict` | **不報錯**：`where` AND 進查詢（`total` 也照套）、`hide` 欄位從回應消失；同時 hide 欄位**不能**出現在 `filters`／`sort`／`order_by`／search／`count_only` |
+| read 命中 `restrict` | **不報錯**：`where` AND 進查詢（`total` 也照套）、`hide` 欄位從回應消失；同時 hide 欄位**不能**出現在 `filters`／`sort`／`order_by`／search／`count_only`——指到 hide 欄位時 `filters`／search 回 **400「未授權的篩選欄位」**（與欄位不存在同形，不是 403），`order_by` 被**靜默略過**、退回預設排序 |
 | 所有可投影欄位都被 hide 蓋掉 | 403 `policy_invalid`（不會回空欄位的列） |
 
 - **403 body 的 `reason` 才是分辨鍵**：同樣 403，`builder.access` 破口（`data-center.md` §7.5）、
@@ -1376,7 +1376,9 @@ prod 切 on 前規則只會被記錄（audit）不會生效；切 on 後本節�
 - **規則是 per-app 的**：`principal.app_id` 認的是「這次呼叫走哪支 app 的資料入口」，同一張表
   被兩支 app 引用要各自設規則——別假設別支 app 的限制會延伸過來
 - 前端要有降級：清單少了幾欄、少了幾列是**預期行為**，不是 bug；別把 hide 欄位寫死在
-  `order_by`／`filters`（會被判 policy_invalid）
+  `order_by`／`filters`：`filters`／search 指到 hide 欄位回 400「未授權的篩選欄位」（與欄位不存在同形），
+  `order_by` 指到 hide 欄位被靜默略過——都不是 403；`policy_invalid` 只在規則自身引用越權欄位、或所有
+  可投影欄位全被 hide 時出現（核自 `app_data_proxy.py` 的 `_build_filter_clause`／`_build_order_clause`）
 - Server Action 的 `ctx.db.*` 與前端 SDK 都在執法範圍；匯入、審批回呼、模板安裝走 system 身分不套人軸
 - **不要在 action 裡自己重做一套角色→表的判斷去「補強」**：規則歸租戶管、平台執法；action 只做
   業務層分流（`ctx.user_permissions`），資料層交給 gate

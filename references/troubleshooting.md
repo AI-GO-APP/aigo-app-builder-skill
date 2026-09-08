@@ -97,14 +97,14 @@
 | **呼叫 action 回 503「app runner 暫時不可用」且 body 帶 `quota_hint`** | 租戶運算配額吃緊、pod 建不出來（2026-09-03 起 backend 會把配額說明接在 `detail` 後並帶頂層 `quota_hint`）。**不是 code 問題**：轉告用戶、引導到「運算資源」頁或找管理員；沒有 `quota_hint` 的 503 才依 `Retry-After` 退避重試 |
 | **資料層 403、body 帶 `reason`（`policy_denied`／`hidden_column_write`／`policy_invalid`／`runner_unavailable`／`app_data_access_suspended`）＋`rule_id`** | 租戶「資料存取規則」（Auth gate）擋的，**app 端改 code 無解**——把 `rule_id` 轉給租戶管理員到 Builder「資料存取規則」分頁看；`hidden_column_write`＝payload 碰到被遮蔽欄位；UAT on／prod off（2026-09-07）→ `custom-app-dev-guide.md` §27 |
 | 使用者開 app 看到整頁「資料存取暫停」 | 管理員對這支 app 按了「封鎖資料存取」（萬用 deny 規則），平台 host 直接接管畫面。找租戶管理員解除，app 沒壞 → dev-guide §27.2 |
-| 清單少了欄位／少了列，API 回 200 | 命中 `restrict` 規則：`where` 併進查詢、`hide` 欄位從回應消失——**預期行為**。若 hide 欄位被寫在 `order_by`／`filters` 會轉成 403 `policy_invalid` → dev-guide §27.2 |
+| 清單少了欄位／少了列，API 回 200 | 命中 `restrict` 規則：`where` 併進查詢、`hide` 欄位從回應消失——**預期行為**。hide 欄位寫進 `filters`／search 回 400「未授權的篩選欄位」（與欄位不存在同形）、寫進 `order_by` 被靜默略過——都不是 403，別往權限查 → dev-guide §27.2 |
 | **已發布 app 閒置一陣子後第一次呼叫 action 很慢／逾時，之後就正常** | runner scale-to-zero 冷啟動，不是 action 壞。付費租戶可 `PATCH /api/v1/builder/apps/{id}/runtime-settings {"always_on": true}`（`builder.publish`）或在 Builder App 設定「執行模式」切常駐；免費 403 `ALWAYS_ON_REQUIRES_PAID_PLAN`、未發布 422、綁通訊渠道的 app 本來就常駐（`locked_reason: messaging_trigger`）→ `custom-app-dev-guide.md` §28 |
 | 排程 action 在 120 秒被切、回 `status: "timeout"` | runner 內層 ceiling 最高 120000（2026-09-07 起），cron 的 280 秒只是 dispatcher 外層；切批次到 120 秒內 → `event-triggers.md` §2.6。**30 秒**就被切且 manifest 設更大＝該 app 在 v1.13.0 前發布、還沒 republish（#1518） |
 | **pub/ API 或 external app 終端使用者拿 404「App 不存在」，開發者自己預覽正常** | 匿名對外服務**未經平台核可**（開旗標≠核可；核可前刻意與不存在同形，app 使用者 token 也擋）。查 app 的 `anonymous_access_requested_at`／`approved_at`，未申請就 `POST /apps/{id}/anonymous-access-request`，已申請請用戶找平台 → `custom-app-dev-guide.md` §15.1 |
 | 分享的 `/runtime/{slug}?…#/page` 深連結登入後落回首頁 | 已修（`?next=` 承載 search+hash，prod v1.13.0 起）；不要在 app 內自己補 localStorage 復原；仍發生就回報平台 → `platform-behaviors.md` §6.2 |
 | 用戶回報「找不到此應用」 | 訊息依身分分三層：匿名／token 失效＝通用訊息（刻意不區分未發布與不存在）；已登入同租戶＝「尚未發布」；已登入查不到＝網址錯或跨租戶。先問**登入了沒、同租戶嗎**再定方向 → `platform-behaviors.md` §6.2 |
 | 前端 toast「輸入內容格式不正確，請檢查後重試」 | 平台前端把 422 的 pydantic 陣列收斂成通用提示（2026-09 起；只有 backend validator 自寫的 `value_error` 訊息原樣顯示）。**API 回應的 `detail` 仍是完整的**——開 network 看 response，別叫用戶重填 |
-| Storage `413`／`403「無權存取此路徑」`／`list` 對不到剛傳的檔 | 413 有兩個來源（單檔 100 MB、整包 109 MiB）；403 是路徑逃出 app 前綴（含 `..`，2026-09-01 起）；`list` 非遞迴且 `folder` 要與上傳時同一個 → `custom-app-dev-guide.md` §12 坑表 |
+| Storage `413`／`403「無權存取此路徑」`／`list` 對不到剛傳的檔 | 413 有兩個來源（單檔 100 MB、整包 109 MiB）；403 是路徑逃出 app 前綴（含 `..`，2026-09-02 起）；`list` 非遞迴且 `folder` 要與上傳時同一個 → `custom-app-dev-guide.md` §12 坑表 |
 | Hosted App `PUT /runtime-settings` 回 422 `RESOURCE_LIMIT_EXCEEDS_MACHINE`／403 `RESOURCES_REQUIRE_DEDICATED_NODES` | per-app 執行上限超過租戶機型單台可用量（body `hint_instance_type` 是最小裝得下的規格）／共用池租戶不能設 `resources`。租戶到「運算資源」頁換規格或開專屬機器，app 端無解 → `hosted-apps.md` §4.1 |
 | Hosted App rollout 失敗 `exec /usr/bin/caddy: operation not permitted` | 執行檔帶 file capability、容器 `drop ALL`。只需 `NET_BIND_SERVICE` 的（caddy／nginx-unprivileged）平台已恆補（UAT 09-05、prod v1.13.0）；仍撞到＝該二進位要別的 cap，換掉它 → `hosted-apps.md` §2 |
 | Hosted App 建 app 回 429 `hosted_app_quota_exceeded` 說 app 數超額 | 租戶 app 數配額已於 v1.13.0 移除（只剩建置時限那條 429）；仍看到 app 數超額訊息就回報平台 → `hosted-apps.md` §10 |

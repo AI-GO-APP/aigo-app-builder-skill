@@ -4,6 +4,29 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.30.1
+
+### PR #46 審查回修：hide 欄位狀態碼、CHANGELOG 結構、Hosted 兩處自相矛盾、測試租戶識別
+
+對 1.30.0 逐條回對平台原始碼後的修正，全部是文件面，`scripts/` 未動：
+
+- **hide 欄位進 `filters`／`order_by` 的狀態碼寫錯**（`custom-app-dev-guide.md` §27.2 兩處、
+  `troubleshooting.md` 一列）：原文寫 403 `policy_invalid`；核自 `app_data_proxy.py`——`filters`／search
+  指到 hide 欄位回 **400「未授權的篩選欄位」**（與欄位不存在同形），`order_by` 指到 hide 欄位被
+  **靜默略過**退回預設排序；`policy_invalid` 只在規則自身引用越權欄位、或所有可投影欄位全被 hide 時出現
+- **1.30.0 節結構**：「實打」小節誤插在清單中間，三顆 bullet 與一顆縮排子項被切到小節底下——歸位
+- **`hosted-apps.md` §11**：restart／interpret 列補「v1.13.0 已補」，與 redeploy 列一致；**§3.4** 改為
+  「正向半邊已實打、負向半邊未實打」，不再與 §3.2 矛盾
+- **測試租戶識別**：1.30.0 新增的四處「demo 租戶」改回「測試租戶」（README 既有的網址範例未動）
+- **順手修的三個日期**（各差一天，核自平台 git log）：Storage 路徑逃出 403 是 09-02（#1371）、
+  413／401 兩條是 09-04（#1441）、深連結與「找不到此應用」三層是 09-03（#1424）
+- **§15.1 同形 404 範圍收窄**：pub 面與 app 使用者 token 兩條路徑字串同為「App 不存在或尚未發布」；
+  發終端使用者憑證的 auth 入口回「App 不存在」——同 404、字串不同，判斷用狀態碼
+
+未動的兩條（待決）：`CUSTOM_DATA_SDK.updateRecord()` 仍送 PUT 到只收 PATCH 的 `/data/records/{id}`
+（#1416 未修到，skill 也未提）；平台 09-08 已出 v1.13.1，prod 是否已切未查。
+
+
 ## 1.30.0
 
 ### 對齊平台 2026-09-01～09-07 main（v1.13.x）：Auth gate、匿名核可、timeout 上限、CodeBuild、per-app 資源
@@ -72,9 +95,16 @@ ops-only）與「程式在、行為未實打」的少數項目另行標明。
     `lastTerminatedReason`「有狀況」標記與五種原因的白話對照（T48）
   - 檔頭「部署落差」段改寫：prod＝v1.13.0，2026-09-01／02 的 404 清單標為已補齊的歷史紀錄，
     另列兩條靠旗標不靠版本的能力；troubleshooting「端點 404」列改為以 prod `openapi.json` 為判準
+  - 檔頭部署落差段補 2026-09-07 main 三塊的判讀提示
 - `platform-behaviors.md` §12：`api-grants` 端點 v1.13.0 起 prod 已有（2026-09-01 的 404 紀錄改為歷史）
+- **平台行為補遺**（`platform-behaviors.md`）：§1.5 proxy 面新增 `not_in`（第 12 個運算子）；
+  §6.2 新段——深連結 `?next=` 承載 search+hash（2026-09-02 起 HashRouter 頁面狀態可分享）與
+  「找不到此應用」依身分三層；§12 末補人軸／app 軸兩條線的指引
+- troubleshooting 另補：整頁「資料存取暫停」、restrict 少列少欄是預期、前端 422 通用提示
+  （API `detail` 仍完整）、深連結落首頁＝部署落差、「找不到此應用」先問登入與租戶、
+  Hosted 記錄頁 `idle` 不是「沒問題」
 
-### 2026-09-08 prod demo 租戶實打（自清，建的 app 全刪）
+### 2026-09-08 prod 測試租戶實打（自清，建的 app 全刪）
 
 以本版文字為腳本逐項對打，全部與文件一致，實測值回填到各節「實打」註記：
 
@@ -91,14 +121,6 @@ ops-only）與「程式在、行為未實打」的少數項目另行標明。
 - 新增兩條文件沒寫清的坑：storage `path` 必須是完整 key（相對路徑 403 不是 404）、
   `app-scoped-token` 打不了 `/ext/storage`（401）；`refs` 的 `columns` 空陣列＝之後查詢恆 400
 - 未實打（負向案例）：CodeBuild OOM／無日誌矩陣、rollout 起不來落 `failed`、gate on 時的 403 body（prod off）
-  - 檔頭部署落差段補 2026-09-07 main 三塊的判讀提示
-- **平台行為補遺**（`platform-behaviors.md`）：§1.5 proxy 面新增 `not_in`（第 12 個運算子）；
-  §6.2 新段——深連結 `?next=` 承載 search+hash（2026-09-02 起 HashRouter 頁面狀態可分享）與
-  「找不到此應用」依身分三層；§12 末補人軸／app 軸兩條線的指引
-- troubleshooting 另補：整頁「資料存取暫停」、restrict 少列少欄是預期、前端 422 通用提示
-  （API `detail` 仍完整）、深連結落首頁＝部署落差、「找不到此應用」先問登入與租戶、
-  Hosted 記錄頁 `idle` 不是「沒問題」
-
 ## 1.29.0
 
 ### 回報：開單前查既有卡（preflight，第一階段只記錄）
