@@ -214,8 +214,8 @@ records 平面的三個契約（自己寫 client 時最常踩；2026-09-02 實�
 
 ### 前端 SDK（`src/api.ts`，Custom App 內）
 
-> ⚠️ **先確認適用範圍再用（§7.5）**：前端 SDK 只適用 **external app**、
-> 或受眾全員持有 `builder.access` 的開發工具型 app。
+> ⚠️ **先確認適用範圍再用（§7.5）**：前端 SDK 只適用受眾全員持有 `builder.access` 的開發工具型 app
+> （以及判進 external 的例外 app，SDK 自動分流 `/ext/data-center`）。
 > **internal app 的自建表存取一律包成 Server Action（`ctx.db.*`）**，
 > 前端走 `runAction`——直呼下面這些方法，一般員工執行期必 403。
 
@@ -284,8 +284,8 @@ def execute(ctx):
 ### 正確寫法（新開發）
 
 - internal app：自建表讀寫**一律**包 Server Action，前端 `runAction`。
-- 前端 SDK 僅限兩種情境直呼：external app（SDK 自動分流 `/ext/data-center`）、
-  或受眾全員持有 `builder.access` 的開發工具型 app。
+- 前端 SDK 僅限受眾全員持有 `builder.access` 的開發工具型 app 直呼
+  （判進 external 的例外 app 由 SDK 自動分流 `/ext/data-center`，不在此閘）。
 - 受眾在 Phase 1.5 計畫階段就要確認（SKILL.md 核心規則 31）。
 
 ### 存量 app 修復流程

@@ -7,7 +7,7 @@
 - VFS（Virtual File System）：以 JSON `{"路徑": "內容"}` 儲存原始碼
 - esbuild 編譯器：React TSX → JS bundle
 - Runtime 沙箱：在 Shadow DOM 隔離環境中執行
-- 三種模式（access_mode）：`internal`（組織內部）/ `external`（對外客戶）/ `self_built`（第三方自建應用，走 API Key 存取 Proxy）
+- 三種模式（access_mode）：`internal`（有登入者一律用它——內外部人員都是租戶成員，用角色分流）/ `external`（例外：匿名頁必須留在 Custom App 內時）/ `self_built`（第三方自建應用，走 API Key 存取 Proxy）
 - 匿名存取：功能旗標（`allow_anonymous_access` + `is_public_readable`），走 /pub/* 端點（見 §15）。**`internal` app 不可啟用**（400），僅 `external` / `self_built` 可以
 - 語言選擇：TypeScript（前端）+ Python（後端），為 AI Coding 最佳化的精選組合（詳見 §21）
 - 資料架構：統一走 API 存取，不直連資料庫——避免結構混亂（詳見 §21）
@@ -321,6 +321,11 @@ action 路徑約定不變：`actions/**.py` 是可呼叫 action（`action_name` 
 
 ## 14. External Auth API
 
+> **只對判進 `starter-external` 的例外 app 有意義**（進入條件：匿名頁必須留在 Custom App 內，
+> `product-line-decision.md` §3 問題一）。要讓外部經銷商／客戶登入**不是**走這裡——
+> 他們是租戶成員，用角色與 `access_role_ids` 分流（`member-admin.md` §0）。
+> 本節只有終端使用者自助註冊／登入，**沒有邀請、預建、角色**。
+
 端點前綴：`/api/v1/custom-app-auth/{slug}/`
 
 - POST `.../register` → 註冊
@@ -335,6 +340,9 @@ action 路徑約定不變：`actions/**.py` 是可呼叫 action（`action_name` 
 Auth SDK：`window.__auth__.login()`, `.register()`, `.logout()`, `.getToken()`
 
 ### 14.1 邀請平台使用者直達 App（internal app 的成員邀請）
+
+> 批次邀請、角色 CRUD、`access_role_ids`、四個邊界與 403 解讀的完整 playbook 在 `member-admin.md`；
+> 本節只留 app 內「邀請按鈕」要知道的契約。
 
 邀請成員時**指定落點**，受邀者完成註冊後直接進 App（不指定會落到 dashboard）：
 
@@ -1290,8 +1298,8 @@ POST /api/v1/builder/apps          （權限：builder.access）
 
 | slug | access_mode | 情景 |
 |---|---|---|
-| `starter-internal` | `internal` | **租戶成員用的內部工具**。登入者＝平台成員，Runtime 注入權限快照（`__USER_ROLES__`／`__USER_PERMISSIONS__`），沿用平台角色權限（規則 23） |
-| `starter-external` | `external` | **對外應用**。終端使用者透過 custom-app-auth 自助註冊／登入（§14），權限快照恆空、UI 要有降級路徑；執行期 API 走 `/ext/*`（SDK 自動分流）；可開匿名 `/pub` |
+| `starter-internal` | `internal` | **預設，凡有登入者都是它**。登入者＝租戶成員（員工、外部經銷商、客戶都算），Runtime 注入權限快照（`__USER_ROLES__`／`__USER_PERMISSIONS__`），沿用平台角色權限（規則 23）；誰能開由 `access_role_ids` 決定（`member-admin.md` §3） |
+| `starter-external` | `external` | **例外**：只在「匿名頁必須留在 Custom App 內」時（`product-line-decision.md` §3）。終端使用者自助註冊／登入（§14），權限快照恆空、UI 要有降級路徑；執行期 API 走 `/ext/*`（SDK 自動分流）；匿名 `/pub` 要平台核可（§15.1）。**不是給外部人員登入用的模式** |
 
 - **`access_mode` 由模板決定**——body 裡的 `access_mode` 欄位是殘留 fallback，
   模板必填所以恆被模板蓋掉。建立後不可改模式，選錯要砍掉重建

@@ -232,6 +232,17 @@ def permission_for(method: str, path: str) -> str | None:
         return "datacenter.schema_write" if m in MUTATING else "builder.access"
     if path.startswith("/api/v1/imports"):
         return "system.data_import"
+    # 成員／角色管理線（references/member-admin.md §2；核自 api/invitations.py、members.py，2026-09-08）
+    if path.startswith("/api/v1/invitations"):
+        return "system.invitations"
+    if path.startswith("/api/v1/members/roles"):
+        return "system.roles_manage"
+    if path.startswith("/api/v1/members"):
+        return "hr.member_manage" if m in MUTATING else "hr.read"
+    if path.startswith("/api/v1/hosted-apps") and path.endswith("/access-settings"):
+        return "hosted_apps.deploy"
+    if path.startswith("/api/v1/builder/apps") and path.endswith("/settings"):
+        return "builder.manage_access"
     if path.startswith("/api/v1/erp"):
         return "system.reference_data"
     if path.startswith("/api/v1/exports"):

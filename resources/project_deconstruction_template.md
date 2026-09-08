@@ -12,7 +12,8 @@
 | 技術棧（前端 / 後端 / DB） | |
 | stack 形狀結論（§2.0） | 純前端 / 有後端、可改寫 / 有後端、整搬 |
 | 前端面向（§2.0） | 應用介面 / 公開 web 資產（官網、電商 storefront） |
-| 產品線判斷結果（§2.1） | Custom App internal / Custom App external / Hosted App |
+| 產品線判斷結果（§2.1） | Custom App internal / Hosted App internal / Hosted App public（無登入者的公開站）／混合 |
+| 使用者群 → 角色（`member-admin.md` §1） | |
 | 對應 AI GO App | |
 
 ## 元件落點對照（Custom App 線）
@@ -51,16 +52,17 @@
 原專案的 `users`／`accounts` 表**不進** `migration_mapping_template.md` 的映射流程。
 把它建成自建表 = 在 app 內另建一套帳號體系，正是 SKILL.md 規則 23 禁止的反模式。
 
-| 產品線判斷結果 | 使用者的去向 | 既有帳號怎麼辦 |
-|---|---|---|
-| Custom App **internal** | 平台租戶成員 + 平台角色權限 | 逐一（或請管理員批次）用成員邀請把人請進租戶，可指定落點直達 App（dev-guide §14.1）；app 內**不建**使用者表 |
-| Custom App **external** | custom-app-auth 自助註冊／登入（dev-guide §14） | **密碼 hash 無法遷移**——請既有使用者重新註冊（或走「首次登入重設密碼」的溝通流程）。目前無批次預建帳號的公開 API；帳號量大時先回報平台確認方案再開工 |
-| Hosted App internal | 平台 proxy 代處理登入（hosted-apps.md §6） | 同 internal：人要先是租戶成員 |
-| Hosted App public | app 自理（原認證系統跟著原始碼一起搬） | 原 users 表跟著 app 的 DB 走（§7.1），平台不介入 |
+**人一律成為租戶成員**——員工、外部經銷商、客戶都一樣，差別只在角色（`member-admin.md` §0／§7）：
 
-使用者表上「跟著人走的業務欄位」（偏好設定、等級、標籤…）另拆出來：
-internal → 存自建表、以平台 user id 當 key；external → 同樣存自建表、
-以 external auth 的 user id 當 key。
+| 原系統的登入者 | 使用者的去向 | 既有帳號怎麼辦 |
+|---|---|---|
+| 員工 | 租戶成員＋既有角色 | 已是成員的不用動；不是的用邀請 API 批次請進租戶，落點直達 App（`member-admin.md` §4） |
+| 外部經銷商／客戶／夥伴 | 租戶成員＋新開的外部角色（`category` 標 External，permissions 從空集合起步） | 名單從原 users 表匯出 email／name → 建角色 → 批次邀請、落點指定 App；**密碼 hash 不遷**，受邀者走連結設新密碼——溝通流程先寫進計畫 |
+| Hosted App **public** 站的匿名訪客 | 不是使用者，不遷 | 原站若有會員登入：優先評估改 Hosted internal＋外部角色；確需 app 自理才連原認證一起搬（`hosted-apps.md` §7.1） |
+
+原系統的「群組／角色」表 → 對映成平台角色（`member-admin.md` §5），不建成自建表。
+使用者表上「跟著人走的業務欄位」（偏好設定、等級、標籤…）另拆出來存自建表、以**平台 user id** 當 key。
+產出填進計畫的**授權架構表**（`member-admin.md` §1）。
 
 ## DB 層邏輯（trigger / view / RLS / stored procedure / edge functions）
 

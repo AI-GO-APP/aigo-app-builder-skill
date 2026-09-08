@@ -101,8 +101,11 @@ SDK 雙軌並存所以存量 app 不會壞；舊模型與端點尚未移除。
 
 ## App 模式
 
-- **access_mode**：`internal`（組織內部）／`external`（對外客戶）／
-  `self_built`（第三方自建應用，走 API Key 存取 Proxy）
+- **access_mode**：`internal`／`external`／`self_built`（第三方自建應用，走 API Key 存取 Proxy）。
+  **有登入者一律 `internal`**——AI GO 帳號體系是內外人員共用的，員工、外部經銷商、客戶都是
+  租戶成員，用**角色**分「能做什麼」、用 app 的 **`access_role_ids`** 分「看得到哪支 app」
+  （`member-admin.md` §0）。`external` 只對應「匿名頁必須留在 Custom App 內」這一種例外，
+  不是「給外部人用」的意思。Hosted App 同理：有登入者 `visibility=internal`，`public` 給無登入者的公開站。
 - **匿名存取**：功能旗標（`allow_anonymous_access` + `is_public_readable`），走 `/pub/*` 端點。
   **不是 access_mode 的一種**，而且**只有 `external` / `self_built` 可以啟用**——
   `internal` app 開匿名存取回 400。**開旗標≠可對外服務**：還要送

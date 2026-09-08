@@ -12,6 +12,7 @@
 | **自建表** | `/api/v1/data-center/tables/{key}/records` 記錄 CRUD；結構操作另有端點 | 記錄 CRUD `builder.access`；建改結構 `datacenter.schema_write`；刪表刪欄 `system.admin` | `aigo_data_center.py`（已封裝） |
 | **批次匯出／匯入** | `POST /api/v1/exports` → 輪詢 → `/download`；`/api/v1/imports`（csv／excel／json，有對應引擎） | 匯出：該表模組的 read；匯入：`system.data_import`（admin 直通） | `aigo_data.py export`；匯入走平台 UI |
 | **結構與值域** | `/api/v1/data-center/meta/tables`（193 張：85 預設＋108 自建）、`/meta/tables/{key}` | 登入即可 | `aigo_data.py meta` |
+| **成員／邀請／角色／app 角色白名單** | `/api/v1/invitations`、`/api/v1/members`、`/api/v1/members/roles`、`PATCH /builder/apps/{id}/settings`、`PUT /hosted-apps/{id}/access-settings` | `system.invitations`／`hr.member_manage`／`system.roles_manage`／`builder.manage_access`／`hosted_apps.deploy` | `aigo_data.py call`；流程與邊界見 `member-admin.md` |
 
 沒有「表名 → 記錄」的通用端點給登入使用者用在預設表上：`/proxy`、`/unified`、`/open/proxy` 都要 app 或整合 id
 並走 Data Reference 授權。預設表的使用者身分路徑**就是各模組 REST**。
@@ -93,9 +94,22 @@
   送 physical_name 會 failed「badly formed hexadecimal UUID string」。自建表整表取出用
   `call GET /api/v1/data-center/tables/{key}/records --all`
 - 不在白名單的預設表（如客戶）：`call GET /api/v1/client --all --out customers.json`
-- 匯入：`/api/v1/imports` 上傳 csv／excel／json → profiling → 對應引擎建議 → 人工定稿 → 背景寫入；
-  `system.data_import` 限定。有 UI 流程與覆核，**建議引導用戶走平台介面**而不是腳本硬灌；
-  逐筆 API 寫入只適合小量或需要程式邏輯的情況
+- **匯入（`/api/v1/imports`，`system.data_import` 限定；核自 `api/imports.py`、`services/import_*.py`，
+  2026-09-08 main）**——批次灌資料的**首選路徑**，AI IDE 可以代跑整條 API，映射定稿仍給用戶覆核：
+  - 格式 csv／xlsx／xls／xlsm／json；單次 ≤20 檔、單檔 ≤50 MB、總量 ≤200 MB、單來源 ≤10 萬列
+    （413／400 訊息會直接說拆檔或分批）
+  - **目標三種**：既有預設表（`existing_table`）、**既有自建表**（`self_built_table`，依欄位去重）、
+    **自動新建自建表**（`new_table`，每個來源檔建一張）；對不到欄的來源欄走延伸欄位（EAV）第二 pass。
+    prod 三條路徑都已開（`IMPORT_TIER3_WRITE_ENABLED`／`IMPORT_TIER2_EAV_ENABLED` 皆 true，核自 k8s manifest）。
+    憑證／金流類敏感表在 denylist，映射不到
+  - 流程：`POST /imports`（multipart 上傳，回 job 與 profiling）→ `POST /{job}/suggest-mapping`
+    → `GET|PUT /{job}/mapping`（定稿；改目標表用 `/mapping/retarget`）→ `POST /{job}/execute` → `GET /{job}` 輪詢
+  - **引導用戶「匯出檔案丟給 AI IDE」而不是給 DB 連線字串**：檔案走這條有 profiling、去重與覆核；
+    DB 直連只能在本地做（`custom-app-dev-guide.md` §23.6），只在需要 ID 映射、FK 轉換或遷後持續同步時才要，
+    且要求唯讀帳號、用完撤銷；Supabase 直接走 REST 匯出，不必給連線字串
+  - 使用者／認證表不進匯入（`member-admin.md` §7）；目標預設表掛簽核流程時先按 dev-guide §23.1 處置
+  - 逐筆 API 寫入（`call POST`／`aigo_data_center.py insert_record`）只適合小量或需要程式邏輯的情況，
+    仍過 §3.5 閘門
 
 ## 6. 這條線不做的事
 

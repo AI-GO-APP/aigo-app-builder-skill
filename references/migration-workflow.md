@@ -46,7 +46,9 @@
    - 確定遷入順序：主資料（客戶、產品）先於交易資料（訂單、案件），無依賴者先行
 
 5. **產出：遷入全景表**
-   - 格式：`| 外部系統 | stack 形狀（§2.0） | 產品線（Custom / Hosted） | 模式（internal / external / visibility） | 對應 AI GO App | app_domain | 遷入順序 | 語意重疊的表 |`
+   - 格式：`| 外部系統 | stack 形狀（§2.0） | 產品線（Custom / Hosted） | 模式（模板 slug / visibility） | 對應 AI GO App | app_domain | 使用者群 → 角色 | 遷入順序 | 語意重疊的表 |`
+   - 「使用者群 → 角色」欄跨系統彙整：同一批人（例如經銷商）在多個系統出現時只開一個角色，
+     不要每系統各開一個（`member-admin.md` §1）
    - 此表在後續各 App 的 Phase 1.5 中持續參照
 
 ---
@@ -88,10 +90,12 @@
 > 取代新建線的需求形狀。先問使用者是誰，再看 stack 形狀——模式選錯要砍掉重建，
 > 技術形狀選錯頂多多花工。
 
-**問題一：原系統的登入使用者是誰？**
-→ 內部成員 = **internal**；外部客戶／會員／公眾 = **external**；
-兩者都有（員工後台 + 客戶前台）= **拆成兩個 App** 各走各的線。
-拿不準就直接問「這系統現在是誰在登入」，不可用預設值帶過。
+**問題一：原系統有哪些登入者？有沒有不登入就能看的部分？**
+→ 有登入者（員工、外部經銷商、客戶都算）= **internal**，人一律成為租戶成員、用角色分流
+（誰能開、掛什麼角色留給計畫第 1.7 項，`member-admin.md` §1、§7）；
+只有匿名訪客 = **Hosted public**；兩者都有（登入後系統 + 匿名可看的頁）= **拆**：匿名部分 Hosted public、
+登入部分 internal。原系統有「客戶帳號」不是 external 的理由——那些客戶邀進租戶掛外部角色。
+拿不準就直接問「這系統現在有哪些人登入、有沒有不登入就要看的頁」，不可用預設值帶過。
 
 **問題二：§2.0 的 stack 形狀結論＋前端面向是哪一種？**
 
@@ -215,8 +219,9 @@
 
 ## 3. 詳細參考
 
-- Custom vs Hosted 差異表 → `hosted-apps.md` §1；起手式模板（internal/external）→ `custom-app-dev-guide.md` §26.1
+- Custom vs Hosted 差異表 → `hosted-apps.md` §1；起手式模板 → `custom-app-dev-guide.md` §26.1
 - 專案解構清單模板（元件落點、使用者表處理）→ `resources/project_deconstruction_template.md`
+- 使用者搬遷（人一律成為租戶成員、角色對映、批次邀請）與授權架構表 → `member-admin.md` §1、§4、§7
 - Schema 映射決策框架、語意重疊表的合併／分離、外鍵處理 → `custom-app-dev-guide.md` §22
 - 遷移策略矩陣、批次匯入範例、ID 體系轉換、驗證 checklist → `custom-app-dev-guide.md` §23
 - 資料抽取路徑、型別降級對照 → `custom-app-dev-guide.md` §23.6／§23.7
