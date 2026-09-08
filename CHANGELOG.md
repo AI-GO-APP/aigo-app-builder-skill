@@ -4,6 +4,70 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.31.0
+
+### 授權架構選型成為計畫必含項：內外人員共用帳號體系、以角色區分；external 收成匿名頁例外；成員／角色 playbook（issue #48）
+
+對 ai-go `main`（2026-09-08，v1.13.1 之後）逐條核對後的結構性調整。立場一句話：**AI GO 的帳號體系是
+內外人員共用的**——員工、外部經銷商、客戶都是租戶成員，用**角色**分「能做什麼」、用 app 的
+**`access_role_ids`** 分「看得到哪支 app」；「誰在登入」不再決定 app 模式，**有登入者一律 internal**。
+
+- **新 `references/member-admin.md`**（吸收 issue #48）：§0 立場；§1 授權架構選型三問與**授權架構表**；
+  §2 邀請／成員／角色／app 白名單端點與權限、後端子集規則；§3 `access_role_ids` 兩條產品線對照
+  （Custom `PATCH /builder/apps/{id}/settings`、Hosted `PUT /hosted-apps/{id}/access-settings`；
+  Hosted `internal`＋空＝全租戶成員；不在名單者 404「App 不存在」）；§4 批次邀請固定流程與四個邊界、
+  `redirect_url` 白名單（含 `/app-login/`、`/hosted-app-handoff/`）；§5 角色 CRUD；
+  §6 Hosted internal 容器收到的四個身分 header（`X-Aigo-User-Id`／`Tenant-Id`／`App-Id`／`Population`，
+  **無 roles／permissions**，核自 `infra/auth-proxy`）；§7 既有系統使用者搬遷；§8 403 解讀；§9 不做的事
+- **SKILL.md**：源頭意圖分流表加「成員／角色管理」一列；§1.0 問題一改問**使用者群**與匿名頁；
+  1.5 改「登入者一律 internal」並加 Hosted 當 Custom 後端一條；**新增計畫第 1.7 項「授權架構選型」**
+  （產出授權架構表，計畫閘門要求）；第 2 項拆分理由移除「員工後台＋客戶前台拆 internal/external」；
+  第 3 項受眾改承接 1.7；計畫確認後多一步「建角色、設白名單、發邀請」；規則 23 補「外部人員也是
+  租戶成員」；規則 31 前端 SDK 直呼收成一種常態；里程碑驗證加角色白名單實測；description 加授權架構
+- **`product-line-decision.md`**：訊號表移除「使用者兩者都有→兩個 Custom App」；問題一改「有沒有登入者、
+  誰是匿名的」，`starter-external` 只剩一個進入條件（匿名頁必須留在 Custom App 內）；四象限改「有登入者
+  ／只有匿名」；§5 新增 **Hosted 當 Custom 後端 → `public`＋自驗簽章**（internal proxy 要 cookie，
+  Server Action 打不進；帶憑證 CORS 平台不支援）；§6 補「使用者不跟著程式搬」
+- **`hosted-apps.md`**：§6 補 `access_role_ids` 欄位語意、四個身分 header、handoff 落點；
+  **新 §5.1** Hosted 當 Custom 後端的做法；§11 指標改指 member-admin
+- **`migration-workflow.md`**：§1 全景表加「使用者群 → 角色」欄；§2.1 問題一改寫（原系統有客戶帳號
+  不是 external 的理由）；§3 加使用者搬遷指標。**`project_deconstruction_template.md`** 使用者／認證表
+  改成「人一律成為租戶成員」三列。**`new_app_requirements_template.md`** §一改盤使用者群、新增授權架構表
+- **`custom-app-dev-guide.md`**：§1 模式說明、§14 加定位註記（只對例外 app 有意義、無邀請／預建／角色）、
+  §14.1 指向 member-admin、§26.1 模板表改「internal 預設、external 例外」
+- **`data-operations.md`**：§1 加成員／角色列；§5 匯入節改寫——`/api/v1/imports` 是**預設表**批次灌資料的首選：
+  csv／xlsx／json、≤20 檔、單檔 50 MB、總量 200 MB、單來源 10 萬列；狀態機（**PUT mapping 定稿＝立刻派送**，
+  execute 只是重派）、`table_required_columns` 必填預警、retarget 只能在候選集內、同檔重匯不去重；
+  **自建表目標（`self_built_table`／`new_table`）在 prod 被 import-worker 靜默 parked**（旗標只給 API pod，
+  worker 沒有）→ 自建表改走本地腳本；引導用戶「匯出檔案丟給 AI IDE」而不是給 DB 連線字串
+- `data-center.md` §7 兩處、`CONTEXT.md` App 模式、`README.md` Phase 1.5、`verification-details.md`
+  第 6／7 項、`troubleshooting.md` 新增三列（特定使用者 404、邀請／建角色 403 子集規則、外部人員
+  `policy_denied`）同步立場
+- **`scripts/aigo_data.py`** `permission_for` 補 invitations／members／roles／access-settings／settings 五組
+  推估（離線測試通過）
+
+### 2026-09-08 測試租戶實打（擁有者帳號；建的角色／app／hosted app／匯入資料全部清掉）
+
+- **角色**：`GET /members/roles` 回 `{items}` 含 `user_count`／`access_whitelist_count`；建 201；同名 409
+  「資料重複：相同的唯一值已存在。」；不存在的權限字串 **400**「不允許的權限：xxx」（不是 403）；
+  刪角色回 `access_whitelist_cleaned`／`locked` 計數；`system.admin` 可改系統角色（200）
+- **邀請**：`POST /invitations` 回 `{token, chat_invite_link, user_id: null}`，落點 `/app-login/{slug}` 直達；
+  `redirect_url` 三種 422 字串（含 `?`／`#`、不在白名單、含中文）；缺 email 422「invitations require either
+  user_id or email」；不存在的角色 400「角色不存在或不屬於此租戶：<id>」；同 email 重發舊張 `status: expired`、
+  `expires_at`＝48h；`DELETE` 204、不存在 404「Invitation not found.」；**`POST /members` 不寄信時回 `id: null`**
+  （受邀者註冊前沒有成員列）
+- **白名單**：Custom `PATCH /builder/apps/{id}/settings` 200 讀回一致；非 UUID 400「access_role_ids 含無效的角色 ID
+  （需為 UUID 格式）」；internal 開匿名 400「Internal App 不支援匿名存取」。Hosted `PUT /access-settings`
+  `internal`＋角色 200；`public`＋角色 **422「public visibility 不可搭配 access_role_ids」**
+- **匯入**：existing_table（suppliers）3 列 10 秒 `completed`；self_built_table 與 new_table **parked**（見上）；
+  必填欄缺值整批 `failed`＋逐列 `error_detail`；副檔名不支援回 200 但 job `failed`；同檔重匯 6 列不去重；
+  worker 冷啟動 40 秒～1.5 分鐘
+- `aigo_data.py perm-check` 五組新路徑推估與實際權限一致
+
+未實打（測試租戶只有擁有者帳號）：子集規則 403 本體、受限帳號開 app 的 404、`PUT /members/{id}`、
+`resend-invite`、外部角色的 `policy_denied`、tier-2 欄位落延伸欄位——皆核自原始碼。
+
+
 ## 1.30.1
 
 ### PR #46 審查回修：hide 欄位狀態碼、CHANGELOG 結構、Hosted 兩處自相矛盾、測試租戶識別

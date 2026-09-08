@@ -9,7 +9,7 @@
 | **Phase -1** | Skill 自我更新檢查 — 比對遠端 `VERSION`，有新版時提示並徵詢是否更新（見「保持更新」） |
 | **Phase 0** | Review 現有 Code（強制） — 分析雲端 VFS 狀態、檔案分類、路由結構、CSS 合規性與 Server Actions |
 | **Phase 1** | 環境設定 — 帳號登入、取得 Token、初始化 `.aigo/config.json` |
-| **Phase 1.5** | 需求盤點與實作計畫（強制） — 新建情景四問＋Custom App 能力邊界核對、產品線與模式判斷（Custom / Hosted / 混合 × internal / external，不可逆）、app 分配表、資料架構雙軌分流；計畫確認後才建 app |
+| **Phase 1.5** | 需求盤點與實作計畫（強制） — 新建情景四問＋Custom App 能力邊界核對、產品線與模式判斷（Custom / Hosted / 混合，登入者一律 internal，不可逆）、app 分配表、授權架構選型（角色、app 角色白名單、邀請）、資料架構雙軌分流；計畫確認後才建 app |
 | **Phase 2** | 專案腳手架（單頁/多頁） — 從雲端 VFS 下載到本地，自動排除 SDK 保護檔 |
 | **Phase 3** | 開發指引（React 18 + TypeScript + Shadow DOM） — 元件開發規範、CSS 限制、Server Actions 撰寫 |
 | **Phase 4** | 部署（sync → compile → publish） — 差異同步、樂觀鎖版本控制、自動 CSS 修復 |

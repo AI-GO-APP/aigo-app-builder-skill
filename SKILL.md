@@ -3,8 +3,9 @@ name: aigo-builder
 description: >
   Use when working on an AI GO Custom App (ai-go.app)：開發前端（React + TypeScript）
   或 Server-Side Action（Python）、部署與驗證、從零規劃新 App（需求盤點、
-  Custom App／Hosted App 產品線判斷）、規劃資料架構（資料中心自建表 /
-  Data Reference）、接 Webhook 或設定 App 排程、將現有系統或整套專案
+  Custom App／Hosted App 產品線判斷）、規劃使用者授權架構（角色、app 角色白名單、
+  批次邀請內外部人員）、規劃資料架構（資料中心自建表 / Data Reference）、
+  接 Webhook 或設定 App 排程、將現有系統或整套專案
   （前端＋後端＋DB；Supabase / Google Sheet / MySQL 等）搬入／遷入 AI GO。
 ---
 
@@ -65,9 +66,10 @@ python scripts/check_update.py     # macOS / Linux 用 python3
 
 | 意圖 | 走法 |
 |------|------|
-| **開發新 App**（從零做新功能） | 走主流程（Phase 0 →），**但建 app 之前必先完成 Phase 1.5 §1.0 的需求盤點**（四問＋Custom App 能力邊界核對，對稱遷入線的 §2.0）——用戶開場的一句話是題目不是需求；產品線判斷（Custom／Hosted／混合）與 internal／external 在 Phase 1.5 定案後才建 app |
+| **開發新 App**（從零做新功能） | 走主流程（Phase 0 →），**但建 app 之前必先完成 Phase 1.5 §1.0 的需求盤點**（四問＋Custom App 能力邊界核對，對稱遷入線的 §2.0）——用戶開場的一句話是題目不是需求；產品線判斷（Custom／Hosted／混合）與授權架構（誰能開、掛什麼角色）在 Phase 1.5 定案後才建 app |
 | **現有 App 遷入**（有既存系統／repo／DB 要搬進 AI GO） | **先讀 `references/migration-workflow.md`，從 §2.0 的 stack 盤點做起**（架構師視角：先盤前端／後端／資料的結構，再分流產品線），之後才回主流程 |
 | **資料操作，不開發 app**（查、改、批次、匯出自己有權限的資料） | **走 `references/data-operations.md` 的短流程**：`aigo_auth.py status` → `aigo_data.py me` → `perm-check` → `openapi` 查路由 → `call`／`export`。不進 Phase 0 的 VFS review、不建 app、不走 proxy——用登入者自己的 token 與權限。**寫入前必過該檔 §3.5 的寫入閘門**——這條線打的是唯一一份正式資料，沒有沙箱也沒有還原路徑 |
+| **成員／角色管理，不開發 app**（批次邀請、建連結、開角色、改權限、設 app 角色白名單） | **走 `references/member-admin.md`**（§2 端點、§4 邀請流程、§5 角色 CRUD）：登入者本人的 JWT，不建 app、不走 `/open/*`；寫入同樣過 `data-operations.md` §3.5 閘門（邀請與改角色都是不可逆的正式資料） |
 
 **資料操作意圖的偵測訊號**：用戶要「查一下／改一批／匯出／灌資料」而沒有提到畫面、功能、
 app；或問「我有沒有權限看某表」。這條線的權限是使用者在平台介面上的權限：預設表依模組
@@ -243,8 +245,8 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
    - **既有 App**：進入 Builder → Custom Apps → 記下 App 的 UUID (`app_id`)
    - **新 App 可直接用 API 建立，不必走 UI**（2026-09-01 實測）：
      `POST /api/v1/builder/apps`，`name` + `template_slug` 必填——
-     `starter-internal`（租戶成員的內部工具）或 `starter-external`
-     （對外應用、終端使用者自助註冊）；
+     `starter-internal`（**預設，凡有登入者都是它**——員工與外部人員都是租戶成員，用角色分流）；
+     `starter-external` 只在計畫的 app 分配表明寫時才用（匿名頁必須留在 Custom App 內的例外）；
      **access_mode 由模板決定、建立後不可改**，回應的 `id` 就是 `app_id`。
      ★ **新建情景不在這裡臨場選模板**：先完成 Phase 1.5（§1.0 需求盤點 → 產品線與模式判斷
      → 計畫確認），模板 slug 照計畫的 **app 分配表**——計畫未確認前登錄表留空是合法狀態。
@@ -306,7 +308,7 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
 
 | # | 問什麼 | 為什麼非問不可 | 用戶答不出時給的選項 |
 |---|---|---|---|
-| 一 | **誰在用**——租戶內部成員、外部客戶／會員／公眾、還是兩者都有？ | 決定 `access_mode`——**建立後不可改，選錯砍掉重建**；「兩者都有」要拆成兩個 app | 「員工自己用的後台」／「客戶或會員會登入的前台」／「兩邊都有」 |
+| 一 | **誰在用**——列出**使用者群**（哪些部門的員工、外部經銷商、客戶、夥伴…），以及有沒有**不登入就要能看**的頁 | 使用者群餵第 1.7 項授權架構（每群一個角色、每支 app 一份角色白名單）；**凡有登入者一律 internal**，內外人員都是租戶成員，不因「有外部人」改模式；只有匿名頁才影響產品線（問題三） | 「只有員工」／「員工＋外部經銷商（或客戶）」／「還有不登入就要看的頁」 |
 | 二 | **做什麼**——功能清單、每個功能的使用場景與使用者流程、涉及哪些資料實體 | 計畫第 1 項全部來自這裡；資料實體清單餵第 3 項的雙軌分流 | 請用戶用「誰、在什麼時候、要完成什麼」各講一句 |
 | 三 | **對外面向**——需不需要自有網域、SEO、讓匿名訪客瀏覽整站？ | 公開 web 資產 → Hosted App；Custom App 的 `/runtime`＋HashRouter 做不了 SEO 與自有網域，`/pub` 只適合少數公開頁 | 「純內部、登入後才能用」／「有幾頁不登入也要看」／「整個站要對外、要自己的網址」 |
 | 四 | **機制需求**——逐條核對 `references/product-line-decision.md` §2 的 **Custom App 能力邊界表** | 命中的每一條是 Hosted 訊號或要改設計；**留到寫 code 才發現＝整段白做** | 把邊界表拿給用戶逐條勾 |
@@ -316,7 +318,7 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
 **產出：需求形狀結論**（照 `resources/new_app_requirements_template.md` 填，帶進 1.5）：
 
 ```
-使用者：internal / external / 兩者（→ 拆）
+使用者群：<群名清單>（有登入者 → internal；匿名頁 → 見面向）
 面向：應用介面 / 公開 web 資產 / 混合（→ 拆）
 邊界命中：<條目，每條標「Hosted」或「改設計」>；或「無」
 功能群：<群名 → 功能清單>（2 群以上不同目的 → 第 2 項拆分）
@@ -331,43 +333,62 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
    - 每個功能的目標使用場景
    - 預期的使用者流程
 
-1.5. **產品線與模式判斷**（Custom App vs Hosted App × internal vs external；★ 結果不可逆）
+1.5. **產品線與模式判斷**（Custom App vs Hosted App；登入者一律 internal；★ 結果不可逆）
    - **SSOT 在 `references/product-line-decision.md`**，兩條路共用——判斷前讀它
-   - **預設立場：一個 Custom App**。新建 app 絕大多數就是這個答案；只有命中訊號才偏離：
-     功能群目的不同 → 多個 Custom App；使用者「兩者都有」→ internal + external 各一；
+   - **預設立場：一個 Custom App `starter-internal`**。新建 app 絕大多數就是這個答案；只有命中訊號才偏離：
+     功能群目的不同 → 多個 Custom App；
      公開 web 資產（自有網域／SEO／整站匿名）→ Hosted App；邊界表命中「Hosted」→ Hosted 或**混合**
      （業務介面 Custom ＋ 命中的部分獨立 Hosted，共用資料落平台側、Hosted 走 Open Proxy）
-   - **兩問定位，先問使用者、再看形狀**：問題一「誰在登入」定 internal／external
-     （新建取 §1.0 問題一；遷入問原系統）；問題二「形狀」定 Custom／Hosted／混合
+   - **使用者有內有外不改模式、不拆模式**：員工與外部經銷商／客戶都是租戶成員，差別在角色與
+     app 角色白名單（第 1.7 項）；要拆也是拆成兩支 internal app 各掛不同 `access_role_ids`
+   - **兩問定位，先問有沒有登入者、再看形狀**：問題一「有登入者嗎、誰是匿名的」——有登入者 → internal，
+     只有匿名 → Hosted public，兩者都有 → 拆（新建取 §1.0 問題一；遷入問原系統）；
+     問題二「形狀」定 Custom／Hosted／混合
      （新建取 §1.0 的面向＋邊界命中；遷入取 §2.0 的 stack 形狀，對照表在 `migration-workflow.md` §2.1）
    - **不可逆與硬前提**：`access_mode` 由模板決定、建立後不可改 → **app 等本計畫確認後才建**；
-     `internal` 不能開匿名（400）→「內部工具想給訪客看一頁」要在此刻攤開；
-     external 開匿名**還要平台核可、無 SLA**（dev-guide §15.1）→ 排程時列成「等平台」的一步；
-     拿不準 Custom vs Hosted 給 `hosted-apps.md` §1 差異表選，拿不準 internal vs external 回頭問，
-     **不可用預設值帶過**
+     `internal` 不能開匿名（400）→「內部工具想給訪客看一頁」要在此刻攤開：拆成 Hosted public 靜態頁，
+     拆不成才落到 `starter-external` 這個例外，且匿名**還要平台核可、無 SLA**（dev-guide §15.1）
+     → 排程時列成「等平台」的一步；拿不準 Custom vs Hosted 給 `hosted-apps.md` §1 差異表選，
+     拿不準有沒有匿名頁回頭問，**不可用預設值帶過**
+   - **Hosted 當 Custom 的後端**（常駐進程接在 Custom 介面後面）→ Hosted 設 `public` ＋ 自驗簽章，
+     `internal` 的 proxy 會把 Server Action 的呼叫導去登入（`product-line-decision.md` §5）
    - 判走 Hosted App 的 app → `references/hosted-apps.md`，不走本 skill 的 Phase 2–4；
      「Hosted = 整套搬」指程式不指資料，業務資料一律落平台的表（`hosted-apps.md` §7.1）
    - **產出：app 分配表**（每個 app 一列，寫進計畫、確認後照表建 app）
      `| alias | 產品線 | 模式（模板 slug / visibility） | 負責的功能群 | 拆分理由 |`
      ——預設情況就是一列 `| <alias> | Custom | starter-internal | 全部 | — |`
 
+1.7. **授權架構選型**（★ 強制；SSOT 在 `references/member-admin.md` §1，兩條路共用）
+   - **立場**：AI GO 帳號體系是內外人員共用的——凡要登入的人都是租戶成員，用**角色**分「能做什麼」、
+     用 app 的 **`access_role_ids`** 分「看得到哪支 app」。不在 app 內另建使用者表、角色表、登入流程
+   - **三問**：① 使用者群有哪些 → 每群一個角色（沿用或新開，新開的 permissions 必須是建立者權限的子集）；
+     ② 每支 app 誰能開 → `access_role_ids`（空＝全租戶成員；Custom 與 Hosted 都有此欄）；
+     ③ 人怎麼進來 → 已是成員／邀請（一人一連結、落點直達 app）／既有系統搬遷（`member-admin.md` §7）
+   - **要攤開的陷阱**：非員工帳號沒有員工列，租戶資料存取規則用到 `$user.employee_id` 類欄位會對他們
+     整列 deny；Hosted internal app 內拿不到角色（只有四個身分 header），角色分流只能在門口做；
+     外部人員角色的 permissions 從空集合起步，`system.*`／`hr.*`／`accounting.*` 不給
+   - **產出：授權架構表**（與 app 分配表並列寫進計畫；確認後照表建角色、設白名單、發邀請）
+     `| app（alias） | 模式 | access_role_ids（角色名） | 角色 → permissions（新開／沿用） | 進入方式／邀請落點 |`
+     ——預設情況就是一列 `| <alias> | starter-internal | （空＝全租戶成員） | 沿用既有角色 | 已是成員 |`
+
 2. **場景拆分與 App 邊界建議**
    - 出現任一情況就**必須建議拆成多個 app**：
      - (a) 需求涵蓋 2 群以上不同功能與目的——「客戶管理」和「財務報表」→ 2 個 Custom App
-     - (b) 問題一答「兩者都有」——員工後台 + 客戶前台 → internal + external 各一
+     - (b) 登入後的系統＋不登入就要看的頁——匿名部分 → Hosted public、登入部分 → internal
      - (c) 部分功能命中 Hosted 邊界——Custom + Hosted 混合，分工見 `product-line-decision.md` §5
-   - 拆出來的每個 app **各自過 1.5 的兩問、各自定模式**，不是複製同一個答案
+   - **使用者有內有外不是拆分理由**：同一支 internal app 用角色分流；真要分開也是兩支 internal app
+     各掛不同 `access_role_ids`（第 1.7 項），不是拆成兩種模式
+   - 拆出來的每個 app **各自過 1.5 的兩問、各自定模式與授權架構**，不是複製同一個答案
    - 每個 Custom App 的 `app_domain` 標籤建議值
    - **拆出來的每個 app（Custom 或 Hosted）都要進工作區登錄表**：建好後
      `aigo_auth.py app add <alias> --id <uuid>`，alias 用 app 分配表的短名；
      之後對話與指令一律用 alias 指稱，UUID 不在對話裡傳遞
 
 3. **資料架構設計**（★ 必須遵循雙軌分流策略，見 Phase 3 規則 18）
-   - **受眾承接 1.5 問題一的答案，不重問**（★ 決定資料存取層的寫法，見規則 31）：
-     受眾中有沒有**無 `builder.access` 的一般員工**？
-     - internal app 且有一般員工受眾（絕大多數情況）→ 自建表存取
-       **全部包 Server Action**，前端不直呼 `queryTable` 等方法
-     - external app、或受眾全員持有 `builder.access` 的開發工具 → 前端 SDK 可直呼
+   - **受眾承接 1.7 授權架構表，不重問**（★ 決定資料存取層的寫法，見規則 31）：
+     受眾中有沒有**無 `builder.access` 的一般成員**（一般員工、外部人員都算）？
+     - 有（絕大多數情況）→ 自建表存取**全部包 Server Action**，前端不直呼 `queryTable` 等方法
+     - 受眾全員持有 `builder.access` 的開發工具型 app → 前端 SDK 可直呼
    - **盤點兩邊**（順序不可省）：
      - `GET /api/v1/data-center/tables` — 租戶既有自建表（Phase 0 已做，此處覆核）
      - `GET /api/v1/refs/available-tables` — 可引用的預設表清單
@@ -433,14 +454,16 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
 
 ### 計畫閘門
 
-- **新建情景：§1.0 四問未齊、或計畫裡沒有「需求形狀結論」與「app 分配表」→ 不算完成計畫，
-  不得送閘門**——先回 §1.0 補問
+- **新建情景：§1.0 四問未齊、或計畫裡沒有「需求形狀結論」「app 分配表」「授權架構表」→ 不算完成計畫，
+  不得送閘門**——先回 §1.0／1.7 補問；遷入情景同樣要有 app 分配表與授權架構表
 - **必須等待用戶明確回覆「同意」或提供修改意見後，才可進入 Phase 2**
 - 若用戶修改需求，需更新計畫後再次確認
 - 計畫確認後：
   - 依 app 分配表建 app（Phase 1 步驟 3，模板 slug 照表）並 `aigo_auth.py app add` 登錄——
     **這是建 app 的唯一時點**
   - 將 `app_domain` 值記錄到 `.aigo/config.json`
+  - 依授權架構表建角色、設 `access_role_ids`、發邀請（`member-admin.md` §3–§5；每一步都過
+    `data-operations.md` §3.5 寫入閘門）——白名單沒設，不在名單的人開 app 是 404「App 不存在」
   - 判走 Hosted App 的 app → 轉 `references/hosted-apps.md`；本 skill 的 Phase 2–4 只跑 Custom App
 
 ## Phase 2：專案腳手架
@@ -571,8 +594,10 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
     - **判斷授權用 permission 標籤（`模組.動作`）不要用角色名稱**——角色可被租戶改名；
       `system.admin` 自動通過所有檢查
     - **前端隱藏只是 UX**：機敏資料差異必須在 action 用 `ctx.user_permissions` 分流
-    - External App / 匿名渲染下 roles 與 permissions **恆為空陣列**，
+    - 匿名渲染下（以及少數判進 external 的 app）roles 與 permissions **恆為空陣列**，
       UI 要有合理的降級路徑（不要因為空陣列就整頁空白）
+    - **外部人員也是租戶成員**：經銷商／客戶登入後同樣走這套快照，他們的角色由計畫第 1.7 項定；
+      app 內不要另做「外部使用者」的登入或身分判斷
     - 詳見 `references/custom-app-dev-guide.md` §6「User Context」與 §7
 24. **預設表寫入可能被簽核攔截**（★ 強制，只限 Data Reference 那一軌）
     - 租戶對該表設了簽核流程時：**insert 照樣寫入但回傳帶 `approval_status: "pending"`**；
@@ -639,8 +664,8 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
     - internal app 的自建表存取一律包成 Server Action（`ctx.db.*` 走 app 憑證，
       不過此閘），前端 `runAction`；並在 action 內用 `ctx.user_permissions`
       分流授權（規則 23）——**跳過補閘會把 403 破口修成資料過度開放，更糟**
-    - 前端 SDK 只有兩種情境可直呼：external app（自動分流 `/ext/data-center`，
-      不受影響）、或受眾全員持有 `builder.access` 的開發工具型 app
+    - 前端 SDK 只有一種常態情境可直呼：受眾全員持有 `builder.access` 的開發工具型 app
+      （判進 external 的例外 app 自動分流 `/ext/data-center`，不在此閘）
     - 機制、存量修復流程、假修法排除清單見 `references/data-center.md` §7.5
 32. **禁止以 Hosted App 承載資料庫或 storage**（★ 強制，遷入情景最容易踩）
     - **不得**把 DB 本身（Postgres／MySQL／Redis…）或「包了 REST 的 DB 服務」
@@ -819,7 +844,7 @@ if (file) downloadFile(file);
                    └─ (若涉及路由/元件) → publish → ✅ Publish 一致性
 
 里程碑交付：
-  上述全部 + External Auth + 匿名存取（如適用）
+  上述全部 + 角色白名單實測（用不在 `access_role_ids` 內的帳號開 app 應 404）+ 匿名存取（僅判進 external 的 app）
 
 Hosted App 線（不走 Phase 2–4）：
   deploy/redeploy → ✅ hosted-apps.md §3.4 部署後驗證閘門（未通過不得對外交付）
@@ -904,7 +929,8 @@ uv run --project scripts python scripts/report_issue.py submit "一句話標題"
 | `references/custom-app-dev-guide.md` | 核心 API 規格與架構理念；**§15.1 匿名存取的平台核可三態**、§12 Storage 坑表、**§27 租戶資料存取規則（Auth gate：403 帶 `reason` 的來源）**、§28 冷啟動／常駐（`always_on`） |
 | `references/data-center.md` | 自建表完整規格（型別、配額、權限、SDK）＋ 延伸欄位（§10） |
 | `references/event-triggers.md` | Webhook 與 App 排程（冪等要求、宣告、限制） |
-| `references/product-line-decision.md` | **Phase 1.5 判產品線與模式時（兩條路共用 SSOT）**：預設 Custom App 與偏離訊號、Custom App 能力邊界核對表、兩問四象限、混合方案分工、不可逆前提、app 分配表 |
+| `references/product-line-decision.md` | **Phase 1.5 判產品線與模式時（兩條路共用 SSOT）**：預設 Custom App 與偏離訊號、Custom App 能力邊界核對表、兩問四象限（登入者一律 internal）、混合方案分工（含 Hosted 當 Custom 後端）、不可逆前提、app 分配表 |
+| `references/member-admin.md` | **Phase 1.5 第 1.7 項授權架構選型的 SSOT ＋ 成員／角色管理 playbook**：內外人員共用帳號體系的立場、三問與授權架構表、邀請／角色端點與權限、`access_role_ids`（兩條線）、批次邀請流程與四個邊界、Hosted internal 的身分 header、既有系統使用者搬遷、403 解讀 |
 | `references/migration-workflow.md` | **有現存系統要遷入時**：stack 盤點（§2.0，最先做）、產品線判斷的遷入輸入（§2.1）、專案解構、Schema 映射、資料遷移 |
 | `references/verification-details.md` | **要執行驗證時**：四項驗證的完整定義、Phase 5 里程碑 |
 | `references/troubleshooting.md` | **出錯時**：錯誤速查表 |

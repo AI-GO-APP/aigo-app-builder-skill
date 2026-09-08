@@ -12,6 +12,7 @@
 | **自建表** | `/api/v1/data-center/tables/{key}/records` 記錄 CRUD；結構操作另有端點 | 記錄 CRUD `builder.access`；建改結構 `datacenter.schema_write`；刪表刪欄 `system.admin` | `aigo_data_center.py`（已封裝） |
 | **批次匯出／匯入** | `POST /api/v1/exports` → 輪詢 → `/download`；`/api/v1/imports`（csv／excel／json，有對應引擎） | 匯出：該表模組的 read；匯入：`system.data_import`（admin 直通） | `aigo_data.py export`；匯入走平台 UI |
 | **結構與值域** | `/api/v1/data-center/meta/tables`（193 張：85 預設＋108 自建）、`/meta/tables/{key}` | 登入即可 | `aigo_data.py meta` |
+| **成員／邀請／角色／app 角色白名單** | `/api/v1/invitations`、`/api/v1/members`、`/api/v1/members/roles`、`PATCH /builder/apps/{id}/settings`、`PUT /hosted-apps/{id}/access-settings` | `system.invitations`／`hr.member_manage`／`system.roles_manage`／`builder.manage_access`／`hosted_apps.deploy` | `aigo_data.py call`；流程與邊界見 `member-admin.md` |
 
 沒有「表名 → 記錄」的通用端點給登入使用者用在預設表上：`/proxy`、`/unified`、`/open/proxy` 都要 app 或整合 id
 並走 Data Reference 授權。預設表的使用者身分路徑**就是各模組 REST**。
@@ -93,9 +94,43 @@
   送 physical_name 會 failed「badly formed hexadecimal UUID string」。自建表整表取出用
   `call GET /api/v1/data-center/tables/{key}/records --all`
 - 不在白名單的預設表（如客戶）：`call GET /api/v1/client --all --out customers.json`
-- 匯入：`/api/v1/imports` 上傳 csv／excel／json → profiling → 對應引擎建議 → 人工定稿 → 背景寫入；
-  `system.data_import` 限定。有 UI 流程與覆核，**建議引導用戶走平台介面**而不是腳本硬灌；
-  逐筆 API 寫入只適合小量或需要程式邏輯的情況
+- **匯入（`/api/v1/imports`，`system.data_import` 限定；核自 `api/imports.py`、`services/import_*.py`，
+  2026-09-08 main；同日測試租戶擁有者帳號**實打**，★ 標記＝實測）**——**預設表**批次灌資料的首選路徑，
+  AI IDE 可以代跑整條 API，映射定稿仍給用戶覆核：
+  - 格式 csv／xlsx／xls／xlsm／json；單次 ≤20 檔、單檔 ≤50 MB、總量 ≤200 MB、單來源 ≤10 萬列
+    （413／400 訊息會直接說拆檔或分批）。★ 副檔名不支援**不是 400**：回 200，job `status: failed`、
+    `error_message`「所有上傳檔皆解析失敗」——看 job 狀態，不要只看 HTTP 碼
+  - **目標三種，prod 只有一種真的會寫**：
+    - 既有預設表（`existing_table`）★ 可用：3 列 CSV 定稿後 10 秒內 `completed`、`imported_count: 3`
+    - **既有自建表（`self_built_table`）與自動新建自建表（`new_table`）★ 在 prod 被靜默 parked**：
+      job `completed`、`imported_count: 0`、`sources[].status: "parked"`、`error_detail: null`——沒有任何錯誤字樣。
+      原因核自 `infra/k8s/prod`：`IMPORT_TIER3_WRITE_ENABLED=true` 只以顯式 env 給 backend API pod，
+      **import-worker 只 `envFrom backend-env`，旗標在 worker 上是預設 false**；mapping 回應的
+      `tier3_write_enabled: true` 是 API pod 的值，會誤導。**自建表匯入改走本地腳本**：
+      `aigo_data_center.py insert_record` 逐筆，或 dev-guide §23.2 的 Server Action 批次；
+      回報平台時附 job id 與 `sources[].status`。憑證／金流類敏感表在 denylist，映射不到
+  - **流程與狀態機**（★）：`POST /imports`（multipart，回 job＋profiling，`awaiting_mapping_review`）
+    → `POST /{job}/suggest-mapping`（建議＋`candidate_tables`＋**`table_required_columns`**）
+    → 要換表就 `POST /{job}/mapping/retarget {source_id, target_ref}`（只能換到 `candidate_tables` 內的表，
+    否則 400「target_ref 'x' 不在此 source 的候選表集內，無法切表重跑」）
+    → **`PUT /{job}/mapping` 定稿＝立刻派送 worker 開始寫**（`ready` → `importing` → `completed`／`failed`）；
+    `POST /{job}/execute` 只是 `ready` 卡住時的重派（SQS 失敗），對已完成／失敗的 job 冪等回現況，
+    對未定稿的 job 409「job 狀態 'awaiting_mapping_review' 尚未定稿，無法執行匯入」
+    → `GET /{job}` 輪詢；worker 是 KEDA scale-to-zero，**冷啟動實測 40 秒～1.5 分鐘才從 `ready` 轉走**，這段不是卡住
+  - **定稿前必看 `table_required_columns`**（★）：目標表的必填欄沒有對到來源欄 → 整批 `failed`、
+    `failed_count`＝列數、`sources[].error_detail.errors[{row, error: "寫入失敗：必填欄位缺值（非空約束）"}]`；
+    定稿後就改不了（PUT／retarget 在非 `awaiting_mapping_review` 狀態一律 409），只能重新上傳。
+    必填欄的 CHECK 值域用 `aigo_data.py meta table <key>` 查（例：`purchase_suppliers.supplier_type ∈ company/individual`）
+  - **同檔重匯不去重**（★）：mapping 顯示 `dedup_key: ["email"]`、`on_conflict: null`，同一份 3 列 CSV 匯兩次 →
+    表裡 6 列、`skipped_count: 0`。匯入前先用同 filter GET 估影響面（§3.5），匯錯要自己用模組 REST 逐筆刪
+  - `column_map` 每欄必帶 `tier`（缺了 422 `Field required`）；`tier-2`（對不到既有欄）的來源欄去向
+    是延伸欄位，模組 REST 讀不到，**未實打驗證**；`transform` 目前 passthrough
+  - **引導用戶「匯出檔案丟給 AI IDE」而不是給 DB 連線字串**：檔案走這條有 profiling、必填預警與覆核；
+    DB 直連只能在本地做（`custom-app-dev-guide.md` §23.6），只在需要 ID 映射、FK 轉換或遷後持續同步時才要，
+    且要求唯讀帳號、用完撤銷；Supabase 直接走 REST 匯出，不必給連線字串
+  - 使用者／認證表不進匯入（`member-admin.md` §7）；目標預設表掛簽核流程時先按 dev-guide §23.1 處置
+  - 逐筆 API 寫入（`call POST`／`aigo_data_center.py insert_record`）適合小量、需要程式邏輯、以及**自建表**
+    （見上），仍過 §3.5 閘門
 
 ## 6. 這條線不做的事
 

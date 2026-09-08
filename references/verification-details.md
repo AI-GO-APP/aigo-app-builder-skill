@@ -73,7 +73,10 @@ verify_server_action(base_url, token, app_id, action_name, params)
    )
    print(format_verification_report(results))
    ```
-6. **External Auth**（可選）— 註冊 → 登入 → 取得用戶 → 登出
-7. **匿名存取驗證**（可選）— 確認 allow_anonymous_access 已啟用 → /pub/ API 讀取 → 確認寫入被拒
+6. **角色白名單驗證**（授權架構表有填 `access_role_ids` 時必做）— 用名單內的角色帳號開 app 正常；
+   用名單外的帳號開 app 應 404「App 不存在」；外部人員角色的帳號走完關鍵路徑不撞 `policy_denied`
+   （`member-admin.md` §3）
+7. **匿名存取驗證**（僅判進 `starter-external` 的例外 app）— 確認 allow_anonymous_access 已啟用且平台已核可
+   → /pub/ API 讀取 → 確認寫入被拒；External Auth（註冊 → 登入 → 取得用戶 → 登出）一併驗
 
 可使用 `scripts/aigo_e2e.py` 和 `scripts/aigo_runtime_verify.py`。

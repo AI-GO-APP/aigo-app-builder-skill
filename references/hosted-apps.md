@@ -317,10 +317,37 @@ Hosted App 容器**只帶平台注入的 `AIGO_*`**，原系統的 env 一顆都
   遷入案的資料層改寫前把這條告訴租戶：對 app 身分要另設不帶 `$user.*` 的規則、或用 app 級規則放行；
   app 端改 code 無解 → `custom-app-dev-guide.md` §27
 
+### 5.1 Hosted App 當 Custom App 的後端（混合方案的一種）
+
+Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫方是 Custom 的 **Server Action**
+（`ctx.http.call`），它**沒有平台登入 cookie**：
+
+- Hosted 設 **`visibility=public`**——`internal` 的 proxy 會把這種呼叫當未登入導去登入頁（HTML 導覽
+  302、fetch 401 `hosted_app_auth_required`），Server Action 端看到的是 401／HTML，不是資料
+- **app 自驗簽章**：Custom 端把共享金鑰存 `ctx.secrets`，action 自組 `Authorization: Bearer …`
+  （egress 閘道原樣轉送 `Authorization`，dev-guide §25）；Hosted 端每個請求驗證，驗不過 401
+- Hosted 的網域要先在 Builder「外部服務」以同名 slug 建成 egress 白名單（SKILL.md 計畫第 4.6 項）
+- **使用者身分由 Custom 端帶**：action 內用 `ctx.user_id`／`ctx.user_permissions` 分流後，把需要的
+  身分欄位放進 request body；Hosted 不自行認人、不另建使用者表
+- 前端**不要**跨來源直打 Hosted：帶憑證的 CORS 平台不支援（proxy 只處理同站 cookie）
+- 業務資料仍落平台的表：Hosted 用 Open Proxy（§5）讀寫，不自帶 DB（規則 32）
+
 ## 6. 可見度與 internal app 的 401 處置
 
-- `PUT /{id}/access-settings`：`visibility` = `public`（預設）／`internal`（僅租戶成員，
-  可再限角色）。**internal app 沒有預覽截圖**
+- `PUT /{id}/access-settings`，body `{visibility, access_role_ids}`：`visibility` = `public`（預設）／
+  `internal`（需登入 AI GO）。**`internal` ＋ `access_role_ids=[]` ＝ 全租戶已登入成員**；填角色 id
+  就只放行那些角色；`public` 下 `access_role_ids` 必須為空（DB CHECK）。需 `hosted_apps.deploy`，
+  再收窄到 app 的 `created_by`／admin。**internal app 沒有預覽截圖**。
+  角色從哪來、外部人員怎麼進租戶 → `member-admin.md` §1／§3／§4。
+  2026-09-08 測試租戶實打：`POST /hosted-apps {create_deployment:false}` 註冊後即可設定；`internal`＋角色 200
+  且 GET 立即讀回；`public`＋非空角色 **422「public visibility 不可搭配 access_role_ids」**；不存在的角色
+  **400「角色不存在或不屬於此租戶：<id>」**
+- **有登入者就是 `internal`**——員工、外部經銷商、客戶都是租戶成員，用 `access_role_ids` 分流；
+  `public` 只給沒有登入者的公開站，或當 Custom App 後端時（§5.1）
+- **容器收到的身分**（proxy 驗過後注入，先剝掉 client 自帶的同名 header）：`X-Aigo-User-Id`、
+  `X-Aigo-Tenant-Id`、`X-Aigo-App-Id`、`X-Aigo-Population`，空值不注入。**沒有 email、roles、
+  permissions**——app 內做不到依角色分功能，角色分流只能在門口用 `access_role_ids`（`member-admin.md` §6）
+- 邀請成員直達 internal app：`redirect_url` 用 `/hosted-app-handoff/{slug}`（`member-admin.md` §4）
 - internal app 的認證由平台 proxy 處理，**app 端幾乎不用做事**，只有一條要寫對：
   - HTML 導覽 → proxy 自己 302 去登入
   - **背景 fetch/XHR → 401 + JSON `{code: "hosted_app_auth_required", ...}`**
@@ -480,4 +507,4 @@ POST /{id}/domains/{domain_id}/verify   → pending_dns → pending_cert → act
 `GET|POST /api/v1/refs/apps/{attached_integration_id}`（預設表引用，§5；不在前綴下，
 Deploy Token 的路徑白名單只認 `/hosted-apps` 前綴，**要登入 session**）。
 邀請成員直達 hosted app：`redirect_url` 白名單含 `/hosted-app-handoff/{slug}`
-（→ `custom-app-dev-guide.md` §14.1）。
+（→ `member-admin.md` §4）。
