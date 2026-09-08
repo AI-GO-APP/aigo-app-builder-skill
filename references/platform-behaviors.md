@@ -314,7 +314,7 @@ https://{tenant}.ai-go.app/runtime/{slug}
 - `src/db.json` **恆為 `{}`**，即使 Data Reference 都註冊成功——它是執行期注入檔、
   不存在 VFS。要確認引用狀態請查 `GET /api/v1/refs/apps/{app_id}`，不要看 `db.json`。
 
-**深連結與「找不到此應用」（2026-09-02 起）**：分享 `/runtime/{slug}?x=1#/page` 給未登入的人，
+**深連結與「找不到此應用」（2026-09-03 起，#1424）**：分享 `/runtime/{slug}?x=1#/page` 給未登入的人，
 登入後會落回**原本那一頁**——導轉鏈以單一 query 參數 `next` 承載 `search+hash`（pathname 不當
 導向目標，落點仍由平台產生器出）。所以 **HashRouter 的頁面狀態可以分享**，不必自己把
 hash 塞進 localStorage 補救（prod v1.13.0 起）。同一批把「應用不存在」改成**依身分三層**：

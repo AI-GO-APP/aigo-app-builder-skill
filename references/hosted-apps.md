@@ -24,7 +24,7 @@
   需要「讓新設定生效」時**等傳播**（§4），需要「重跑建置」時**重新上傳**（§3.2）
 - ✅ 2026-09-02 實測可用：`/open/data-center/*`（自建表記錄面，§5）、
   `GET|POST /api/v1/refs/apps/{整合 id}`（預設表引用，§5）
-- **v1.13.0 帶上 prod 的三塊**（openapi 實查＋**2026-09-08 demo 租戶實打一輪**：靜態站 CodeBuild
+- **v1.13.0 帶上 prod 的三塊**（openapi 實查＋**2026-09-08 測試租戶實打一輪**：靜態站 CodeBuild
   建置 46 秒 active、caddy 起得來、`runtime-starts` 有資料、`resources` 在共用池回 403——本檔各節
   標「實打」處即為實測）：
   ① 建置引擎搬 **AWS CodeBuild**（§1／§2；UAT 2026-09-05、prod 隨 v1.13.0 切換，平台 0907 漂移
@@ -188,7 +188,7 @@ Custom App 線每次變更都要過 SKILL.md Phase 4.2 的驗證閘門；Hosted 
 **本節是它的等價物**。`deployment` 變成 `active` 只代表**建置與 rollout 成功**，
 不代表對外服務的就是你這一版——rollout 失敗時對外仍是舊 revision，而平台**不顯示
 目前服務中的版本**（§3.2）。沒有 version marker 就沒有「新版已生效」的證據。
-（v1.13.0 起 `active` 已改為「新 revision 真的接手」，但尚未在 prod 實打驗證，
+（v1.13.0 起 `active` 已改為「新 revision 真的接手」，正向半邊 2026-09-08 已實打，「起不來落 `failed`」的負向半邊未實打，
 本節的 version marker 要求不放寬——見 §3.2。）
 
 | 變更範圍 | 先等 | 必驗項目 |
@@ -465,7 +465,7 @@ POST /{id}/domains/{domain_id}/verify   → pending_dns → pending_cert → act
 | `GET /`／`GET /{id}` | ✅ |
 | `POST /`（建立）——session-only（ADR 0019，§3.1；固定 403 訊息） | ❌ |
 | `POST /{id}/deployments`／`GET .../deployments*`／`.../logs` | ✅ |
-| `POST /{id}/restart`／`GET /{id}/runtime-logs`／`POST /{id}/logs/interpret`（⚠️ restart／interpret prod 2026-09-02 仍 404） | ✅ |
+| `POST /{id}/restart`／`GET /{id}/runtime-logs`／`POST /{id}/logs/interpret`（⚠️ restart／interpret prod 2026-09-02 仍 404，v1.13.0 已補） | ✅ |
 | `GET /{id}/runtime-starts`／`GET /{id}/runtime-starts/{pod_name}/logs`／`POST /{id}/logs/interpret-line`（§8；v1.13.0，prod openapi 已實查） | ✅ |
 | `GET|PUT /{id}/runtime-settings`／`GET /{id}/resource-usage` | ✅ |
 | `GET /{id}/preview`／`POST /{id}/preview/capture` | ✅ |
