@@ -200,6 +200,13 @@ app 仍帶舊的 30 秒 ceiling，**要 republish 一次**才會換上 manifest 
 超過 120000 的宣告會被夾回 120000；webhook（90 秒）與排程（300 秒）的 dispatcher 外層上限
 另算（`event-triggers.md` §1.6／§2.6），兩道取小。逾時回 `status: "timeout"`，長工作仍要切批次。
 
+> ⚠️ **走 `ctx.http.call` 的 action 另有一道 30 秒的牆，跟 manifest 無關。**
+> egress 閘道的 `timeout_ms` 硬上限是 **30000**，到期時平台砍掉的是**整支 action**，
+> 回 `status: "timeout"`、`result: null`、`error: "Action 執行超時(30000ms)"`——
+> 訊息裡的 `30000ms` 是**閘道的值，不是 manifest 的**，兩道牆的錯誤原文一字不差。
+> 這是最容易被誤讀成「manifest `timeout_ms` 沒生效／要 republish」的一種情形。
+> 三道閘道上限與分辨法見 §25.4。
+
 依權限分流（前端隱藏不算數，這裡才是強制點）：
 
 ```python
@@ -1354,7 +1361,35 @@ def execute(ctx):
    `ctx.secrets` 金鑰，別再往外部服務設定找。
 5. 確認設定生效後才重試。
 
-### 25.4 規劃階段就要處理
+### 25.4 閘道的三道上限（★ 2026-09-09 prod 實打）
+
+| 上限 | 值 | 撞到時的樣子 |
+|---|---|---|
+| 單次對外呼叫的時間 | **30000 ms**＝EgressService `timeout_ms`，且是硬上限 | **整支 action 被砍**：`status: "timeout"`、`result: null`、`error: "Action 執行超時(30000ms)"` |
+| 送出去的請求本體 | **8388608 位元組（8 MiB）** | `status: 413`、`detail: "送往外部服務「<slug>」的請求本體超過閘道的大小上限（8388608 位元組）"` |
+| 收回來的回應本體 | **5242880 位元組（5 MiB）**＝EgressService `max_response_bytes` | 回應被閘道擋下 |
+
+三道都掛在閘道上，跟另外兩道**不同層**的限制常被混為一談：
+`actions/manifest.json` 的 `timeout_ms`（runner 執行上限，1000～120000，§7），
+以及呼叫 action 的 API 入口 request body（pad 512 KiB／4／8／12 MiB 實打全 200，**12 MiB 送得進去**）。
+
+- `timeout_ms` **調不高**：`PATCH` 60000 與 120000 皆回 **422**
+  「`timeout_ms` 必須是 1～30000 之間的正整數（毫秒）」。
+- `ctx.http.call` **沒有** per-call timeout 參數：傳 `timeout=90` 回
+  `TypeError: HttpModule.call() got an unexpected keyword argument 'timeout'`。
+  單次對外呼叫的逾時只由 EgressService 的 `timeout_ms` 決定，action 端覆寫不了。
+- **串流（SSE）不繞過這 30 秒**：閘道原樣轉送 SSE、上游也收
+  `stream_options: {"include_usage": true}`，串流路徑本身可用（短工作串流 15.6 秒成功，
+  usage 與 cost 都解得出來）；但砍的是**總執行時間**不是 idle，同一份長工作非串流 timeout、
+  串流一樣 timeout（`duration_ms` 30350）。
+
+★ **怎麼分辨是這道牆還是 runner ceiling**：兩者錯誤原文完全相同，只能看
+「這支 action 有沒有走 `ctx.http.call`」。同一支**已發布**、manifest `timeout_ms: 120000`
+的 app：純 `time.sleep(100)`（完全不碰網路）→ `success`、`duration_ms: 100002`（ceiling 正常）；
+同一支 app 走 `ctx.http.call` 的長工作四發，`duration_ms` 落在 **30394～30405**（離散度 11 ms，
+一道 wall-clock 硬牆的形狀），換 terra／sonnet-5／gemini-3.8-flash 三家模型都一樣。
+
+### 25.5 規劃階段就要處理
 
 Phase 1.5 實作計畫裡就該**列出所有要打出去的外部服務（egress slug + base_url）**，
 讓用戶在寫 code 前先去建立外部服務並授權本 App，同時把各 API 的金鑰存進

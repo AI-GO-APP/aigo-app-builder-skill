@@ -796,6 +796,12 @@ def execute(ctx):
 > ⚠️ **slug 必須先建立同名「外部服務」（base_url 域名白名單）並授權給本 App，
 > 否則連不出去**——見 `references/custom-app-dev-guide.md` §25。這是設定問題，
 > 不是程式問題，改 code 改不掉。
+> ⚠️ **閘道有三道上限**：單次呼叫 **30000 ms**（EgressService `timeout_ms`，硬上限、
+> `ctx.http.call` 也沒有 timeout 參數）、送出的請求本體 **8 MiB**、回應 **5 MiB**。
+> 逾時砍的是**整支 action**，`error` 原文 `Action 執行超時(30000ms)` 與 runner ceiling
+> 那道一字不差——**走 `ctx.http.call` 的 action 在 30 秒被切，不是 manifest 沒生效、
+> 也不是該 republish**（同一支已發布 app 的純 `sleep(100)` 是 `success`）。
+> 串流不繞過。→ dev-guide §25.4。
 > 閘道只做**域名驗證**，**不代管、不注入、也不剝除憑證**（ADR 0010）：
 > `Authorization` 等呼叫端 headers 原樣轉送（僅擋 hop-by-hop）。
 > API 金鑰請開 `ctx.secrets` 欄位、由 action 自組 header。

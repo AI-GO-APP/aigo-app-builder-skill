@@ -607,3 +607,67 @@ export function currentIdentity(): { userId: string; email: string; tenantId: st
 > ⚠️ **本節是 app 軸；另有一條人軸——租戶「資料存取規則」（Auth gate v1）**，由平台在
 > 資料函式層執法、403 body 帶 `reason`／`rule_id`，**UAT 已 on、prod 仍 off**（2026-09-07）。
 > 兩軸獨立疊加，403 有沒有 `reason` 是分辨鍵 → `custom-app-dev-guide.md` §27。
+
+---
+
+## 13. Egress 閘道的三道上限（2026-09-09 prod 實打）
+
+> 驗證環境：單一租戶、Custom App（internal）、**已發布**、`actions/manifest.json`
+> 宣告 `timeout_ms: 120000`。上游為 OpenRouter chat completions。
+
+| 上限 | 值 | 可調性 | 撞到時的回應 |
+|---|---|---|---|
+| 單次對外呼叫時間 | **30000 ms**（EgressService `timeout_ms`） | 不可調高 | 整支 action 被砍：`{"status":"timeout","result":null,"error":"Action 執行超時(30000ms)","duration_ms":30401.0}` |
+| 送出的請求本體 | **8388608 位元組（8 MiB）** | 未見設定欄位 | `status: 413`、`detail: "送往外部服務「openrouter」的請求本體超過閘道的大小上限（8388608 位元組）"` |
+| 收回的回應本體 | **5242880 位元組（5 MiB）**（EgressService `max_response_bytes`） | 建立時的欄位 | 回應被閘道擋下 |
+
+### 13.1 `timeout_ms` 是硬上限，action 端也覆寫不了
+
+`PATCH /api/v1/egress-services/{id}` 送 `timeout_ms: 60000` 與 `120000` 都回 **422**：
+
+```json
+{"detail":[{"type":"value_error","loc":["body","timeout_ms"],
+  "msg":"Value error, timeout_ms 必須是 1～30000 之間的正整數（毫秒）","input":120000}]}
+```
+
+`ctx.http.call` 沒有 per-call timeout 參數 —— 實打 `ctx.http.call(..., timeout=90)` 回
+`TypeError: HttpModule.call() got an unexpected keyword argument 'timeout'`。
+（客戶端 `aigo_sdk._RemoteModule.call` 的簽名是 `(*args, **kwargs)` 的通用 RPC 代理，
+簽名本身看不出後端 allowlist，只能實打。）
+
+### 13.2 到期時砍的是整支 action，訊息與 runner ceiling 那道一字不差（★ 最易誤判）
+
+同一支已發布 app、同一份 manifest（`timeout_ms: 120000`）：
+
+| action 內容 | 平台 `status` | `duration_ms` |
+|---|---|---|
+| 純 `time.sleep(100)`，完全不碰網路 | `success` | **100002** |
+| 走 `ctx.http.call` 的長工作，5 頁輸入 | `timeout` | 30401 |
+| 同上，12 頁輸入 | `timeout` | 30399 |
+| 同上，換 `anthropic/claude-sonnet-5` | `timeout` | 30394 |
+| 同上，換 `google/gemini-3.8-flash` | `timeout` | 30405 |
+
+`sleep(100)` 成功證明 **runner ceiling 確實吃 manifest 的 120000**；四發對外呼叫的
+`duration_ms` 離散度只有 11 ms，是一道 wall-clock 硬牆的形狀，不是上游忽快忽慢。
+兩者的 `error` 原文都是 `Action 執行超時(30000ms)`，**訊息本身分辨不了**——
+唯一的分辨依據是「這支 action 有沒有走 `ctx.http.call`」。
+
+平台三處都記著 manifest 的值（repo `actions/manifest.json`、
+`GET /builder/apps/{id}` 的 `published_vfs["actions/manifest.json"]`、
+`GET /api/v1/actions/apps/{id}` 回的 `timeout_ms: 120000`），所以「查 API 看到 120000」
+不代表對外呼叫拿得到 120 秒。
+
+### 13.3 串流（SSE）不繞過 30 秒
+
+閘道**原樣轉送 SSE**，上游也接受 `stream_options: {"include_usage": true}`：短工作串流
+15625 ms `success`，`usage`／`cost`／`finish_reason` 都解得出來，串流路徑本身正常。
+但同一份長工作非串流 timeout、串流一樣 timeout（`duration_ms` 30350）——
+砍的是**總執行時間**，不是 idle 時間，所以串流繞不過去。
+
+### 13.4 三道不同層的體積限制，不要混為一談
+
+| 哪一段 | 上限 | 實測 |
+|---|---|---|
+| 呼叫 action 的平台 API 入口（request body） | 至少 12 MiB | pad 512 KiB／4 MiB／8 MiB／12 MiB 全部 200 |
+| action → 外部服務（egress 送出） | **8 MiB** | 8.0 MiB 的 base64 影像 → 413 |
+| 外部服務 → action（egress 收回） | **5 MiB**（`max_response_bytes`） | 未撞到 |

@@ -67,11 +67,52 @@ def declared_egress_slugs(vfs: dict) -> set[str]:
     return set()
 
 
+def available_services(available: dict | None) -> list[dict]:
+    """取 available-egress-services 的 `services`（租戶有、且本 App 看得到的外部服務）。
+
+    只認 `services` 這個 key：舊版寫法「回應裡第一個 list」會在缺 key 時撈到
+    `authorized_egress_service_ids`，那是另一種形狀的清單（沒有 slug），撈到只會靜靜算錯。
+    """
+    if not isinstance(available, dict):
+        return []
+    services = available.get("services")
+    if not isinstance(services, list):
+        return []
+    return [s for s in services if isinstance(s, dict)]
+
+
+def authorized_service_ids(available: dict | None) -> set[str]:
+    """取「已授權給本 App」的 EgressService id 集合。
+
+    ★ 元素是 **dict**，不是字串——2026-09-09 兩個租戶實打（abeco／ckleegarden）皆為
+    `[{"service_id": "<uuid>"}]`，與 `PUT authorized-egress-services` 的 body
+    `{"services": [{"service_id": …}]}` 同形。直接 `str(x)` 會得到 `"{'service_id': …}"`，
+    永遠對不上 `services[].id` → **每個 slug 都被誤判成 gap**（1.39.0 以前的行為）。
+
+    空清單是 `[]`，看不出元素形狀，所以純字串元素也一併吃下；
+    key 名同時認 `service_id`／`id`／`egress_service_id`，平台換寫法不會又靜靜算錯。
+    """
+    if not isinstance(available, dict):
+        return set()
+    ids: set[str] = set()
+    for item in available.get("authorized_egress_service_ids") or []:
+        if isinstance(item, dict):
+            for key in ("service_id", "id", "egress_service_id"):
+                v = item.get(key)
+                if isinstance(v, str) and v:
+                    ids.add(v)
+                    break
+        elif isinstance(item, str) and item:
+            ids.add(item)
+    return ids
+
+
 def egress_preflight(vfs: dict, available: dict | None = None) -> dict:
     """比對「宣告」「程式碼實際用到」「本 App 已授權」三份 egress slug。純函式。
 
     `available` 是 `GET /builder/apps/{id}/available-egress-services` 的回應
-    （`{services: [{id, slug, is_active, …}], authorized_egress_service_ids: [...]}`）；不給就只比前兩份。
+    （`{services: [{id, slug, is_active, …}], authorized_egress_service_ids: [{"service_id": …}]}`）；
+    不給就只比前兩份。授權清單的元素形狀見 `authorized_service_ids()`。
 
     回傳：
     - needed        閘門會檢查的全集 = declared ∪ literal
@@ -86,11 +127,8 @@ def egress_preflight(vfs: dict, available: dict | None = None) -> dict:
     authorized: set[str] | None = None
     missing_service: list[str] = []
     if available is not None:
-        services = available.get("services") if isinstance(available, dict) else None
-        if not isinstance(services, list):
-            services = next((v for v in available.values() if isinstance(v, list)), []) if isinstance(available, dict) else []
-        auth_ids = set(str(x) for x in (available.get("authorized_egress_service_ids") or [])) if isinstance(available, dict) else set()
-        by_slug = {s.get("slug"): s for s in services if isinstance(s, dict) and s.get("slug")}
+        by_slug = {s.get("slug"): s for s in available_services(available) if s.get("slug")}
+        auth_ids = authorized_service_ids(available)
         authorized = {slug for slug, s in by_slug.items() if str(s.get("id")) in auth_ids}
         missing_service = [s for s in needed if s not in by_slug]
 
@@ -262,3 +300,112 @@ def full_deploy(base_url: str, token: str, app_id: str, slug: str, project_path:
     if verify.get('status') != 'published':
         raise RuntimeError(f"完整部署驗證失敗：status={verify.get('status')}，預期 published")
     return result
+
+
+# ---------------------------------------------------------------------------
+# 離線自測：`python scripts/aigo_publish.py selftest`（不打網路、只用標準庫）
+# ---------------------------------------------------------------------------
+
+# 2026-09-09 實打回應的縮影：`authorized_egress_service_ids` 的元素是
+# `{"service_id": …}`（abeco `evidence/egress_final.json` 的 verify、
+# ckleegarden `GET available-egress-services` 皆同形）。
+_SAMPLE_AVAILABLE = {
+    "services": [
+        {"id": "c527c1ce-9f2c-4f14-aab0-55c5283ddc99", "name": "OpenAI",
+         "slug": "openai", "base_url": "https://api.openai.com",
+         "auth_type": "none", "is_active": True},
+        {"id": "f55d0c24-11ca-4944-89b7-957975bb8287", "name": "OpenRouter",
+         "slug": "openrouter", "base_url": "https://openrouter.ai",
+         "auth_type": "none", "is_active": True},
+    ],
+    "authorized_egress_service_ids": [
+        {"service_id": "f55d0c24-11ca-4944-89b7-957975bb8287"},
+        {"service_id": "c527c1ce-9f2c-4f14-aab0-55c5283ddc99"},
+    ],
+}
+
+_SAMPLE_VFS = {
+    "_template.json": json.dumps({"required_egress": {"openai": {}}}),
+    "actions/summarize_leads.py": "def run(ctx):\n    return ctx.http.call('openai', '/v1/x')\n",
+    "actions/po_extract.py": (
+        "def run(ctx):\n"
+        "    slug = ctx.params['slug']\n"
+        "    ctx.http.call(slug, '/dyn')\n"
+        "    return ctx.http.call('openrouter', '/api/v1/chat/completions')\n"
+    ),
+}
+
+
+def _selftest() -> int:
+    fails: list[str] = []
+
+    def check(name: str, got: Any, want: Any) -> None:
+        if got != want:
+            fails.append(f"{name}\n     got : {got!r}\n     want: {want!r}")
+
+    # 1) 授權清單：dict 元素（實際形狀）、字串元素（防未來改回）、混用、空、壞資料
+    check("dict 元素", authorized_service_ids(_SAMPLE_AVAILABLE),
+          {"f55d0c24-11ca-4944-89b7-957975bb8287", "c527c1ce-9f2c-4f14-aab0-55c5283ddc99"})
+    check("字串元素", authorized_service_ids({"authorized_egress_service_ids": ["a", "b"]}), {"a", "b"})
+    check("混用與別名 key", authorized_service_ids(
+        {"authorized_egress_service_ids": ["a", {"id": "b"}, {"egress_service_id": "c"}]}), {"a", "b", "c"})
+    check("空清單", authorized_service_ids({"authorized_egress_service_ids": []}), set())
+    check("欄位缺席", authorized_service_ids({}), set())
+    check("不是 dict", authorized_service_ids(None), set())
+    check("壞元素略過", authorized_service_ids({"authorized_egress_service_ids": [{"x": 1}, 3, None, ""]}), set())
+
+    # 2) services 只認 services key，不會撈到授權清單當服務用
+    check("services 缺席", available_services({"authorized_egress_service_ids": [{"service_id": "a"}]}), [])
+    check("services 正常", [s["slug"] for s in available_services(_SAMPLE_AVAILABLE)], ["openai", "openrouter"])
+
+    # 3) ★ 迴歸本體：兩個都已授權 → gaps 必須是空的（修正前這裡是 ['openai', 'openrouter']）
+    rep = egress_preflight(_SAMPLE_VFS, _SAMPLE_AVAILABLE)
+    check("needed", rep["needed"], ["openai", "openrouter"])
+    check("authorized", rep["authorized"], ["openai", "openrouter"])
+    check("gaps 應為空", rep["gaps"], [])
+    check("動態呼叫仍點名", len(rep["dynamic"]), 1)
+    check("起手式殘留仍點名", rep["leftovers"], ["_template.json", "actions/summarize_leads.py"])
+    # 起手式的示範 action 自己就字面呼叫 openai，所以宣告 ⊆ 字面 → declared_only 是空的
+    check("declared_only", rep["declared_only"], [])
+    check("宣告了但沒人呼叫 → declared_only",
+          egress_preflight({"_template.json": json.dumps({"required_egress": ["stripe"]})})["declared_only"],
+          ["stripe"])
+
+    # 4) 真的沒授權時仍要點名（避免修過頭變成永遠不報 gap）
+    none_auth = {**_SAMPLE_AVAILABLE, "authorized_egress_service_ids": []}
+    check("零授權 → 全是 gap", egress_preflight(_SAMPLE_VFS, none_auth)["gaps"], ["openai", "openrouter"])
+    only_openai = {**_SAMPLE_AVAILABLE,
+                   "authorized_egress_service_ids": [{"service_id": "c527c1ce-9f2c-4f14-aab0-55c5283ddc99"}]}
+    check("半授權 → 只點沒授的", egress_preflight(_SAMPLE_VFS, only_openai)["gaps"], ["openrouter"])
+
+    # 5) 租戶根本沒建這個服務 → 算 missing_service，訊息要分辨得出來
+    no_service = {"services": [], "authorized_egress_service_ids": []}
+    rep3 = egress_preflight(_SAMPLE_VFS, no_service)
+    check("missing_service", rep3["missing_service"], ["openai", "openrouter"])
+    assert "租戶沒有這個外部服務" in format_egress_preflight(rep3)
+
+    # 6) 不給 available → 降級，不算 gaps
+    rep4 = egress_preflight(_SAMPLE_VFS)
+    check("降級 authorized", rep4["authorized"], None)
+    check("降級 gaps", rep4["gaps"], [])
+
+    if fails:
+        print("❌ selftest 失敗 %d 項：" % len(fails))
+        for f in fails:
+            print("   - " + f)
+        return 1
+    print("✅ aigo_publish selftest 全數通過（egress 預檢，離線）")
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    # Windows 主控台預設 cp950，訊息裡的 ✅／❌ 會炸 UnicodeEncodeError
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+    if len(sys.argv) > 1 and sys.argv[1] == "selftest":
+        raise SystemExit(_selftest())
+    print("用法：python aigo_publish.py selftest")
