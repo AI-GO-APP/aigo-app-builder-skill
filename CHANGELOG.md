@@ -4,6 +4,57 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.38.0
+
+### 更正：Custom App 執行期網址與存取端點——internal／external 兩線各自的正式／測試形狀與四條通道端點總表
+
+1.36.0 以前整份 skill 對 external Custom App 的網址只有一格：`platform-behaviors.md` §6.2 寫
+「`{subdomain}.apps.ai-go.app` → 導向獨立登入頁（供 external app 用）」，而且是錯的；
+`/ext-runtime` 與 `version-test`（開發預覽）在 skill 裡出現次數是 0，`*.apps.ai-go.app` 在三處
+被寫成三種東西（沙箱域／external 專用登入頁／webhook 基底）。2026-09-09 回平台原始碼
+（`frontend/src/lib/appUrl.ts`、`externalRuntimeUrl.ts`、`middleware.ts`、`backend/app/main.py`
+router 掛載與各 router 的 `Depends`）核對，並在 prod 以測試租戶的真實 app 逐形狀 GET 實打、
+以四種憑證交叉打四條通道實打，結論：
+
+- 網址兩線完全不同：internal `https://{tenant}.ai-go.app/runtime/{識別碼}`；external 有
+  `subdomain` 走 `https://{subdomain}.apps.ai-go.app/ext-runtime`，沒有走
+  `https://runtime.apps.ai-go.app/ext-runtime/{slug}`；測試版各多一段 `version-test`，
+  external 的測試版還要 `?preview_token=`（`POST /ext/preview-token/{slug}` 鑄）
+- 識別碼規則相反：internal 用 `url_name`（有值）否則 `slug`；external 路徑一律原始 `slug`
+  （共用 host 上 `url_name` 只租戶內唯一，平台 security review 列 CRITICAL）
+- `subdomain` 落庫真值是 `{租戶前綴}-{輸入}`（`check-subdomain` 實打回 `stored_subdomain`）；
+  internal 與 external 都可以有子網域（測試租戶實查 3 支 internal 帶 `subdomain`）；
+  裸根 `{subdomain}.apps.ai-go.app/` 是 rewrite 到 `/resolve-app`（網址不變）依 `access_mode` 渲染，
+  不是導向登入頁
+- `url_name` 只收小寫英數與連字號（`check-url-name` 實打中文回 `available: false`），
+  1.36 以前 `member-admin.md` 寫「`url_name` 可含中文會被 422 擋」是錯的
+- 端點四條通道各一組前綴、憑證不能互換（實打）：平台 JWT／app-scoped token 打 `/ext/*` 401、
+  external 使用者 token 打 `/data-center`／`/proxy` 401、對 internal slug `register` 404；
+  `/pub/*` 只有讀；`/open/*` 是 Hosted／self_built 的 API key 通道
+
+改動：
+
+- `references/platform-behaviors.md` §6.2：改寫成「Custom App 執行期網址：internal／external ×
+  正式／測試」唯一權威表，附識別碼、`subdomain` 落庫值、`version-test` 門禁、`*.apps` 共用、
+  規則 29 例外、常見錯法表、internal apps-origin 旗標的移動標靶註記；§6.1 表列改稱「執行期網域」
+- `references/custom-app-dev-guide.md`：新增 §6.0「同一支 SDK，internal 與 external 打兩組端點」
+  分流表（api／db／action／approval／user／Storage／compile）；新增 §29「存取通道端點總表」
+  （internal／external／匿名／open 四條通道的憑證、前綴、權限閘，與自建表 CRUD 四路對照）；
+  §2 補「規則 29 只管 base_url」指標；§14 補 `register` 的 `display_name` 必填、`/me/password`、
+  `manage/{app_id}/users` 管理端點、終端使用者入口連結＝執行期網址；§26 補 `subdomain`／`url_name`
+  契約與 `check-subdomain`／`check-url-name`
+- `references/member-admin.md`：`/app-login/{slug}` 一律填自動 slug（理由改為 `url_name` 可能為
+  null／發布前可改），移除「可含中文」的錯誤說法；補 external app 沒有這個落點
+- `references/event-triggers.md` §1.3：`{domain}` 改回 `apps.ai-go.app`，`subdomain` 用落庫值，
+  註明 `*.apps` 是執行期網域、internal 也可能有
+- `SKILL.md`：規則 29 區塊與核心規則 29 補「app 執行期網址不受本條管」的例外；Phase 4.1 補
+  「在瀏覽器看草稿」的網址；里程碑交付補「交付連結實開」；references 索引補 §6.2／§6.0／§29
+- `references/verification-details.md`：新增第 8 項「交付連結實開」
+- `references/troubleshooting.md`：新增「同一段 SDK 在 internal 通、external 401」與
+  「給用戶的連結 404／空殼」兩列
+- `references/data-center.md` §7、`references/hosted-apps.md` §1、`CONTEXT.md`：指到權威表
+- `scripts/aigo_auth.py`：`*.apps.ai-go.app` 的擋下訊息改為「執行期網域（internal／external 共用）」
+
 ## 1.37.0
 
 ### 自建表命名硬閘：實體名一律英文、`biz_` 前綴，既有不合規表走重建式改名

@@ -165,8 +165,12 @@ app；或問「我有沒有權限看某表」。這條線的權限是使用者�
 https://urfit.ai-go.app/api/v1/auth/login     ✅
 https://demo.ai-go.app/api/v1/builder/apps/…  ✅
 https://ai-go.app/api/v1/auth/login           ❌ 主站 apex，不是租戶入口
-https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不是 API host
+https://xxx.apps.ai-go.app/…                  ❌ Custom App 執行期網域，不是 API host
 ```
+
+> 這條只管**登入與 API 的 base_url**。app 的**執行期網址**是另一套形狀——internal 在
+> `{tenant}.ai-go.app/runtime/…`，external 在 `*.apps.ai-go.app/ext-runtime…`，各有正式／測試兩版；
+> 唯一權威表 `references/platform-behaviors.md` §6.2，別拿本條去「糾正」它。
 
 - `tenant` = 用戶平時登入時**網址列的第一段**。不確定就直接問用戶，或請對方貼登入後的網址。
 - 平台是用 **Host header** 解租戶的（`{tenant}.ai-go.app/api/*` 同源代理到後端並保留 Host），
@@ -708,6 +712,10 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
       不要往密碼、Token、權限方向深掘
     - 租戶前綴 = 用戶登入時網址列的第一段；不確定就直接問用戶，別猜
     - 細節見 `references/platform-behaviors.md` §6.1
+    - **例外：app 的執行期網址不受本條管**——external Custom App 本來就在 `*.apps.ai-go.app`
+      （有 `subdomain` 走 `{subdomain}.apps.ai-go.app/ext-runtime`，沒有走 `runtime.apps.ai-go.app/ext-runtime/{slug}`），
+      internal 在 `{tenant}.ai-go.app/runtime/{識別碼}`；測試版各多一段 `version-test`。
+      要給用戶連結時照 `platform-behaviors.md` §6.2 那張表，不要自己拼、不要拿本條判它錯
 30. **啟動先渲染 skeleton，不要讓長 API 擋住首次渲染**（★ 強制）
     - 平台會監看掛載後 **8 秒**：Shadow root 全空就自動回報 runtime error，
       並對使用者顯示「App 已載入但沒有顯示任何內容」banner
@@ -825,6 +833,9 @@ if (file) downloadFile(file);
 2. **編譯**：POST `/api/v1/compile/compile/{slug}?dev=true`
    - 腳本：`scripts/aigo_compile.py` 的 `compile_app()`
    - ⚠️ `success: true` 且 `compile_errors: []` 只代表**轉譯成功**，不代表程式語意正確（見 1.5）
+   - 要讓用戶**在瀏覽器看草稿**：internal 開 `{tenant}.ai-go.app/runtime/version-test/{識別碼}`
+     （需 `builder.access`）；external 的測試網址還要 `?preview_token=`（Builder 工具列「預覽」會自動帶），
+     形狀表與識別碼規則見 `references/platform-behaviors.md` §6.2——**不要自己拼**
 3. **編譯失敗**：解析錯誤 → 嘗試自動修復 → 重新同步 → 重新編譯（最多 5 次）
 4. **編譯成功 → 進入驗證閘門**（Phase 4.2）
 
@@ -904,6 +915,7 @@ if (file) downloadFile(file);
 
 里程碑交付：
   上述全部 + 角色白名單實測（用不在 `access_role_ids` 內的帳號開 app 應 404）+ 匿名存取（僅判進 external 的 app）
+  + 交付連結實開（照 `platform-behaviors.md` §6.2 組**正式版**網址，用非開發者帳號／external 使用者開一次；`verification-details.md` 第 8 項）
 
 Hosted App 線（不走 Phase 2–4）：
   deploy/redeploy → ✅ hosted-apps.md §3.4 部署後驗證閘門（含讀回 `always_on`＝§3.0 決策；未通過不得對外交付）
@@ -1011,7 +1023,7 @@ uv run --project scripts python scripts/report_issue.py submit "一句話標題"
 | 檔案 | 內容 |
 |------|------|
 | `CONTEXT.md` | ★ 術語表——預設表／自建表兩大類＋四個機制詞（含稱謂對照與禁用詞：舊稱 SaaS 表與外部產品名都不出現） |
-| `references/custom-app-dev-guide.md` | 核心 API 規格與架構理念；**§15.1 匿名存取的平台核可三態**、§12 Storage 坑表、**§27 租戶資料存取規則（Auth gate：403 帶 `reason` 的來源）**、§28 冷啟動／常駐（`always_on`） |
+| `references/custom-app-dev-guide.md` | 核心 API 規格與架構理念；**§6.0 SDK 依模式分流表**、**§29 四條存取通道端點總表（internal／external／匿名／open）**、**§15.1 匿名存取的平台核可三態**、§12 Storage 坑表、**§27 租戶資料存取規則（Auth gate：403 帶 `reason` 的來源）**、§28 冷啟動／常駐（`always_on`） |
 | `references/data-center.md` | 自建表完整規格（型別、配額、權限、SDK）＋ 延伸欄位（§10） |
 | `references/default-table-lookup.md` | **判「平台有沒有同語意實體」時（Phase 1.5 第 3 項、遷入 §2.4 每張表必查）**：業務語言→預設表速查、表名前綴讀法、Meta 面↔引用面對照、必填欄與唯讀表、遷入常見誤判 |
 | `references/event-triggers.md` | Webhook 與 App 排程（冪等要求、宣告、限制） |
@@ -1022,6 +1034,6 @@ uv run --project scripts python scripts/report_issue.py submit "一句話標題"
 | `references/troubleshooting.md` | **出錯時**：錯誤速查表 |
 | `references/pre-report-self-grill.md` | **回報平台問題前（必走）**：預設平台正確、六輪自審排除樹、送出條件、已排除清單 |
 | `references/issue-reporting.md` | **回報平台問題時**：BDD 撰寫規範、指令、進度追蹤 |
-| `references/platform-behaviors.md` | **實測行為補遺**：DB Proxy 分頁與筆數上限、`custom_data` 不可伺服器端過濾、TIMESTAMP 格式、seed 表唯讀、`ctx.erp` 白名單、深連結與「找不到此應用」三層（§6.2）、空渲染偵測、API 權限閘（app 軸；人軸見 dev-guide §27） |
+| `references/platform-behaviors.md` | **實測行為補遺**：DB Proxy 分頁與筆數上限、`custom_data` 不可伺服器端過濾、TIMESTAMP 格式、seed 表唯讀、`ctx.erp` 白名單、**app 執行期網址總表（§6.2：internal／external × 正式／測試）**、深連結與「找不到此應用」三層（§6.2）、空渲染偵測、API 權限閘（app 軸；人軸見 dev-guide §27） |
 | `references/hosted-apps.md` | **Hosted App（「自訂 App」）產品線**：與 Custom App 的邊界、應用形狀硬規則、部署 API、**部署後驗證閘門（§3.4＝Phase 4.2 的等價物）**、env 規則、錯誤碼對照——Phase 1.5 判斷走這條線或混合方案時讀 |
 | `references/data-operations.md` | **資料操作模式（不開發 app）**：四條使用者身分資料面與權限閘、**寫入閘門（§3.5，正式資料不可逆）**、模組 REST 慣例、匯出白名單、Meta 值域、出錯與回報出口（§7）——源頭意圖判成「資料操作」時讀 |

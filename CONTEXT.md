@@ -116,3 +116,7 @@ SDK 雙軌並存所以存量 app 不會壞；舊模型與端點尚未移除。
 - **資料存取規則（Auth gate）**：租戶自訂「角色 × 表 × 動詞 → deny／列過濾／欄遮蔽」，
   由平台在資料層執法，403 body 帶 `reason`／`rule_id`。UAT on／prod off（2026-09-07）。
   與「App API 權限閘」（app 軸、audit 模式）是兩條軸（`custom-app-dev-guide.md` §27）。
+- **執行期網址與端點跟著模式走**：internal 在租戶主站 `{tenant}.ai-go.app/runtime/{識別碼}`、
+  前端打 `/data-center`／`/proxy/{app_id}`／`/actions/apps/{app_id}`；external 在
+  `*.apps.ai-go.app/ext-runtime…`、前端打 `/ext/*`；匿名走 `/pub/*`（唯讀）；Hosted 容器走 `/open/*`。
+  測試版網址各多一段 `version-test`。權威表：網址 `platform-behaviors.md` §6.2、端點 `custom-app-dev-guide.md` §29。

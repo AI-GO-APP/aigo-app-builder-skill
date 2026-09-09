@@ -256,7 +256,8 @@ data-center/{租戶 UUID}/{表實體名}/{隨機 UUID}.{png|jpg|gif|webp}
 External app 的執行期走 `/api/v1/ext/data-center/...`——含 `GET /tables`（列出整租戶自建表
 及其欄位定義）與記錄 CRUD，但**沒有結構操作**。前端 SDK 依 `window.__IS_EXTERNAL__` 自動分流。
 **Hosted App 容器內**（`AIGO_API_TOKEN`）走 `/api/v1/open/data-center/...`——照上表路徑打會 401
-（`hosted-apps.md` §5）。
+（`hosted-apps.md` §5）。匿名訪客走 `/api/v1/pub/data-center/{slug}/...`（唯讀）。
+四條通道同一張表的完整對照（前綴、憑證、權限閘）→ `custom-app-dev-guide.md` §29。
 
 records 平面的三個契約（自己寫 client 時最常踩；2026-09-02 實測＋原始碼核對）：
 

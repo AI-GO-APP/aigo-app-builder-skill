@@ -44,7 +44,7 @@
 | 產物 | Builder 產的 React bundle（VFS + Shadow DOM） | **任意技術棧原始碼 → 容器映像** |
 | 建置 | 平台 esbuild | zbpack 自動偵測語言（免 Dockerfile；有 Dockerfile 就走 Dockerfile）；**跑在 AWS CodeBuild（東京）叢集外**（ADR 0028；UAT 2026-09-05、prod v1.13.0 2026-09-07 起）——對開發者的差別只在建置包絡與 OOM 語意（§2） |
 | 執行 | 平台 runtime 內 | Knative 容器，**scale-to-zero** |
-| 網址 | 主站內 `/runtime/...` | `https://{slug}.deploy.ai-go.app`（可綁自訂網域） |
+| 網址 | internal 在租戶主站 `/runtime/...`；external 在 `*.apps.ai-go.app/ext-runtime…`（正式／測試各一版，`platform-behaviors.md` §6.2） | `https://{slug}.deploy.ai-go.app`（可綁自訂網域；與 `*.apps.*` 是不同網域樹，不撞名） |
 | 取平台資料 | `ctx` SDK／前端 SDK | 注入的 `AIGO_*` env + Open Proxy REST |
 | 適合 | 平台內業務介面、直接吃租戶資料 | 遷入整套既有服務、自選框架、常駐進程、WebSocket（★ 單請求 300 秒上限＋最多 2 實例，§2——長連線要重連、狀態不能留在行程內） |
 

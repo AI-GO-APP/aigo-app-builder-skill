@@ -75,8 +75,11 @@ def execute(ctx):
 
 | 情況 | URL |
 |---|---|
-| app 有 `subdomain` | `https://{subdomain}.apps.{domain}/webhook/{hook_name}` |
+| app 有 `subdomain`（internal／external 都可能有） | `https://{subdomain}.apps.ai-go.app/webhook/{hook_name}`——`subdomain` 用 app 物件回讀的落庫值（形狀 `{租戶前綴}-{輸入}`，`platform-behaviors.md` §6.2） |
 | 沒有 subdomain（相容端點） | `https://{tenant}.ai-go.app/api/v1/custom-apps/webhook/{slug}/{hook_name}` |
+
+> `*.apps.ai-go.app` 是 Custom App 的執行期網域（§6.2），webhook 接收器只是掛在同一棵樹上；
+> 「無 subdomain 的 external app」執行期照樣在 `runtime.apps.ai-go.app`，只是 webhook 沒有那條形狀。
 
 > 相容端點是**依 path 的 slug 解 app**、不看 Host（核對 `backend/app/api/custom_app_webhook.py`），
 > 所以 apex `https://ai-go.app/api/v1/...` 的舊登記今天仍會投遞。但登記新的一律用租戶子網域

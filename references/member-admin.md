@@ -135,7 +135,9 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
 `/app-login/`、`/runtime/`、`/customApp/`、`/builder/`、`/dashboard/`、`/onboarding`、`/hosted-app-handoff/`。
 
 - `/app-login/{slug}`：**直達 internal Custom App 的登入頁**，中間不繞 `/register`；
-  slug 是 app 的 `url_name`／自動 slug，純 ASCII `[A-Za-z0-9/._~-]`，不可含 `?`／`#`，≤256 字
+  落點只收純 ASCII `[A-Za-z0-9/._~-]`，不可含 `?`／`#`，≤256 字。**一律填 app 的自動 `slug`**
+  （12 位十六進位）——`url_name` 可能是 `null`、發布前還能改，slug 永遠存在且不變（下方 §4 末段）。
+  external app 沒有這個落點：它的使用者不是租戶成員，入口是 app 執行期網址（`platform-behaviors.md` §6.2）
 - `/hosted-app-handoff/{slug}`：直達 Hosted internal app
 - 其餘前綴走 `/register?token=…&redirect=…`；**不指定落點的受邀者會落在 `/dashboard`**——
   對只有 app 角色的外部人員那是他沒權限的地方，**邀請外部人員一律指定落點**
@@ -144,7 +146,9 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
   `token`＋`chat_invite_link`，`POST /members` 回應的 `id`／`user_id` 是 `null`——受邀者註冊完成前**沒有成員列**，
   之後要改角色（`PUT /members/{id}`）或重寄（`resend-invite`）都要先從 `GET /members` 找到他的 id
 - 批次名單的 slug 一律用 app 的**自動 slug**（`GET /builder/apps/{id}` 的 `slug`，12 位十六進位），
-  不用 `url_name`——後者可含中文，會被 422 擋
+  不用 `url_name`——它可能是 `null`（名稱是中文時平台產不出候選）、發布前還能改；
+  （1.36 以前寫「`url_name` 可含中文會被 422 擋」是錯的：`url_name` 本身只收小寫英數與連字號，
+  prod `check-url-name` 實打，`custom-app-dev-guide.md` §26）
 
 ## 5. 角色 CRUD 流程
 
@@ -227,7 +231,7 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
 | `POST /members/roles`／帶 `role_ids` 的邀請 403 | 目標角色的 permissions 不是呼叫者權限的子集，或想鑄造的權限超出自己所有（後端子集規則） | 印出兩邊 permissions 差集給用戶看；請更高權限者操作，**不要**改用別的角色硬塞 |
 | 邀請／白名單帶角色 id 400 ★「角色不存在或不屬於此租戶：<id>」 | `role_ids`／`access_role_ids` 裡的 id 錯（三個端點同一句：`POST /invitations`、`PATCH /builder/apps/{id}/settings`、`PUT /hosted-apps/{id}/access-settings`） | 角色 id 一律從 `GET /members/roles` 取，不從別的租戶或舊筆記抄 |
 | `PATCH /builder/apps/{id}/settings` 400 ★「access_role_ids 含無效的角色 ID（需為 UUID 格式）」 | 送了角色名或非 UUID | 名 → id 先對照 |
-| `POST /invitations` 422 ★「邀請落點不可含 ? 或 #（連結尾端要接 token，會互相衝突）」／★「邀請落點不在允許清單內：/app-login/、/runtime/、/customApp/、/builder/、/dashboard/、/onboarding、/hosted-app-handoff/」／★「邀請落點只允許英數字與 / - _ . ~」 | `redirect_url` 形狀不合（fail-closed） | 照 §4 白名單組落點；slug 用 app 的自動 slug（純 ASCII），不要用含中文的 `url_name` |
+| `POST /invitations` 422 ★「邀請落點不可含 ? 或 #（連結尾端要接 token，會互相衝突）」／★「邀請落點不在允許清單內：/app-login/、/runtime/、/customApp/、/builder/、/dashboard/、/onboarding、/hosted-app-handoff/」／★「邀請落點只允許英數字與 / - _ . ~」 | `redirect_url` 形狀不合（fail-closed） | 照 §4 白名單組落點；slug 用 app 的自動 slug（永遠存在、不變），不要用可能為 `null` 的 `url_name` |
 | `POST /invitations` 422 ★「invitations require either user_id or email」 | 沒給 `email` 也沒給 `user_id` | 一人一筆，email 必填 |
 | `DELETE /invitations/{token}` 404 ★「Invitation not found.」 | token 不存在或已被新邀請作廢清掉 | 用 `GET /invitations` 現查 |
 | `DELETE /members/roles/{id}` 404 ★「角色不存在」 | id 錯或已刪 | — |
