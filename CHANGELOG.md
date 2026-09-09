@@ -4,6 +4,36 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.39.2
+
+### 更正：發布 409 的 `code` 與 gap kind 混寫；補上 1.39.1 那批宣稱的測試租戶實打佐證
+
+2026-09-09 在測試租戶把整條 egress 路徑走完（建服務 → 授權 → 停用 → 發布 → 全部刪掉），
+1.39.1 寫進去的宣稱**全部驗證為真**，但發現一處自己寫錯的欄位標題：
+
+- **`platform-behaviors.md` §13.5 的表把「執行期 error type」標成「409 的 code」**。
+  實際上發布 409 的 `code` **恆為 `EGRESS_NOT_READY`**，成因只在 `gaps[].kind`；
+  `egress_service_not_found`／`egress_service_inactive`／`egress_not_authorized`
+  是**執行期**（`ctx.http.call` 當下）的 error type，兩邊靠 `GAP_KIND_TO_ERROR_TYPE`
+  共用文案但不會出現在 409 body 裡。表頭改成「`gaps[].kind`（發布 409）｜執行期對應的
+  error type」，並附上實打回來的 409 body 原文。`troubleshooting.md` 那列同步改。
+
+同一輪補進去的實打佐證：
+
+- 建外部服務**不給 `timeout_ms`** → 落庫 `timeout_ms: 10000`（證實 1.39.1 的更正：
+  30000 是上限、10000 才是實際拿到的值）
+- `PATCH {"timeout_ms": 60000}` → 422；`PATCH {"max_response_bytes": 10485760}` → 422
+  「必須是 1～5242880 之間的正整數（bytes）」（證實 `max_response_bytes` 只調得下去）
+- 授權後把服務停用 → `available-egress-services` **照樣回它**（`is_active: false`）
+  且**仍留在 `authorized_egress_service_ids` 裡** → POST `/publish` 回 409、
+  `gaps[].kind = service_inactive`。**「已授權 ∧ 已停用」確認為可達狀態**，
+  1.39.1 補的那道判定是對的（平台自己的 `fix` 文案也寫「不要重建，slug 唯一」）
+- `authorized_egress_service_ids` 的 dict 元素形狀在**第三個租戶**再次確認
+
+誠實標註佐證強度：閘道四道上限裡，**「每分鐘 120 次」那道只有原始碼佐證、沒有實打**
+（要打滿 120 次才觸發，未做），其餘三道皆 prod 實打——`platform-behaviors.md` §13
+與 `custom-app-dev-guide.md` §25.4 都已標明。
+
 ## 1.39.1
 
 ### 修正：egress 預檢把每個 slug 都誤判成 gap、以及漏判「服務已停用」；補上閘道四道上限的零覆蓋
