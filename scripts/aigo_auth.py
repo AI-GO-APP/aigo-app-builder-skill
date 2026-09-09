@@ -645,7 +645,8 @@ def validate_base_url(base_url: str) -> str:
     故本函式直接把 apex 擋在最前面：與其讓使用者去查一個無解的「密碼錯誤」，不如當場說清楚。
 
     Raises:
-        ValueError: 空值、非 https、apex、或 `*.apps.ai-go.app`（那是 app 沙箱域，不是 API host）
+        ValueError: 空值、非 https、apex、或 `*.apps.ai-go.app`（那是 Custom App 的執行期網域，
+            internal／external 共用；不是 API host——app 網址形狀見 platform-behaviors.md §6.2）
     """
     value = (base_url or "").strip().rstrip("/")
     if not value:
@@ -674,7 +675,7 @@ def validate_base_url(base_url: str) -> str:
     if "." in prefix:
         raise ValueError(
             f"❌ `{value}` 不是租戶空間（租戶前綴只有一層）。\n"
-            f"   `*.apps.ai-go.app` 是 Custom App 的沙箱域，不是 API host。\n"
+            f"   `*.apps.ai-go.app` 是 Custom App 的執行期網域（internal／external 共用），不是 API host。\n"
             f"   規則：https://[tenant].ai-go.app/*"
         )
     return f"https://{host}"

@@ -78,5 +78,9 @@ verify_server_action(base_url, token, app_id, action_name, params)
    （`member-admin.md` §3）
 7. **匿名存取驗證**（僅判進 `starter-external` 的例外 app）— 確認 allow_anonymous_access 已啟用且平台已核可
    → /pub/ API 讀取 → 確認寫入被拒；External Auth（註冊 → 登入 → 取得用戶 → 登出）一併驗
+8. **交付連結實開**（每次里程碑必做）— 用 `GET /builder/apps/{id}` 回讀 `access_mode`／`slug`／`url_name`／
+   `subdomain`，照 `platform-behaviors.md` §6.2 組**正式版**網址（internal `/runtime/{識別碼}`；external
+   有 `subdomain` 走 `{subdomain}.apps.ai-go.app/ext-runtime`、沒有走 `runtime.apps.ai-go.app/ext-runtime/{slug}`），
+   以**非開發者帳號**（internal）或 external 使用者身分開一次；`version-test` 測試網址只給開發者，不進交付說明
 
 可使用 `scripts/aigo_e2e.py` 和 `scripts/aigo_runtime_verify.py`。

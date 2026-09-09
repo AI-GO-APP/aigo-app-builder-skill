@@ -29,6 +29,10 @@ POST https://urfit.ai-go.app/api/v1/auth/login
 ⚠️ 租戶由 **Host** 決定：同一組帳密打到別的租戶子網域，平台一律回 **401「帳號或密碼錯誤」**
 ——與密碼真的打錯**完全同形**（反帳號列舉）。查 401 先確認網址列的租戶前綴。
 
+> 這條規則管的是**登入與 API 的 base_url**。app **執行期網址**是另一套形狀（internal 在租戶主站
+> `/runtime/…`，external 在 `*.apps.ai-go.app/ext-runtime…`），唯一權威表在
+> `platform-behaviors.md` §6.2；app 內各條通道打哪個 API 前綴見 §29。
+
 ## 3. VFS 標準檔案樹
 
 ```
@@ -78,6 +82,29 @@ POST /api/v1/compile/compile/{slug}?dev=true
 External 模組（不需安裝）：react, react-dom, lucide-react, react-router-dom, react-hot-toast
 
 ## 6. 內建 SDK
+
+### 6.0 同一支 SDK，internal 與 external 打的是兩組端點（★ 先看這張表）
+
+SDK 模板在執行期讀 `!!window.__IS_EXTERNAL__` 自動分流；**程式碼不用改，但端點、憑證與權限閘
+完全不同**，自己寫 fetch 或本地腳本重現時要照模式選（完整端點對照與匿名／Hosted 兩線見 §29）：
+
+| SDK 檔 | internal（`__APP_TOKEN__`＝app-scoped JWT，代表**登入者**） | external（`__APP_TOKEN__`＝終端使用者 token，代表 **app 使用者**） |
+|---|---|---|
+| `api.ts` 自建表 | `/api/v1/data-center/tables/{key}/records`（掛 `builder.access`，§7.5） | `/api/v1/ext/data-center/tables/{key}/records`（無結構操作） |
+| `db.ts` 預設表 proxy | `/api/v1/proxy/{app_id}/{table}…` | `/api/v1/ext/proxy/{table}…`（路徑**沒有** `app_id`，app 由 token 決定） |
+| `action.ts` | `/api/v1/actions/apps/{app_id}/run/{name}`（可 `use_dev`） | `/api/v1/ext/actions/run/{name}`（**只讀 `published_vfs`**，沒有 dev 版） |
+| `approval.ts` | `/api/v1/approvals/*` | **不支援**——SDK 直接拋錯（§24.4） |
+| `user.ts` | 讀注入的 `__USER_ROLES__`／`__USER_PERMISSIONS__` | 快照恆空（§13） |
+| Storage（無 SDK 檔） | `/api/v1/storage/upload`（`files.access`）＋ `data-center` 圖片端點 | `/api/v1/ext/storage/{upload,url,list,file}`（§12） |
+| 編譯（Builder 側） | `/api/v1/compile/compile/{slug}` | 同一支；另有 `/api/v1/ext/compile/compile/{slug}` 給 external 執行期鏈路 |
+
+- `/ext/*` 只收 **external／self_built** app 由 `custom-app-auth` 發的使用者 token（2026-09-09 測試租戶實打）：
+  平台 JWT 或 app-scoped token 打 `/ext/*` → **401「無效或已過期的 Token」**；external 使用者 token 打
+  `/data-center`、`/proxy/{app_id}` → **401「Invalid authentication token」**；對 internal app 的 slug
+  `register` → **404「App 不存在」**（internal app 根本發不出這種 token）。
+  「SDK 在 internal 通、搬到 external 就 401」多半是自己硬編了前綴，不是平台壞。
+- `legacy` 的 `listRecords`／`submitRecord`（CustomObject，`/api/v1/data/objects/*`）**沒有**分流——
+  external app 沿用它會打到 internal 端點；平台另有 `/api/v1/ext/data/*` 但 SDK 模板未接。存量才會碰到，新開發不用。
 
 ### 自建表 (api.ts)
 
@@ -328,7 +355,8 @@ action 路徑約定不變：`actions/**.py` 是可呼叫 action（`action_name` 
 
 端點前綴：`/api/v1/custom-app-auth/{slug}/`
 
-- POST `.../register` → 註冊
+- POST `.../register` → 註冊（body `{email, password, display_name}`——**`display_name` 必填**，
+  少了回 422 `Field required`；成功 201 直接回 `access_token`。2026-09-09 測試租戶實打）
 - POST `.../login` → 登入
 - GET `.../me` → 當前用戶
 - **PATCH `.../me`** → 使用者改自己的顯示名稱（2026-08 起）。
@@ -336,8 +364,17 @@ action 路徑約定不變：`actions/**.py` 是可呼叫 action（`action_name` 
   身分由 token 決定，天然只能改自己；不撤 session
 - POST `.../refresh` → 刷新 Token
 - POST `.../logout` → 登出
+- **POST `.../me/password`** → 使用者自助改密碼（憑 token 改自己的）
+- 管理面（Builder 側，平台身分＋`builder.access`，**不是** app 使用者 token）：
+  `GET /api/v1/custom-app-auth/manage/{app_id}/users` 列出、`PATCH .../users/{user_id}`
+  改 `is_active`／`display_name`／`email`／重設 `password`（重設不驗舊密碼、撤銷該人全部 session）、
+  `DELETE .../users/{user_id}`。這是「停用／清理自助註冊帳號」的入口，仍**不是**邀請或角色
 
 Auth SDK：`window.__auth__.login()`, `.register()`, `.logout()`, `.getToken()`
+
+**終端使用者的入口連結**就是 app 的執行期網址（`platform-behaviors.md` §6.2 external 那兩列）——
+他們不是租戶成員，沒有 `/app-login/{slug}`、也不走邀請；登入頁由 app 自己用 `__auth__` 做。
+給客戶的連結一律是**正式版**（`/ext-runtime`），`version-test` 那條要 `?preview_token=` 且只給開發者。
 
 ### 14.1 邀請平台使用者直達 App（internal app 的成員邀請）
 
@@ -1312,11 +1349,21 @@ POST /api/v1/builder/apps          （權限：builder.access）
 {
   "name": "我的系統",                    // 必填，1–100 字
   "template_slug": "starter-internal",  // 必填——API 是模板驅動，不能建純空白 app
-  "subdomain": "...",                   // 選填；撞名 422
-  "url_name": "..."                     // 選填；未填由 name 自動產生
+  "subdomain": "...",                   // 選填；撞名 422；4–63 字
+  "url_name": "..."                     // 選填；未填由 name 自動產生（中文名產不出→留 null）
 }
 → 201 CustomAppResponse——app_id 從回應的 id 拿，回填 .aigo/config.json
 ```
+
+兩個網址欄位的契約（決定 app 網址長什麼樣，`platform-behaviors.md` §6.2）：
+
+- **`subdomain` 落庫值＝`{租戶前綴}-{你填的值}`**，不是你填的原字串。建立前可先
+  `GET /builder/apps/check-subdomain/{值}` → `{available, reason, stored_subdomain}`（prod 實打），
+  組網址一律用回讀的 `stored_subdomain`／app 物件的 `subdomain`。internal 與 external 都可以有。
+- **`url_name` 只允許小寫英數與連字號、不可連字號開頭結尾**（`GET /builder/apps/check-url-name/{值}`
+  prod 實打，中文回 `available: false`＋這句 reason）。名稱是中文時自動產生會得到空值，
+  app 物件的 `url_name` 就是 `null` 或等於 `slug`；**發布後凍結**。它只用在 internal 網址的路徑，
+  external 的路徑永遠用 `slug`（§6.2 的理由）。
 
 ### 26.1 起手式模板怎麼選（★ 建立前先確認情景）
 
@@ -1456,4 +1503,40 @@ PATCH /api/v1/builder/apps/{app_id}/runtime-settings   （builder.publish）
   平台自己鎖常駐），所以**只剩一題**——問 owner「閒置後第一個人打開要等 N 秒能不能接受」，問出實際秒數，
   容忍不了才開並寫下依據；「第一發慢」本身不是理由，純排程／批次 app 不開。agent 不自行開、
   也不把「要不要常駐」丟給 owner 選；開了在交付說明留一句「常駐＝開，理由 X；退場條件 Y」
+
+## 29. 存取通道端點總表：internal／external／匿名／Hosted（★ 四條通道，四種憑證）
+
+> 核自 `backend/app/main.py` 的 router 掛載與各 router 的 `Depends`（2026-09-09），並以 prod
+> `/api/v1/openapi.json` 逐條對照（`aigo_data.py openapi paths --prefix /api/v1/ext|/pub|/open`
+> 三組路徑與原始碼一致）。**同一種資料在四條通道各有一組前綴，憑證不能互換。**
+
+| 通道 | 誰在用 | 憑證 | 前綴 | 權限閘 |
+|---|---|---|---|---|
+| **internal** | internal Custom App 前端（登入者） | `__APP_TOKEN__`＝app-scoped JWT（代表登入者；`POST /app-scoped-token/{app_id}`／`app-runtime-session` 發） | `/api/v1/data-center`、`/proxy/{app_id}`、`/actions/apps/{app_id}`、`/storage`、`/approvals`、`/refs` | 登入者的權限（自建表記錄 CRUD 掛 `builder.access`，§7.5；預設表看 Data Reference 授權） |
+| **external** | external／self_built Custom App 前端（app 使用者） | `__APP_TOKEN__`＝`custom-app-auth` 發的使用者 token（claim 帶 `custom_app_id`） | `/api/v1/ext/{data-center,proxy,actions,storage,data,compile,preview-token,runtime-errors}`＋`/custom-app-auth/{slug}/*` | app 脈絡，不驗使用者權限；別種憑證一律 401「無效或已過期的 Token」（實打） |
+| **匿名** | 未登入訪客（只有 external／self_built 可開） | 無 | `/api/v1/pub/{data-center,proxy,data}/{slug}/…`（**唯讀**：只有 GET／`query`） | 表要 `is_public_readable`＋app 開旗標＋**平台核可**（§15.1）；120 次/分/IP |
+| **Hosted／self_built 後端** | Hosted App 容器、第三方自建應用 | `Authorization: Bearer <API key>`（容器內 `AIGO_API_TOKEN`；`X-API-Key` 相容） | `/api/v1/open/{data-center,proxy,data}` | app 身分（沒有 user）；預設表零授權起步，600 次/分/key（`hosted-apps.md` §5） |
+
+同一張表的四條路徑（自建表記錄為例；預設表把 `data-center/tables/{key}/records` 換成 `proxy/{table}` 即可）：
+
+| 動作 | internal | external | 匿名 | open |
+|---|---|---|---|---|
+| 列表 | `GET /data-center/tables` | `GET /ext/data-center/tables` | `GET /pub/data-center/{slug}/tables` | `GET /open/data-center/tables` |
+| 查 | `GET /data-center/tables/{key}/records` | `GET /ext/data-center/tables/{key}/records` | `GET /pub/data-center/{slug}/tables/{key}/records` | `GET /open/data-center/tables/{key}/records` |
+| 增 | `POST …/records` | `POST /ext/…/records` | — | `POST /open/…/records` |
+| 改 | `PATCH …/records/{id}` | `PATCH /ext/…/records/{id}` | — | `PATCH /open/…/records/{id}` |
+| 刪 | `DELETE …/records/{id}` | `DELETE /ext/…/records/{id}` | — | `DELETE /open/…/records/{id}` |
+| 預設表 proxy | `/proxy/{app_id}/{table}`、`…/query`、`…/{row_id}` | `/ext/proxy/{table}`（無 `app_id`） | `GET /pub/proxy/{slug}/{table}`、`POST …/query` | `/open/proxy/{table}` |
+| 跑 action | `POST /actions/apps/{app_id}/run/{name}` | `POST /ext/actions/run/{name}`（只讀已發布） | — | —（Hosted 沒有 action） |
+| 結構操作（建表／欄位） | `/data-center/tables…`（`system.admin`） | **無** | **無** | **無** |
+
+- **不要在 app 內硬編任何一組前綴**：SDK 讀 `__IS_EXTERNAL__` 自動分流（§6.0）。本地腳本要重現
+  external 鏈路時先走 §14 登入拿使用者 token，再打 `/ext/*`；拿平台 JWT 或 app-scoped token 打
+  `/ext/*` 是 401「無效或已過期的 Token」（§12 的實打）。
+- `/pub/*` 沒有寫入端點——匿名頁的「送出表單」要嘛做成 external 使用者登入後寫，要嘛由
+  Server Action 代寫（action 只能被已登入者觸發）。
+- Server Action 內的 `ctx.db`／`ctx.erp` 走第五條通道 `/internal/ctx/invoke`（invocation token，
+  不驗使用者權限，`data-center.md` §7.5）——它不在上表，因為前端碰不到。
+- `/ext/data`、`/open/data`、`/pub/data` 是 legacy CustomObject 的對應面（`data-center.md` §8），
+  只讀不加。
 

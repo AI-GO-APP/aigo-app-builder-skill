@@ -279,7 +279,7 @@ HTTP 409
 | `https://urfit.ai-go.app/login`、`/api/v1/*` | **正確** |
 | `https://ai-go.app/login` | 主站 apex，已收斂成 **workspace finder**（找工作區的頁面），不是登入頁 |
 | `https://ai-go.app/api/v1/auth/login` | **401「帳號或密碼錯誤」**（實測，正確帳密；apex 推不出租戶 → fail-closed） |
-| `https://xxx.apps.ai-go.app/*` | Custom App 沙箱域，不是 API host |
+| `https://xxx.apps.ai-go.app/*` | Custom App 的**執行期網域**（internal／external 共用，§6.2），不是 API host |
 
 實測對照（2026-08-08，同一組正確帳密）：
 
@@ -295,17 +295,56 @@ POST https://urfit.ai-go.app/api/v1/auth/login → 200 {"access_token": ...}
 
 本 Skill 的 `aigo_auth.resolve_base_url()` 因此**直接擋掉 apex，且不留任何預設值**。
 
-### 6.2 Internal App 的執行期網址
+### 6.2 Custom App 執行期網址：internal／external × 正式／測試（★ 唯一權威表）
 
-```
-https://{tenant}.ai-go.app/runtime/{slug}
-```
+> 來源：平台前端的**單一網址產生器** `frontend/src/lib/appUrl.ts`＋`externalRuntimeUrl.ts`
+> 與路由 `frontend/src/middleware.ts`（2026-09-09 核對），並於同日在 prod 以測試租戶的
+> 真實 app 逐形狀 GET 實打（下表每一格都開得起來）。**其他檔案只指到這裡，不要另抄一份。**
 
-| 寫法 | 結果 |
+| 模式 | 正式（已發布版） | 測試（開發預覽版，讀草稿 VFS） |
+|---|---|---|
+| **internal** | `https://{tenant}.ai-go.app/runtime/{識別碼}` | `https://{tenant}.ai-go.app/runtime/version-test/{識別碼}` |
+| **external**，有 `subdomain` | `https://{subdomain}.apps.ai-go.app/ext-runtime` | `https://{subdomain}.apps.ai-go.app/ext-runtime/version-test` |
+| **external**，無 `subdomain` | `https://runtime.apps.ai-go.app/ext-runtime/{slug}` | `https://runtime.apps.ai-go.app/ext-runtime/version-test/{slug}` |
+
+兩線的規則**相反**，缺任何一條就會產出死連結或錯 app：
+
+- **識別碼**：internal 用 `url_name`（有值時）、否則用 12 位隨機 `slug`，兩者都可解析；
+  **external 的路徑一律用原始 `slug`，不可用 `url_name`**——`runtime.apps.ai-go.app` 是所有租戶
+  共用的 host，而 `url_name` 只保證租戶內唯一（平台 2026-08-03 security review 列 CRITICAL，
+  解析端遇到歧義 fail-closed）。有 `subdomain` 的 external app 路徑上沒有識別碼，app 由 host 決定。
+- **`subdomain` 的落庫真值是 `{租戶前綴}-{使用者輸入}`**（`POST /builder/apps` 建立時由後端
+  `compose_stored_subdomain` 組出；prod 實打 `GET /builder/apps/check-subdomain/{輸入}` 回
+  `{"available": true, "stored_subdomain": "<租戶>-<輸入>"}`）。組網址要用 app 物件回讀的
+  `subdomain` 欄位，**拿使用者輸入直接拼就是死連結**。早期 app 有無前綴的 legacy 值（照回讀值用）。
+- **測試版（`version-test`）的門禁**：internal 走平台登入（未登入導 `/app-login/{slug}`，需
+  `builder.access`）；**external 還要在網址後附 `?preview_token=…`**——Builder 工具列的「預覽」
+  按鈕會先 `POST /api/v1/ext/preview-token/{slug}`（平台 owner 身分）鑄一顆短效 token 再開頁。
+  自己組 external 測試網址而沒帶 token，開到的是空殼。external 的 action 執行期**只讀
+  `published_vfs`**（`/ext/actions/run` 沒有 dev 版），所以 external 的「測試」只測前端草稿。
+- **`*.apps.ai-go.app` 是 Custom App 的執行期網域，兩種模式共用**——測試租戶實查有 3 支
+  internal app 帶 `subdomain`。裸根 `https://{subdomain}.apps.ai-go.app/` 會 rewrite 到
+  `/resolve-app/{subdomain}`（**網址不變**，不是導向登入頁），由後端查 `access_mode` 後渲染對應
+  runtime；該 host 上的 `/login`、`/app-login/*` 才會 307 回**主站**登入頁。
+  路由只看路徑形狀（`/runtime` vs `/ext-runtime`），模式錯了要到 API 層才 401／403。
+- **這條例外不受規則 29 管**：規則 29「一律 `https://[tenant].ai-go.app/*`」講的是**登入與 API
+  的 base_url**；app 的執行期網址本來就可能落在 `*.apps.ai-go.app`，`aigo_auth.resolve_base_url()`
+  擋它是因為它不是 API host，不是因為它是錯的 app 網址。
+- **不要自己拼**：Builder 工具列的「開啟」「預覽」、App 設定頁的分享連結都出自同一支產生器；
+  要給用戶連結時優先請對方從那裡複製，或用 `GET /builder/apps/{id}` 回讀 `access_mode`／
+  `slug`／`url_name`／`subdomain` 照上表組。
+
+| 常見錯法 | 結果 |
 |---|---|
-| `{tenant}.ai-go.app/runtime/{slug}` | **正確** |
-| `{tenant}.ai-go.app/{slug}` | 404 |
-| `{subdomain}.apps.ai-go.app` | 導向獨立登入頁（供 external app 用） |
+| `{tenant}.ai-go.app/{slug}`（漏 `/runtime/`） | 404 |
+| external 用 `runtime.apps.ai-go.app/ext-runtime/{url_name}` | 全域恰好一筆時會開，撞名即 fail-closed——**不是產生器輸出，不要外流** |
+| `apps.ai-go.app/{slug}`（無子網域前綴的 path-based 別名） | 會開 internal app，但不是產生器輸出，不要外流 |
+| 主站 `{tenant}.ai-go.app/ext-runtime/{slug}` | 307 到 `runtime.apps.ai-go.app`（相容轉址，別當正式網址） |
+| 網址尾端多一個 `/`（`/ext-runtime/`） | 308 去掉尾斜線，可用但多一跳 |
+
+⚠️ **移動標靶**：internal app 搬到 `{tenant}.apps.ai-go.app/{識別碼}` 的路由已寫好但由旗標
+`INTERNAL_APP_APPS_ORIGIN_ENABLED` 關著（2026-09-09 prod 實打該形狀回 404）。上表 internal
+那列是**現行**形狀；平台開旗標後只有 origin 會換、路徑規則不變。
 
 另外兩點對自動化測試有影響：
 
