@@ -393,12 +393,19 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
      受眾中有沒有**無 `builder.access` 的一般成員**（一般員工、外部人員都算）？
      - 有（絕大多數情況）→ 自建表存取**全部包 Server Action**，前端不直呼 `queryTable` 等方法
      - 受眾全員持有 `builder.access` 的開發工具型 app → 前端 SDK 可直呼
-   - **盤點兩邊**（順序不可省）：
+   - **盤點兩邊**（順序不可省，★ 兩邊都是硬閘）：
      - `GET /api/v1/data-center/tables` — 租戶既有自建表（Phase 0 已做，此處覆核）
-     - `GET /api/v1/refs/available-tables` — 可引用的預設表清單
+     - **預設表語意對照**——每個實體先用業務語言查 `references/default-table-lookup.md` §2，
+       再 `aigo_data.py meta tables --source erp --grep <關鍵字>` 看中文標題；
+       `GET /api/v1/refs/available-tables` 只是表名清單（`comment` 實務上為空），不能當語意來源
      - 對候選預設表呼叫 `GET /api/v1/refs/tables/{name}/columns` 查欄位結構
+       （Meta key 與引用面表名不同時依查表 §3 換名再打）
        ⚠️ **查到的表沒有 `tenant_id` 是正常的**，不代表不安全，也不要自補過濾——見規則 25
    - 列出所有需要的資料表（來源：§1.0 的資料實體清單），逐表判定走哪一軌（判定標準見規則 18）
+   - **產出：資料承載表**（每個實體一列，寫進計畫；模板在 `new_app_requirements_template.md` §五、
+     遷入線在 `migration_mapping_template.md` 每張表的對照項）
+     `| 實體 | 用業務語言說是什麼 | 已對照的預設表（Meta 標題） | 採用／不採用理由 | 軌 |`
+     ——走自建表的列，「已對照」與「不採用理由」兩欄**不得為空**；「沒想到有」不是理由，「查過沒有」才是
    - **重用優先於新建**：既有自建表語意相同就重用，不要新建；
      **重用的表欄位不足 → 直接加實體欄位**（`data-center.md` §7 加欄），
      不要因缺欄就另建新表或把結構化欄位塞進 json 欄
@@ -458,8 +465,10 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
 
 ### 計畫閘門
 
-- **新建情景：§1.0 四問未齊、或計畫裡沒有「需求形狀結論」「app 分配表」「授權架構表」→ 不算完成計畫，
-  不得送閘門**——先回 §1.0／1.7 補問；遷入情景同樣要有 app 分配表與授權架構表
+- **新建情景：§1.0 四問未齊、或計畫裡沒有「需求形狀結論」「app 分配表」「授權架構表」「資料承載表」→ 不算完成計畫，
+  不得送閘門**——先回 §1.0／1.7／第 3 項補；遷入情景同樣要有這四張表
+- **資料承載表裡任何一張自建表缺「已對照的預設表／不採用理由」→ 不算完成計畫**——
+  這道閘與 Phase 0 步驟 6 的自建表盤點同級（issue #53：少了它，46 張表的遷入案第一版判了 40 張自建表，對照後只剩 13 張）
 - **必須等待用戶明確回覆「同意」或提供修改意見後，才可進入 Phase 2**
 - 若用戶修改需求，需更新計畫後再次確認
 - 計畫確認後：
@@ -517,16 +526,18 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
 
     | 資料性質 | 走哪一軌 | 理由 |
     |---------|---------|------|
-    | 要與平台既有功能連動（看板、專案、發票、客戶…） | **Data Reference**（原生欄位優先） | 與平台功能共用同一份資料 |
+    | **平台有同語意的實體**（案件追蹤、往來對象、專案、交付物、待辦…——先用業務語言查 `references/default-table-lookup.md` §2） | **Data Reference**（原生欄位優先） | 與平台功能共用同一份資料；舉證責任在「為什麼不用預設表」 |
     | 預設表缺「租戶級正式欄位」 | Data Reference 的**延伸欄位**（EAV） | 有型別、全租戶可見；讀寫走獨立端點（`data-center.md` §10） |
-    | 租戶自有的新業務實體（外部系統遷入的表最常見） | **自建表** | 租戶級真實資料表，跨 app 共用 |
+    | 平台**沒有**同語意實體（查過查表與 Meta API 仍無：領域專屬紀錄、公開爬蟲資料…） | **自建表** | 租戶級真實資料表，跨 app 共用 |
     | app 私有標記（`app_domain`）、臨時、鬆散、不值得定義欄位 | 預設表的 `custom_data` JSONB | 免定義成本 |
 
     完整決策樹（表級 → 欄位級，直接開發與遷入同一棵）見
     `references/custom-app-dev-guide.md` **§19（SSOT）**——與本表出入時以 §19 為準。
 
-    - **自建表不是「最後手段」**——它是租戶級的真實 Postgres 表，200 張配額（付費檔），
-      是遷入案例的主力承載體。
+    - **自建表不是「最後手段」，也不是遷入的預設答案**——它是租戶級的真實 Postgres 表（200 張配額，付費檔），
+      該用就用；但遷入的表語意落在 CRM、專案、銷售採購、HR、會計時**預設引用預設表**，
+      只有平台真的沒有對應實體才自建。每張自建表都要附「已對照 <預設表>／不採用理由」
+      （Phase 1.5 第 3 項的資料承載表；issue #53：跳過對照的計畫把 13 張表做成 40 張）
     - **既有表欄位不夠 ≠ 換軌或塞 json**：自建表可直接**加實體欄位**
       （`data-center.md` §7）；預設表本體不可改，但可加**延伸欄位**
       （租戶級正式欄位，EAV，`data-center.md` §10）——`custom_data` 不是
@@ -954,9 +965,10 @@ uv run --project scripts python scripts/report_issue.py submit "一句話標題"
 
 | 檔案 | 內容 |
 |------|------|
-| `CONTEXT.md` | ★ 術語表——預設表／自建表兩大類＋四個機制詞（含稱謂對照：舊稱 SaaS 表已停用） |
+| `CONTEXT.md` | ★ 術語表——預設表／自建表兩大類＋四個機制詞（含稱謂對照與禁用詞：舊稱 SaaS 表與外部產品名都不出現） |
 | `references/custom-app-dev-guide.md` | 核心 API 規格與架構理念；**§15.1 匿名存取的平台核可三態**、§12 Storage 坑表、**§27 租戶資料存取規則（Auth gate：403 帶 `reason` 的來源）**、§28 冷啟動／常駐（`always_on`） |
 | `references/data-center.md` | 自建表完整規格（型別、配額、權限、SDK）＋ 延伸欄位（§10） |
+| `references/default-table-lookup.md` | **判「平台有沒有同語意實體」時（Phase 1.5 第 3 項、遷入 §2.4 每張表必查）**：業務語言→預設表速查、表名前綴讀法、Meta 面↔引用面對照、必填欄與唯讀表、遷入常見誤判 |
 | `references/event-triggers.md` | Webhook 與 App 排程（冪等要求、宣告、限制） |
 | `references/product-line-decision.md` | **Phase 1.5 判產品線與模式時（兩條路共用 SSOT）**：預設 Custom App 與偏離訊號、Custom App 能力邊界核對表、兩問四象限（登入者一律 internal）、混合方案分工（含 Hosted 當 Custom 後端）、不可逆前提、app 分配表 |
 | `references/member-admin.md` | **Phase 1.5 第 1.7 項授權架構選型的 SSOT ＋ 成員／角色管理 playbook**：內外人員共用帳號體系的立場、三問與授權架構表、邀請／角色端點與權限、`access_role_ids`（兩條線）、批次邀請流程與四個邊界、Hosted internal 的身分 header、既有系統使用者搬遷、403 解讀 |

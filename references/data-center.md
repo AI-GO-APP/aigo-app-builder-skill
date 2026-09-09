@@ -59,7 +59,10 @@
 
 ```
 1. GET /api/v1/data-center/tables        ← 盤點租戶既有自建表（不可跳過）
-2. 有語意相同的表？ → 重用，不要新建
+2. 有語意相同的自建表？ → 重用，不要新建
+2.5 平台有同語意的預設表？（default-table-lookup.md §2 ＋ Meta API；同樣不可跳過）
+    → 有 → 走 Data Reference，不建表
+    → 沒有 → 資料承載表寫下「已對照 X／不採用理由」再往下
 3. 需要新表 → 產出「建表規格」給用戶確認（Phase 1.5 計畫閘門）
 4. POST /api/v1/data-center/tables
    ├─ 201 → GET 驗收，繼續開發

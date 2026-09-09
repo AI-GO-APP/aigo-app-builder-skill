@@ -103,7 +103,7 @@
 | `window.__CURRENT_USER__` 是 undefined | 這個全域**任何模式都不存在**（不是 internal 才沒有）。要身分改解 `__APP_TOKEN__` 的 JWT payload；要權限用 `__USER_PERMISSIONS__` → `platform-behaviors.md` §10 |
 | `__IS_AUTHENTICATED__` 讀到 undefined／恆為 false | 它只在**匿名渲染**注入且恆為 `false`，不能拿來判斷「是否已登入」→ `platform-behaviors.md` §10.1 |
 | 扣帳成功但單據還是「未扣帳」 | `stock_pickings.state` 不會變，只有 `date_done` 會寫；冪等要看 `stock_moves.state` → `platform-behaviors.md` §4.3 |
-| validate 後庫存沒動、也不報錯 | 該單沒有 `stock_moves` 明細；明細是 seed 表 App 寫不了，要先在 ERP 補。UI 應在明細為空時停用按鈕 → `platform-behaviors.md` §4.3 |
+| validate 後庫存沒動、也不報錯 | 該單沒有 `stock_moves` 明細；明細是 seed 表 App 寫不了，要先在平台模組介面補。UI 應在明細為空時停用按鈕 → `platform-behaviors.md` §4.3 |
 | 身分欄位被填成別人的 id | 前端從 token 解出的 `sub` 可被竄改。Server Action 一律用 `ctx.user_id` 覆蓋前端送來的值 → `platform-behaviors.md` §10.3 |
 | **前端 `db.update()` 回 405** | 舊版注入的 `src/db.ts` 送 `PUT`，資料代理只收 `PATCH`（2026-09-01 修 SDK 模板）。換成最新模板或直接 fetch 用 `PATCH`；不是權限問題 → SKILL.md 規則 12 |
 | **呼叫 action 回 503「app runner 暫時不可用」且 body 帶 `quota_hint`** | 租戶運算配額吃緊、pod 建不出來（2026-09-03 起 backend 會把配額說明接在 `detail` 後並帶頂層 `quota_hint`）。**不是 code 問題**：轉告用戶、引導到「運算資源」頁或找管理員；沒有 `quota_hint` 的 503 才依 `Retry-After` 退避重試 |
