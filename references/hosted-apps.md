@@ -382,9 +382,23 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
   **400「角色不存在或不屬於此租戶：<id>」**
 - **有登入者就是 `internal`**——員工、外部經銷商、客戶都是租戶成員，用 `access_role_ids` 分流；
   `public` 只給沒有登入者的公開站，或當 Custom App 後端時（§5.1）
-- **容器收到的身分**（proxy 驗過後注入，先剝掉 client 自帶的同名 header）：`X-Aigo-User-Id`、
-  `X-Aigo-Tenant-Id`、`X-Aigo-App-Id`、`X-Aigo-Population`，空值不注入。**沒有 email、roles、
-  permissions**——app 內做不到依角色分功能，角色分流只能在門口用 `access_role_ids`（`member-admin.md` §6）
+- **容器收到的身分：一個都沒有**（2026-09-09 測試租戶實打）。部署一支只把收到的 header 原樣印出來的
+  app（`internal` ＋ `access_role_ids=[]`），以成員身分走完交遞後開啟：容器只看到 `Host`／`Accept`／
+  `Forwarded`／`K-Proxy-Request`／`X-Envoy-Original-Host`／`X-Forwarded-*`／`X-Request-Id` 這類轉送
+  header，**一個 `X-Aigo-*` 都沒有**，`Cookie` 也沒有。⇒ **app 分不出這次請求是哪一位使用者**，
+  更談不上 email／roles／permissions。
+  ⚠️ 1.35.0 以前本節寫「proxy 驗過後注入 `X-Aigo-User-Id`／`-Tenant-Id`／`-App-Id`／`-Population`
+  四個 header」是**錯的**——那是平台另一條**尚未接線**的資料面設計，不是 Hosted App 的現況；
+  照它寫 app 會拿到一片空白。
+- **`AIGO_API_TOKEN` 是 app 身分不是使用者身分**：容器內拿它打 `/api/v1/auth/me`、`/api/v1/members`、
+  `/api/v1/members/{id}/linked-roles`、`/api/v1/members/roles` 一律 **401** `Invalid authentication token`
+  （API Key 只在 `/api/v1/open/*` 有效）；open proxy 打 `users`／`roles`／`user_role_rel`／`members`
+  一律 **403**「App 未被授權存取表」（這四張是平台身分表，引用面根本列不出來）。
+  對照組 `/api/v1/open/data-center/tables` 200，證明憑證本身有效。**已回報平台（2026-09-09）**，不必重複開單
+- ⇒ **角色分流只能在門口用 `access_role_ids`**（`member-admin.md` §6）。要在畫面內依角色開關功能，
+  三選一：① 該部分做成 Custom internal app（runtime 有 `__USER_ROLES__`／`__USER_PERMISSIONS__`）；
+  ② Custom App 當前端 ＋ Hosted 設 `public` 當後端、由 app 自驗簽章（§5.1）；
+  ③ 按角色拆成多支 internal Hosted App，各自掛不同 `access_role_ids`
 - 邀請成員直達 internal app：`redirect_url` 用 `/hosted-app-handoff/{slug}`（`member-admin.md` §4）
 - internal app 的認證由平台 proxy 處理，**app 端幾乎不用做事**，只有一條要寫對：
   - HTML 導覽 → proxy 自己 302 去登入

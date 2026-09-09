@@ -369,7 +369,8 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
      ② 每支 app 誰能開 → `access_role_ids`（空＝全租戶成員；Custom 與 Hosted 都有此欄）；
      ③ 人怎麼進來 → 已是成員／邀請（一人一連結、落點直達 app）／既有系統搬遷（`member-admin.md` §7）
    - **要攤開的陷阱**：非員工帳號沒有員工列，租戶資料存取規則用到 `$user.employee_id` 類欄位會對他們
-     整列 deny；Hosted internal app 內拿不到角色（只有四個身分 header），角色分流只能在門口做；
+     整列 deny；Hosted internal app 內**拿不到任何身分**（連使用者 id 都沒有，2026-09-09 實打），
+     角色分流只能在門口做，要在畫面內分流就得換 Custom internal app；
      外部人員角色的 permissions 從空集合起步，`system.*`／`hr.*`／`accounting.*` 不給
    - **產出：授權架構表**（與 app 分配表並列寫進計畫；確認後照表建角色、設白名單、發邀請）
      `| app（alias） | 模式 | access_role_ids（角色名） | 角色 → permissions（新開／沿用） | 進入方式／邀請落點 |`
@@ -974,7 +975,7 @@ uv run --project scripts python scripts/report_issue.py submit "一句話標題"
 | `references/default-table-lookup.md` | **判「平台有沒有同語意實體」時（Phase 1.5 第 3 項、遷入 §2.4 每張表必查）**：業務語言→預設表速查、表名前綴讀法、Meta 面↔引用面對照、必填欄與唯讀表、遷入常見誤判 |
 | `references/event-triggers.md` | Webhook 與 App 排程（冪等要求、宣告、限制） |
 | `references/product-line-decision.md` | **Phase 1.5 判產品線與模式時（兩條路共用 SSOT）**：預設 Custom App 與偏離訊號、Custom App 能力邊界核對表、兩問四象限（登入者一律 internal）、混合方案分工（含 Hosted 當 Custom 後端）、不可逆前提、app 分配表 |
-| `references/member-admin.md` | **Phase 1.5 第 1.7 項授權架構選型的 SSOT ＋ 成員／角色管理 playbook**：內外人員共用帳號體系的立場、三問與授權架構表、邀請／角色端點與權限、`access_role_ids`（兩條線）、批次邀請流程與四個邊界、Hosted internal 的身分 header、既有系統使用者搬遷、403 解讀 |
+| `references/member-admin.md` | **Phase 1.5 第 1.7 項授權架構選型的 SSOT ＋ 成員／角色管理 playbook**：內外人員共用帳號體系的立場、三問與授權架構表、邀請／角色端點與權限、`access_role_ids`（兩條線）、批次邀請流程與四個邊界、Hosted internal 拿不到任何身分、既有系統使用者搬遷、403 解讀 |
 | `references/migration-workflow.md` | **有現存系統要遷入時**：stack 盤點（§2.0，最先做）、產品線判斷的遷入輸入（§2.1）、專案解構、Schema 映射、資料遷移 |
 | `references/verification-details.md` | **要執行驗證時**：四項驗證的完整定義、Phase 5 里程碑 |
 | `references/troubleshooting.md` | **出錯時**：錯誤速查表 |
