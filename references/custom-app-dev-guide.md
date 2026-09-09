@@ -220,6 +220,26 @@ POST /api/v1/builder/apps/{app_id}/publish
 {"published_assets": {}}
 ```
 
+三個 query 參數（皆選填、預設 `false`；2026-09-09 prod 實打皆生效）：
+
+| 參數 | 作用 | 什麼時候帶 |
+|---|---|---|
+| `confirm_removal=true` | 略過 409 `ACTION_REMOVAL`（本次發布會移除既有 action） | 用戶確認要移除該 action，且知道綁在它上面的 webhook／排程會斷 |
+| `confirm_egress_gaps=true` | 略過 409 `EGRESS_NOT_READY`（外部服務／金鑰未到位） | 確定 app 用不到那個 slug（例如只剩起手式的 `_template.json` 宣告還沒清）；發布後呼叫該 slug 必失敗 |
+| `auto_rollback=true` | 發布後自動跑編譯驗證，失敗退回上一版並回 422 | 想要「壞版本不會上線」的安全網；要讓用戶知道會自動退版（只驗過成功路徑） |
+
+發布閘門順序（前一道過了才看得到下一道）：400 `INVALID_ACTION_CODE`（結構驗證）→ 409 `ACTION_REMOVAL`
+→ 409 `EGRESS_NOT_READY` → 引用完整性（新引入的幽靈欄位 409、存量只 warn）。
+
+`EGRESS_NOT_READY` 的 `gaps[]` 每項 `{kind, slug|key, message, fix, fix_url, required_role}`，
+`kind` ∈ `service_missing`（租戶沒有這個 slug 的外部服務）／`service_inactive`／`unauthorized`（有服務但沒授權給本 App）／
+`secret_missing`。閘門掃的是 **`actions/*.py` 字面 `ctx.http.call` slug ∪ `_template.json.required_egress`**——
+動態 slug（`ctx.http.call(ep["service"], …)`）掃不到、只記 log；README 與 `actions/manifest.json` 不在掃描範圍。
+起手式殘留見 §26.2；`platform-behaviors.md` §5.2／§5.3 有回應原文。
+
+`scripts/aigo_publish.py publish_app()` 三個參數都可帶，並在 POST 前先跑 `egress_preflight()`
+把宣告、字面 slug 與已授權清單對照列出來；409 回來會把 `code` 翻成下一步，**不會自動帶 confirm**。
+
 ## 9. Shadow DOM CSS 規範
 
 ```css
@@ -1387,6 +1407,12 @@ POST /api/v1/builder/apps          （權限：builder.access）
 - **起手式不是全空白**：實測 `starter-internal` seed 了 23 個檔案，
   含示範 action（`export_leads_csv.py`／`summarize_leads.py` 等 leads 範例）——
   走 Phase 0 review 時會看到，與需求無關就清掉，不要在範例上疊功能
+- **★ 起手式自帶 `_template.json`，宣告 `required_egress: {"openai": …}`**（`starter-internal` 1.6.0／
+  `starter-external` 1.4.0 皆是，2026-09-09 prod 實打；`GET /templates/{slug}` 看不到這個欄位，只有 VFS 裡看得到）：
+  什麼都沒改直接發布就 409 `EGRESS_NOT_READY`。清示範時 **`actions/summarize_leads.py` 與 `_template.json`
+  兩個都要刪**（只刪 action 仍擋；README、`actions/manifest.json` 的殘留不影響閘門）。刪遠端檔用
+  `DELETE /builder/apps/{id}/source/files` 帶 `paths` 與 `expected_version`（缺就 400）——`aigo_sync.py` 的
+  `sync_to_cloud()` 只 PATCH 不會刪，本機清掉遠端還在，要用 `delete_remote_files()`。閘門規則與參數見 §8
 - 模板會一併 seed 模板定義的自訂表與 Data Reference 引用（起手式兩款不帶）
 - 金鑰**刻意不在建立時收**——建立後在 Builder「服務」tab 設定
 - 複製既有 app：`POST /apps/{app_id}/duplicate` → 201
