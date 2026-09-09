@@ -84,7 +84,7 @@ def available_services(available: dict | None) -> list[dict]:
 def authorized_service_ids(available: dict | None) -> set[str]:
     """取「已授權給本 App」的 EgressService id 集合。
 
-    ★ 元素是 **dict**，不是字串——2026-09-09 兩個租戶實打（abeco／ckleegarden）皆為
+    ★ 元素是 **dict**，不是字串——2026-09-09 在兩個租戶實打皆為
     `[{"service_id": "<uuid>"}]`，與 `PUT authorized-egress-services` 的 body
     `{"services": [{"service_id": …}]}` 同形。直接 `str(x)` 會得到 `"{'service_id': …}"`，
     永遠對不上 `services[].id` → **每個 slug 都被誤判成 gap**（1.39.0 以前的行為）。
@@ -115,10 +115,19 @@ def egress_preflight(vfs: dict, available: dict | None = None) -> dict:
     不給就只比前兩份。授權清單的元素形狀見 `authorized_service_ids()`。
 
     回傳：
-    - needed        閘門會檢查的全集 = declared ∪ literal
-    - gaps          needed 裡沒授權給本 App 的（有 available 才算得出）——發布會 409 EGRESS_NOT_READY
-    - declared_only 宣告了但程式碼沒用到
-    - leftovers     起手式殘留檔（`_template.json` 宣告 openai／示範 action）——與需求無關就兩個一起刪
+    - needed           閘門會檢查的全集 = declared ∪ literal
+    - gaps             needed 裡過不了平台閘門的（有 available 才算得出）——發布會 409 EGRESS_NOT_READY
+    - missing_service  gaps 的成因之一：租戶沒有這個 slug 的外部服務
+    - inactive_service gaps 的成因之一：有服務但**已停用**
+    - declared_only    宣告了但程式碼沒用到
+    - leftovers        起手式殘留檔（`_template.json` 宣告 openai／示範 action）——與需求無關就兩個一起刪
+
+    ★ 三種成因與平台 `publish_guard.check_egress_readiness` 的三種 gap 一一對應
+    （`service_missing`／`service_inactive`／`unauthorized`）。**停用中的服務一定要獨立判**：
+    `GET available-egress-services` **會回停用中的服務**（平台的 `list_tenant_egress_services`
+    預設 `active_only=False`，ADR 0011 刻意保留停用列以便重新啟用），而「先授權、之後停用」
+    不會回收授權清單裡的 id——只看 `authorized_egress_service_ids` 會判成「已授權」印出 ✅，
+    平台卻照樣回 409 `service_inactive`。
     """
     declared = declared_egress_slugs(vfs)
     literal, dynamic = scan_literal_egress_slugs(vfs)
@@ -126,11 +135,16 @@ def egress_preflight(vfs: dict, available: dict | None = None) -> dict:
 
     authorized: set[str] | None = None
     missing_service: list[str] = []
+    inactive_service: list[str] = []
     if available is not None:
         by_slug = {s.get("slug"): s for s in available_services(available) if s.get("slug")}
         auth_ids = authorized_service_ids(available)
-        authorized = {slug for slug, s in by_slug.items() if str(s.get("id")) in auth_ids}
+        # is_active 缺席時當作啟用（舊平台版本不回這個欄位；只有明確的 False 才判停用）
+        authorized = {slug for slug, s in by_slug.items()
+                      if str(s.get("id")) in auth_ids and s.get("is_active") is not False}
         missing_service = [s for s in needed if s not in by_slug]
+        inactive_service = [s for s in needed
+                            if s in by_slug and by_slug[s].get("is_active") is False]
 
     gaps = [s for s in needed if authorized is not None and s not in authorized]
     leftovers = [p for p in _STARTER_LEFTOVERS if p in (vfs or {})]
@@ -143,6 +157,7 @@ def egress_preflight(vfs: dict, available: dict | None = None) -> dict:
         "needed": needed,
         "authorized": sorted(authorized) if authorized is not None else None,
         "missing_service": missing_service,
+        "inactive_service": inactive_service,
         "gaps": gaps,
         "declared_only": sorted(declared - set(literal)),
         "leftovers": leftovers,
@@ -163,12 +178,21 @@ def format_egress_preflight(report: dict) -> str:
                      "（aigo_sync.delete_remote_files；只刪 action 仍擋，README／manifest 不用管）")
     if report["gaps"]:
         ms = set(report["missing_service"])
-        parts = [f"{s}（租戶沒有這個外部服務）" if s in ms else f"{s}（有服務、未授權給本 App）" for s in report["gaps"]]
-        lines.append(f"❌ 發布會 409 EGRESS_NOT_READY：{'；'.join(parts)}。"
-                     "真的要用 → 建立／授權外部服務（dev-guide §25.2）；用不到 → 清掉宣告與呼叫，"
+        inact = set(report.get("inactive_service") or ())
+
+        def _why(s: str) -> str:
+            if s in ms:
+                return f"{s}（租戶沒有這個外部服務）"
+            if s in inact:
+                return f"{s}（服務存在但已停用——去 Builder 重新啟用，不要再建一個同名的）"
+            return f"{s}（有服務、未授權給本 App）"
+
+        lines.append(f"❌ 發布會 409 EGRESS_NOT_READY：{'；'.join(_why(s) for s in report['gaps'])}。"
+                     "真的要用 → 建立／啟用／授權外部服務（dev-guide §25.2）；用不到 → 清掉宣告與呼叫，"
                      "或帶 confirm_egress_gaps=True（發布後呼叫該 slug 必失敗）")
     elif report["authorized"] is not None and report["needed"]:
-        lines.append(f"✅ egress 預檢：{', '.join(report['needed'])} 都已授權給本 App")
+        lines.append(f"✅ egress 預檢：{', '.join(report['needed'])} 都已啟用且授權給本 App"
+                     "（平台閘門另檢查 ctx.secrets 必填金鑰，這裡看不到）")
     elif not report["needed"]:
         lines.append("→ egress 預檢：沒有宣告、沒有對外呼叫")
     return "\n".join(lines)
@@ -307,8 +331,8 @@ def full_deploy(base_url: str, token: str, app_id: str, slug: str, project_path:
 # ---------------------------------------------------------------------------
 
 # 2026-09-09 實打回應的縮影：`authorized_egress_service_ids` 的元素是
-# `{"service_id": …}`（abeco `evidence/egress_final.json` 的 verify、
-# ckleegarden `GET available-egress-services` 皆同形）。
+# `{"service_id": …}`（兩個測試租戶的 `GET available-egress-services` 皆同形；
+# 平台 `egress_authorization.py` 寫入端就是 `[{"service_id": sid} for sid in …]`）。
 _SAMPLE_AVAILABLE = {
     "services": [
         {"id": "c527c1ce-9f2c-4f14-aab0-55c5283ddc99", "name": "OpenAI",
@@ -382,12 +406,32 @@ def _selftest() -> int:
     no_service = {"services": [], "authorized_egress_service_ids": []}
     rep3 = egress_preflight(_SAMPLE_VFS, no_service)
     check("missing_service", rep3["missing_service"], ["openai", "openrouter"])
-    assert "租戶沒有這個外部服務" in format_egress_preflight(rep3)
+    check("missing_service 的訊息", "租戶沒有這個外部服務" in format_egress_preflight(rep3), True)
 
-    # 6) 不給 available → 降級，不算 gaps
+    # 6) ★ 已授權但**已停用**：available 會回停用列（平台 active_only 預設 False），
+    #    「先授權、之後停用」不回收授權清單 → 只看授權清單會誤印 ✅，平台照樣 409 service_inactive
+    disabled = {
+        "services": [{**s, "is_active": False} if s["slug"] == "openai" else s
+                     for s in _SAMPLE_AVAILABLE["services"]],
+        "authorized_egress_service_ids": _SAMPLE_AVAILABLE["authorized_egress_service_ids"],
+    }
+    rep5 = egress_preflight(_SAMPLE_VFS, disabled)
+    check("停用的不算已授權", rep5["authorized"], ["openrouter"])
+    check("停用要進 gaps", rep5["gaps"], ["openai"])
+    check("停用歸 inactive_service", rep5["inactive_service"], ["openai"])
+    check("停用不歸 missing_service", rep5["missing_service"], [])
+    check("停用的訊息要說『已停用』", "已停用" in format_egress_preflight(rep5), True)
+    # is_active 欄位缺席（舊平台版本）→ 當作啟用，不要無中生有一個 gap
+    no_flag = {"services": [{k: v for k, v in s.items() if k != "is_active"}
+                            for s in _SAMPLE_AVAILABLE["services"]],
+               "authorized_egress_service_ids": _SAMPLE_AVAILABLE["authorized_egress_service_ids"]}
+    check("is_active 缺席當啟用", egress_preflight(_SAMPLE_VFS, no_flag)["gaps"], [])
+
+    # 7) 不給 available → 降級，不算 gaps
     rep4 = egress_preflight(_SAMPLE_VFS)
     check("降級 authorized", rep4["authorized"], None)
     check("降級 gaps", rep4["gaps"], [])
+    check("降級 inactive_service", rep4["inactive_service"], [])
 
     if fails:
         print("❌ selftest 失敗 %d 項：" % len(fails))

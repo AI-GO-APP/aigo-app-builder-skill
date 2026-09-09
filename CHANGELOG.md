@@ -6,46 +6,69 @@
 
 ## 1.39.1
 
-### 修正：egress 預檢把每個 slug 都誤判成 gap；補上閘道三道上限的零覆蓋
+### 修正：egress 預檢把每個 slug 都誤判成 gap、以及漏判「服務已停用」；補上閘道四道上限的零覆蓋
 
 2026-09-09 在測試租戶實打 `GET /api/v1/builder/apps/{app_id}/available-egress-services`
-（兩個不同租戶，回應形狀一致）：`authorized_egress_service_ids` 的元素是 **dict**
+（兩個不同租戶，回應形狀一致），並回平台原始碼交叉核對（v1.13.1～v1.14.1 皆同）：
+
+**（一）`authorized_egress_service_ids` 的元素是 dict**
 `[{"service_id": "<uuid>"}]`，與 `PUT authorized-egress-services` 的 body
-`{"services": [{"service_id": …}]}` 同形，**不是 id 字串的 list**。
+`{"services": [{"service_id": …}]}` 同形，**不是 id 字串的 list**
+（平台寫入端就是 `[{"service_id": sid} for sid in service_ids]`）。
 
 1.39.0 的 `egress_preflight()` 對每個元素直接 `str(x)`，得到
 `"{'service_id': '…'}"`，永遠對不上 `services[].id` → **`authorized` 恆為空集合、
 每個 slug 都被點成 gap**，已授權的 `openai`／`openrouter` 照樣被擋，只能靠
-`skip_preflight=True` 繞過（平台實際 POST `/publish` 並沒有回 `EGRESS_NOT_READY`——
-是 skill 這側自己算錯，不是平台閘門）。
+`skip_preflight=True` 繞過。那一輪的 POST `/publish` 沒有觸發 `EGRESS_NOT_READY`
+（該打的都已授權）——是 skill 這側自己算錯，平台閘門本身是在的。
 
-同一輪實測補上 egress 閘道三道上限：`timeout_ms` 硬上限 **30000**（PATCH 60000／120000 回 422）、
-送出的請求本體 **8 MiB**、回應 **5 MiB**。逾時砍的是**整支 action**，`error` 原文
-`Action 執行超時(30000ms)` 與 runner ceiling 那道一字不差——同一支已發布 app 的純
+**（二）反過來的誤判：預檢漏看 `is_active`**
+發布閘門（`publish_guard.check_egress_readiness`）分**三種**互斥 gap：
+`service_missing`／`service_inactive`／`unauthorized`。而 `available-egress-services`
+的 `services` **含停用中的服務**（平台 `list_tenant_egress_services()` 預設
+`active_only=False`，ADR 0011 刻意保留停用列以便重新啟用；該端點 docstring 過時）。
+授權當下會擋停用中的服務，但**之後停用不會回收授權清單裡的 id**，所以
+「已授權 ∧ 已停用」是可達狀態——只比對授權清單會印出 ✅，publish 卻回 409 `service_inactive`。
+1.39.0 因為什麼都算 gap 而碰不到這格；修好（一）之後它就活了，故一併修。
+
+**（三）egress 閘道的上限原本零覆蓋**，同一輪補齊，且**是四道不是三道**：
+單次呼叫時間＝該服務的 `timeout_ms`（**預設 10000**、硬上限 **30000**；PATCH 60000／120000 回 422）、
+送出的請求本體 **8 MiB**、回應 **5 MiB**（`max_response_bytes`，**只調得下去**）、
+頻率 **每分鐘 120 次**（key＝單一 App × 單一 slug，超過回 429）。
+逾時砍的是**整支 action**，`error` 原文與 runner ceiling 那道同形——同一支已發布 app 的純
 `sleep(100)` 回 `success`／`duration_ms 100002`（manifest 的 120000 確實生效），
-走 `ctx.http.call` 的四發卻全落在 30394～30405 ms。這是 skill 原本零覆蓋、
-而且最容易被誤讀成「manifest 沒生效／要 republish」的一格。
+走 `ctx.http.call` 的四發卻全落在 30394～30405 ms。這是最容易被誤讀成
+「manifest 沒生效／要 republish」的一格；且 **30000 是上限不是預設**，
+沒明設 `timeout_ms` 的服務在約 10 秒就被切。
 
 改動：
 
 - `scripts/aigo_publish.py`：新增 `authorized_service_ids()`——`service_id`／`id`／
   `egress_service_id` 三種 key 都認，純字串元素也吃（空清單看不出形狀，留退路），
   壞元素略過；新增 `available_services()`，只認 `services` 這個 key（舊寫法「回應裡第一個 list」
-  在缺 key 時會撈到授權清單當服務用，靜靜算錯）。新增離線自測
-  `python scripts/aigo_publish.py selftest`：不打網路、只用標準庫，涵蓋 dict／字串／混用／空／
-  壞資料五種元素形狀，以及全授權（gaps 空）、零授權、半授權、租戶沒建服務、不給 available 降級五種
-  預檢情境；把舊解析法塞回去會失敗 6 項，其中 `gaps` 正是回報的 `['openai', 'openrouter']`
-- `references/custom-app-dev-guide.md`：新增 §25.4「閘道的三道上限」（數值、可調性、
+  在缺 key 時會撈到授權清單當服務用，靜靜算錯）。`egress_preflight()` 改判 `is_active`
+  （只有明確 `False` 才算停用，欄位缺席當啟用），回傳新增 `inactive_service`，
+  `format_egress_preflight()` 三種成因分開講、✅ 那行註明「平台另檢查 secrets，這裡看不到」。
+  新增離線自測 `python scripts/aigo_publish.py selftest`：不打網路、只用標準庫，涵蓋
+  dict／字串／混用／空／壞資料五種元素形狀，以及全授權、零授權、半授權、租戶沒建服務、
+  已授權但停用、`is_active` 欄位缺席、不給 available 降級等預檢情境。把 1.39.0 的舊
+  id 解析法塞回去會失敗 6 項（其中 `gaps` 正是回報的 `['openai', 'openrouter']`）；
+  把 `is_active` 判定拿掉會失敗 3 項
+- `references/custom-app-dev-guide.md`：新增 §25.4「閘道的四道上限」（數值、可調性、
   撞到時的回應原文、串流不繞過、與 runner ceiling 的分辨法）；原 §25.4 順延為 §25.5；
-  §7 執行逾時段補一則「走 `ctx.http.call` 另有一道 30 秒的牆、訊息裡的 30000ms 是閘道的值」
-- `references/platform-behaviors.md`：新增 §13，記三道上限的實測數字、422 原文、
+  §7 執行逾時段補一則「走 `ctx.http.call` 另有一道更早的牆、括號裡的毫秒是閘道的值」
+- `references/platform-behaviors.md`：新增 §13，記四道上限的實測數字與可調性、422 原文、
   `ctx.http.call(timeout=…)` 的 `TypeError`、`sleep(100)` 對照表、SSE 實測、
-  三道不同層的體積限制對照
-- `references/troubleshooting.md`：「Action 超時」列改成先分流；新增「走 `ctx.http.call` 的 action
-  在 30 秒被切」列（含 `sleep(n)` 對照的分辨法）與 413 請求體積列；新增
+  三道不同層的體積限制對照，以及 §13.5「三種 gap kind × 可用清單會回停用列」
+- `references/troubleshooting.md`：「Action 超時」列改成先分流；新增「走 `ctx.http.call`
+  的 action 提早被切」列（含 `sleep(n)` 對照的分辨法）、413 請求體積列、429 限流列、
+  「409 EGRESS_NOT_READY 但服務明明建好也授權了＝被停用」列；新增
   「有 `actions/requirements.txt` 就每支 action 回 500 HeadObject 403」列——
   **只記症狀與分辨法**（單一租戶、無對照組，不下平台故障的結論）
-- `SKILL.md`：`ctx.http.call` 段補三道上限與「30 秒被切不等於 manifest 沒生效」
+- `references/event-triggers.md`：§1.6／§2.6 的逾時模型原本只講「dispatcher 外層 ∪ runner
+  ceiling 兩道取小」，補上第三道（egress 閘道）的指標——dev-guide §7 會把讀者指到這兩節，
+  不補的話順著指標走的人看不到那道牆
+- `SKILL.md`：`ctx.http.call` 段補四道上限、「提早被切不等於 manifest 沒生效」與「服務被停用也擋」
 
 ## 1.39.0
 

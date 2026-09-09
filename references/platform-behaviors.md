@@ -610,18 +610,26 @@ export function currentIdentity(): { userId: string; email: string; tenantId: st
 
 ---
 
-## 13. Egress 閘道的三道上限（2026-09-09 prod 實打）
+## 13. Egress 閘道的四道上限（2026-09-09 prod 實打＋平台原始碼核對）
 
-> 驗證環境：單一租戶、Custom App（internal）、**已發布**、`actions/manifest.json`
-> 宣告 `timeout_ms: 120000`。上游為 OpenRouter chat completions。
+> 驗證環境：測試租戶、Custom App（internal）、**已發布**、`actions/manifest.json`
+> 宣告 `timeout_ms: 120000`、該外部服務 `timeout_ms` 設成 30000。上游為 OpenRouter chat completions。
+> 數值另以平台原始碼（`backend/app/core/config.py` 的 `EGRESS_*`、`models/egress.py`）
+> 交叉核對，v1.13.1～v1.14.1 四道值均未變動。
 
 | 上限 | 值 | 可調性 | 撞到時的回應 |
 |---|---|---|---|
-| 單次對外呼叫時間 | **30000 ms**（EgressService `timeout_ms`） | 不可調高 | 整支 action 被砍：`{"status":"timeout","result":null,"error":"Action 執行超時(30000ms)","duration_ms":30401.0}` |
-| 送出的請求本體 | **8388608 位元組（8 MiB）** | 未見設定欄位 | `status: 413`、`detail: "送往外部服務「openrouter」的請求本體超過閘道的大小上限（8388608 位元組）"` |
-| 收回的回應本體 | **5242880 位元組（5 MiB）**（EgressService `max_response_bytes`） | 建立時的欄位 | 回應被閘道擋下 |
+| 單次對外呼叫時間 | EgressService `timeout_ms`：**預設 10000**、**硬上限 30000** | 只能在 1～30000 之間調 | 整支 action 被砍：`{"status":"timeout","result":null,"error":"Action 執行超時(30000ms)","duration_ms":30401.0}` |
+| 送出的請求本體 | **8388608 位元組（8 MiB）** | 平台層常數，租戶端無欄位 | `status: 413`、`detail: "送往外部服務「openrouter」的請求本體超過閘道的大小上限（8388608 位元組）"` |
+| 收回的回應本體 | **5242880 位元組（5 MiB）**（EgressService `max_response_bytes`） | **只調得下去**：預設值即硬上限 | 回應被閘道擋下 |
+| 呼叫頻率 | **每分鐘 120 次**，key＝`egress:{app_id}:{呼叫端給的 slug}` | 平台層常數 | `429`、`呼叫外部服務「<slug>」的頻率超過每分鐘 120 次上限`（標記 retryable） |
 
-### 13.1 `timeout_ms` 是硬上限，action 端也覆寫不了
+### 13.1 時間那道：30000 是上限，10000 才是預設
+
+`egress_services.timeout_ms` 的落庫預設是 **10000**（`server_default=text("10000")`，
+與 `EGRESS_DEFAULT_TIMEOUT_MS` 同值）——**建立外部服務時沒明給就是 10 秒**，不是 30 秒。
+`error` 括號裡的毫秒數印的是該服務實際的值，所以看到 `Action 執行超時(10000ms)`
+一樣可能是這道牆。
 
 `PATCH /api/v1/egress-services/{id}` 送 `timeout_ms: 60000` 與 `120000` 都回 **422**：
 
@@ -635,9 +643,12 @@ export function currentIdentity(): { userId: string; email: string; tenantId: st
 （客戶端 `aigo_sdk._RemoteModule.call` 的簽名是 `(*args, **kwargs)` 的通用 RPC 代理，
 簽名本身看不出後端 allowlist，只能實打。）
 
-### 13.2 到期時砍的是整支 action，訊息與 runner ceiling 那道一字不差（★ 最易誤判）
+`max_response_bytes` 同理但方向相反：硬上限**刻意等於預設值**（閘道單 replica 全量緩衝回應，
+拉高＝OOMKill），所以這個欄位**只調得下去**，送更大的值回 422。
 
-同一支已發布 app、同一份 manifest（`timeout_ms: 120000`）：
+### 13.2 到期時砍的是整支 action，訊息與 runner ceiling 那道同形（★ 最易誤判）
+
+同一支已發布 app、同一份 manifest（`timeout_ms: 120000`）、外部服務 `timeout_ms: 30000`：
 
 | action 內容 | 平台 `status` | `duration_ms` |
 |---|---|---|
@@ -649,7 +660,7 @@ export function currentIdentity(): { userId: string; email: string; tenantId: st
 
 `sleep(100)` 成功證明 **runner ceiling 確實吃 manifest 的 120000**；四發對外呼叫的
 `duration_ms` 離散度只有 11 ms，是一道 wall-clock 硬牆的形狀，不是上游忽快忽慢。
-兩者的 `error` 原文都是 `Action 執行超時(30000ms)`，**訊息本身分辨不了**——
+兩者的 `error` 都是 `Action 執行超時(<毫秒>ms)`，**訊息本身分辨不了**——
 唯一的分辨依據是「這支 action 有沒有走 `ctx.http.call`」。
 
 平台三處都記著 manifest 的值（repo `actions/manifest.json`、
@@ -657,12 +668,12 @@ export function currentIdentity(): { userId: string; email: string; tenantId: st
 `GET /api/v1/actions/apps/{id}` 回的 `timeout_ms: 120000`），所以「查 API 看到 120000」
 不代表對外呼叫拿得到 120 秒。
 
-### 13.3 串流（SSE）不繞過 30 秒
+### 13.3 串流（SSE）不繞過時間那道
 
 閘道**原樣轉送 SSE**，上游也接受 `stream_options: {"include_usage": true}`：短工作串流
 15625 ms `success`，`usage`／`cost`／`finish_reason` 都解得出來，串流路徑本身正常。
 但同一份長工作非串流 timeout、串流一樣 timeout（`duration_ms` 30350）——
-砍的是**總執行時間**，不是 idle 時間，所以串流繞不過去。
+砍的是**單次呼叫的總時間**，不是 idle 時間，所以串流繞不過去。
 
 ### 13.4 三道不同層的體積限制，不要混為一談
 
@@ -671,3 +682,25 @@ export function currentIdentity(): { userId: string; email: string; tenantId: st
 | 呼叫 action 的平台 API 入口（request body） | 至少 12 MiB | pad 512 KiB／4 MiB／8 MiB／12 MiB 全部 200 |
 | action → 外部服務（egress 送出） | **8 MiB** | 8.0 MiB 的 base64 影像 → 413 |
 | 外部服務 → action（egress 收回） | **5 MiB**（`max_response_bytes`） | 未撞到 |
+
+### 13.5 發布閘門會擋「服務已停用」，而可用清單**照樣回停用中的服務**
+
+`GET /builder/apps/{id}/available-egress-services` 的 `services` **含停用列**——
+平台的 `list_tenant_egress_services()` 預設 `active_only=False`（ADR 0011 刻意保留，
+好讓人在 Builder 重新啟用；該端點 docstring 寫「只回 is_active=True」是過時的）。
+
+而 publish 閘門（`publish_guard.check_egress_readiness`）分成**三種**互斥的 gap：
+
+| gap kind | 409 的 code | 成因 |
+|---|---|---|
+| `service_missing` | `egress_service_not_found` | 租戶沒有這個 slug 的 EgressService |
+| `service_inactive` | `egress_service_inactive` | 有 row 但 `is_active=False` |
+| `unauthorized` | `egress_not_authorized` | 沒在該 App 的 `authorized_egress_service_ids` 裡 |
+
+★ 授權當下會擋停用中的服務，但**之後把服務停用並不會回收授權清單裡的 id**。
+所以「已授權 ∧ 已停用」是可達狀態：只比對 `authorized_egress_service_ids` 會判成通過，
+publish 卻回 409 `service_inactive`。要判這格一定要一起看 `services[].is_active`
+（`scripts/aigo_publish.py` 的 `egress_preflight()` 即照此三分）。
+
+另外閘門還會檢查 `ctx.secrets` 必填金鑰（`secret_missing` → `gaps[].key`），
+那一格從 `available-egress-services` 看不到，只能等 409。

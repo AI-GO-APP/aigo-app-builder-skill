@@ -165,6 +165,12 @@ manifest 全部 action `timeout_ms` 的最大值，夾在 30000～**120000**；�
 修正（#1518，prod v1.13.0 起）前 ceiling 恆 30 秒；ceiling 在 publish 時寫入，**舊 app 要 republish
 一次才換上新值**（`custom-app-dev-guide.md` §7）。
 
+⚠️ **還有第三道，只對走 `ctx.http.call` 的 action 生效**：egress 閘道的 `timeout_ms`
+（設定在那支外部服務上，**預設 10000、硬上限 30000**）。它砍的是**整支 action**，
+錯誤原文與上面兩道同形，所以 webhook／排程的 action 一打外部 API 就在 10 或 30 秒被切時，
+**先不要懷疑 dispatcher 或 manifest** → `custom-app-dev-guide.md` §25.4。
+閘道另有請求 8 MiB／回應 5 MiB／每分鐘 120 次（單一 App × 單一 slug）三道上限。
+
 ### 1.7 Meta（FB／IG／WhatsApp）訂閱驗證
 
 平台自動處理 GET 的 `hub.mode=subscribe` 驗證，你不需要寫 code。
@@ -286,6 +292,9 @@ app 不可見（不在 `access_role_ids` 內）時整組端點回 404「app 不�
   切掉、回 `status: "timeout"`。**實務上限是 120 秒，不是 280**；280 只是 dispatcher 不會先斷線。
 - 長任務要自己切批次：每次處理 N 筆、把進度存回自建表，靠下一次觸發接續。
 - 不支援「跑很久的任務」是設計取捨，不是缺陷。
+- ★ 批次裡若逐筆打外部 API，真正先撞到的通常是 **egress 閘道**那道：單次呼叫預設 10 秒
+  （硬上限 30 秒）、且**每分鐘 120 次**的限流是「單一 App × 單一 slug」——算批次大小要一起算
+  → `custom-app-dev-guide.md` §25.4。
 
 ### 2.7 ★ 重疊會被跳過（Forbid），不排隊
 
