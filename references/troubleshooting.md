@@ -65,6 +65,9 @@
 | Action 驗證失敗 | 檢查 execute(ctx) 函式、依賴模組是否可用 |
 | Publish 一致性失敗 | 重新 sync → compile → publish 完整循環 |
 | 建表 403 | 帳號缺 `datacenter.schema_write`（也非 `system.admin`），改輸出建表規格引導用戶到資料中心 UI 自建；**刪表／刪欄另限 `system.admin`**（建改與刪除是兩段權限）→ `data-center.md` §2 |
+| **建出來的表名是 `tbl` / `tbl_2`，欄位是 `col`、`col_2`** | `display_name` 填了純中文。實體名是 NFKD 折疊後丟掉非 ASCII 生成的，中文折疊後是空字串→落到 `tbl`/`col` 保底名。**還沒資料就當場刪掉重建**（上游用兩步命名法）；已有資料要走重建式遷移 → SKILL.md 規則 18.5、`data-center.md` §1、§11 |
+| **想把已建好的表／欄位實體名改掉** | 沒有這條路——`PATCH /tables/{key}` 只收顯示名等五項，改欄 payload 是 `extra="forbid"`，帶 `physical_name` 直接 422。唯一做法是重建式改名（建新表→搬資料→改引用→驗收→刪舊表），**要先出計畫書給用戶同意**；只有部分欄位不合規則加新欄→搬值→刪舊欄，不用動表 → `data-center.md` §11 |
+| **重建式改名後圖片全壞了（404／403）** | image 欄位的 storage key 內嵌**舊表實體名**，取 URL 端點會驗「key 裡的表是本租戶現存的表」——舊表一刪就取不到。key 不可直接複製：舊表還在時逐張下載→重傳到新表→寫新 key → `data-center.md` §11.5 第 4 步 |
 | 建表／加欄 409 | 撞配額（`table_quota_exceeded` / `field_quota_exceeded`，數值見 `data-center.md` §4）或實體名撞名；「**與平台保留表名衝突**」= 撞到平台地板表名（users/tenants/api_keys…），沒有補救管道，換個實體名（⚠️ 2026-09-01 實測此檢查 prod 尚未生效——沒被擋≠可以用，一律自律避開）→ `data-center.md` §1 |
 | 文件宣稱的端點回 404／回應缺欄位 | 先懷疑**部署落差**——prod 由 `v*` tag 觸發，可能落後 main 數天到一週；**判準是查 prod 的 `GET /api/v1/openapi.json`（免登入）有沒有那條路徑**，不是文件錯也不是打錯。2026-09-07 prod＝v1.13.0，與 main 幾乎同步；歷史紀錄見 `hosted-apps.md` 檔頭與 `data-center.md` §9 |
 | 刪表／刪欄被擋 | 兩段式刪除：先取 `/impact`，確認值必須是**實體名**不是顯示名 |
