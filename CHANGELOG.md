@@ -4,6 +4,35 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.39.3
+
+### `requirements.txt` → 500 HeadObject 403：做了對照組，**不重現**，因此不回報平台
+
+1.39.1 收了一列「只要 VFS 有 `actions/requirements.txt`，每支 action 就回 500
+`HeadObject ... Forbidden`」，當時明寫「只在一個租戶看過、沒有對照組，不要據此斷定平台故障」。
+2026-09-09 補做對照組實驗：另一個測試租戶、拋棄式 app、一支不 import 任何東西的探針 action，
+唯一變因是 `requirements.txt` 的有無，跑五個相位——
+
+| 相位 | VFS 有無 reqs | 結果 |
+|---|---|---|
+| A 基準線 | 無 | 3 發全 200 success |
+| B 加上 reqs | 有 | 2 發 200，2 發 503（redeploy 空窗） |
+| C 拿掉（不 publish） | 無 | 1 發 503、2 發 200 |
+| D 拿掉並 publish | 無 | 3 發全 200 |
+| E 放回 reqs | 有 | 3 發全 200 |
+| F `import requests` 驗證 | 有 | 3 發 503 後轉 3 發 200，`requests.__version__` 回 `2.32.3` |
+
+**22 發沒有任何一發出現 `HeadObject`**，且 F 相位證明 wheelhouse 真的有從 `requirements.txt`
+建起來並掛上（套件版本解得出來）。⇒ 這**不是「有 `requirements.txt` 就會壞」的普遍行為**，
+原觀察的成因未明、無法歸因平台，**依「先在最新 prod 驗證為真才回報」的原則不開回報單**。
+
+順帶量到一個會被誤讀成故障的東西：**改依賴後發布有一段約 75 秒的 redeploy 空窗**
+（連三發 503「app runner 暫時不可用」，每發卡滿 25 秒後才轉 200）。與本列症狀的分辨法：
+503「app runner 暫時不可用」是空窗，500 帶 `HeadObject` 才是那個未明症狀。
+
+`troubleshooting.md` 該列改寫：保留原症狀與分辨法，加上對照組結果、redeploy 空窗數字，
+並把「不要據此斷定平台故障」講得更明確。
+
 ## 1.39.2
 
 ### 更正：發布 409 的 `code` 與 gap kind 混寫；補上 1.39.1 那批宣稱的測試租戶實打佐證
