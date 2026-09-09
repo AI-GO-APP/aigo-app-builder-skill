@@ -129,6 +129,11 @@ app；或問「我有沒有權限看某表」。這條線的權限是使用者�
    - 自建表是**租戶級**資源、**不在 VFS 裡**——同租戶的其他 app 建的表，這個 app 也看得到、用得到
    - 列出每張表的實體名、顯示名、欄位結構
    - 這一步的目的是**避免重複建表**：兩個 app 各建一張「客戶」表 = 資料分裂成兩份
+   - **順手掃命名**（★ 規則 18.5）：看每張表的 `physical_name`——
+     命中 `^tbl(_\d+)?$`、欄位 `^col(_\d+)?$`、延伸欄位 `^ext(_\d+)?$` 就是中文顯示名生出來的保底名
+     （`aigo_data_center.py` 的 `audit_table_naming()`／`format_naming_audit()` 已封裝），
+     記進盤點結果（分級與處置見 `references/data-center.md` §11.1）。
+     **這一步只盤不動手**——重建式改名是另一條流程，要先出計畫書給用戶同意
 7. **盤點既有排程**（若 app 已上線）
    - `GET /api/v1/builder/apps/{app_id}/crons`（`aigo_review.py` 的 `fetch_app_crons()`；App 開發面，`builder.access` 可讀），
      確認有哪些排程綁在本 app 的 action 上
@@ -412,7 +417,9 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
      不要因缺欄就另建新表或把結構化欄位塞進 json 欄
    - 走 Data Reference 的表：說明如何用 `custom_data` JSONB 擴充、`app_domain` 標籤值
    - 走自建表且需要新建的：產出**建表規格表**
-     `| 表顯示名 | 欄位顯示名 | 型別 | 必填 | 唯一 | relation 目標 |`
+     `| 表實體名 | 表顯示名 | 欄位實體名 | 欄位顯示名 | 型別 | 必填 | 唯一 | relation 目標 |`
+     ——**兩個實體名欄不得為空且一律英文**（表 `biz_<英文複數>`、欄位 snake_case）；
+     中文只能出現在顯示名那兩欄。理由與兩步命名法見規則 18.5
    - 若決定使用的預設表尚未被引用（以 `GET /api/v1/refs/apps/{app_id}` 為準，不是 db.json），
      引導用戶到 Builder 後台加入 Data Reference
    - 需求命中「交易／JOIN／條件式 UPDATE」邊界的實體，在這裡寫出改設計後的寫法
@@ -553,6 +560,40 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 沙箱域，不�
     - `data.json` / `POST /api/v1/data/objects/batch` 是**已退場的 CustomObject**，
       不是自建表。存量 app 可留，新需求一律不用。
     - 詳見 `references/data-center.md`
+
+18.5. **自建表命名規範：實體名一律英文**（★ 強制；新建與接手都適用）
+
+    實體名（physical name）**建立後永不可變、平台沒有改名 API**，而它是系統從顯示名生成的：
+    NFKD 折疊 → 丟掉非 ASCII。**純中文顯示名折疊後是空字串**，實體名於是變成
+    `tbl`／`tbl_2`／`col`／`col_2`／`ext_2` 這種保底名，往後所有 code 都得寫
+    `queryTable('tbl_3', { filters: [{ field: 'col_7', … }] })`，而且**永遠改不回來**。
+
+    | 對象 | 規範 |
+    |---|---|
+    | 表實體名 | `biz_<英文實體複數>`，snake_case（`biz_customers`、`biz_patent_cases`） |
+    | 欄位實體名 | 英文 snake_case，不加前綴；關聯欄用 `<單數實體>_id` |
+    | 延伸欄位實體名 | 同欄位規範 |
+    | 顯示名 | 中文照舊，隨時可 `PATCH` 改 |
+
+    - **`biz_` 前綴的三個作用**：與預設表的功能區前綴（`crm_`／`sale_`／`hr_`／`account_`…）
+      一眼分得開；**完全避開保留名 409**（保留母體 = SQL 保留字 ∪ 預設表名 ∪ 平台地板表名 76 張，
+      沒有一個以 `biz_` 開頭）；不佔用平台自己在用的 `dc_`／`app_`。
+    - **兩步命名法（唯一做法）**：`POST /tables` 的 `display_name` 先填**英文實體名**
+      → 拿到正確 `physical_name` → 再 `PATCH` 把表與各欄的 `display_name` 改成中文。
+      **兩步要在同一次交付內做完**，不要只做第一步就收工。
+    - **建完必驗**：`GET /tables` 看 `physical_name` 是不是預期值。拿到 `tbl` / `col_N`
+      = 填錯了，**當場刪掉重建**——此時沒資料，成本最低；有資料之後就得走
+      `data-center.md` §11 的重建式遷移（建新表→搬資料→改引用→刪舊表，五步不可逆）。
+    - **403 降級、引導用戶到資料中心 UI 自建時**，規格表要附一句
+      「表名欄請照填 `<英文實體名>`，建好後由我把顯示名改成中文」——
+      UI 建表框的 placeholder 就寫「例如：客訴紀錄」，不講清楚用戶一定填中文。
+    - **用戶堅持「表名要中文」時**：說明顯示名確實是中文、實體名是資料庫識別字，
+      只有開發者在 code 與 API 看得到。不要因此退回中文顯示名建表。
+    - **接手既有租戶**：Phase 0 步驟 6 掃 `physical_name`，不合規的**分級**處置
+      （`data-center.md` §11.1）——P0 保底名出計畫書、用戶同意後走重建式改名；
+      **P2（只是少 `biz_` 前綴但名字可讀）預設不動**，重建一張有資料的表，
+      風險遠大於命名一致的收益。**未經用戶書面同意不得動既有表**。
+    - 詳見 `references/data-center.md` §1（命名規範與生成規則）、§11（重建式改名）
 
 19. **app_domain 標籤規範**（★ 強制，但**只限 Data Reference 那一軌**）
     - **適用範圍**：只有寫入預設表（Data Reference）的資料需要 `app_domain`。

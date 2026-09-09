@@ -4,6 +4,56 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.37.0
+
+### 自建表命名硬閘：實體名一律英文、`biz_` 前綴，既有不合規表走重建式改名
+
+自建表的**實體名**（physical name）是平台從 `display_name` 生成的、**建立後永不可變、沒有改名 API**。
+生成規則是 NFKD 折疊後丟掉非 ASCII——**純中文顯示名折疊後是空字串**，於是落到保底前綴：
+一張中文表拿到 `tbl`／`tbl_2`，欄位拿到 `col`／`col_2`／`col_3`，延伸欄位 `ext_N`。
+所有 API、`filters`／`sort`、刪除確認值都用實體名，於是 code 永久長成
+`queryTable('tbl_3', { filters: [{ field: 'col_7' }] })`。
+資料中心 UI 建表框的 placeholder 就寫「例如：客訴紀錄」，用戶自建的表幾乎都是這個下場，
+而本 skill 原本只寫了「顯示名字元集：任意（中文常見）」，建表規格表也只收顯示名——等於把 agent 帶進坑。
+
+- **SKILL.md 新增規則 18.5「自建表命名規範：實體名一律英文」**（★ 強制）：
+  表 `biz_<英文實體複數>`、欄位英文 snake_case、延伸欄位同規範、顯示名照樣中文。
+  `biz_` 前綴的三個作用——與預設表的功能區前綴（`crm_`／`sale_`／`hr_`…）一眼分開、
+  **完全避開保留名 409**（保留母體 = SQL 保留字 ∪ 預設表名 ∪ 平台地板表名 76 張，無一以 `biz_` 開頭）、
+  不佔用平台自己在用的 `dc_`／`app_`
+- **兩步命名法**（唯一能同時要到英文實體名與中文 UI 的做法）：`POST /tables` 的 `display_name`
+  先填英文實體名 → 驗 `physical_name` → 再 `PATCH` 把表與各欄顯示名改成中文；**同一次交付內做完**
+- **Phase 1.5 建表規格表加兩欄實體名**（`| 表實體名 | 表顯示名 | 欄位實體名 | 欄位顯示名 | …`），
+  兩個實體名欄不得為空且一律英文；`migration_mapping_template.md` 的自建表區塊同步加欄，
+  該表即「中文欄位名 → AI GO 英文實體名」的 SSOT
+- **Phase 0 步驟 6 加「順手掃命名」**：只盤不動手。`data-center.md` §11.1 分四級——
+  P0 保底名（必改）、P1 撞平台語意、**P2 只是少前綴但名字可讀（預設不動）**、P3 只有顯示名不對（直接 PATCH）。
+  ⚠️ 不為了前綴一致去重建一張有資料的表：風險遠大於收益
+- **`data-center.md` 新增 §11「重建式改名」**：平台沒有改名 API（`PATCH` 不收 `physical_name`，
+  改欄 payload 是 `extra="forbid"`），所謂改名實際是「建新表→搬資料→改引用→驗收→刪舊表」五步不可逆。
+  計畫書要五塊（對照表／引用掃描／relation 連鎖／配額/停機回滾），**用戶同意後才動**。
+  三個實測坑：① 新表 = 新 UUID，指向舊表的 `relation` 欄位**也要重建**；② 重建期間新舊並存，
+  表數暫時翻倍要先算配額；③ **image 欄位的 storage key 內嵌舊表實體名**，取 URL 端點會驗
+  「key 裡的表是本租戶現存的表」——舊表一刪圖片全 404，key 不可直接複製，必須逐張重傳。
+  只有部分欄位不合規時走「加新欄→搬值→刪舊欄」，不動表
+- **`aigo_data_center.py`**：新增 `predict_physical_name()`（複刻平台演算法，送出前就能說「你會拿到什麼名字」）、
+  `assert_naming()`（建表／加欄的硬閘，不合規直接不送）、`audit_table_naming()`／`format_naming_audit()`
+  （既有表分級盤點）、`update_table()`（兩步命名法第二步；擋下 `physical_name` 並指向 §11）。
+  `create_table()` 加 `labels=` 參數自動做完第二步，並在建完驗 `physical_name` 是否等於預期
+  （不等就拋——此時沒資料，刪掉重建最便宜）。`format_create_spec()` 的降級指引改成
+  「表名欄請照填 `<英文實體名>`，建好後我把顯示名改成中文」
+- **`aigo_review.py`**：新增 `scan_table_references(vfs_state, names)`／`format_table_reference_scan()`
+  ——全字比對（`tbl_2` 不會誤中 `tbl_20`）、另收**動態表名**（`queryTable(tableName)`、f-string 拼接）
+  標為必須人工確認；掃全部檔案不只 `src/`
+- `troubleshooting.md` 加三列（建出 `tbl`/`col_N`、想改實體名、重建後圖片全壞）；
+  `CONTEXT.md`、dev-guide §23.4 同步
+- ⚠️ **行為變更**：`create_table()`／`add_field()` 在送出前會因命名不合規而 `ValueError`——
+  舊呼叫端若直接傳中文 `display_name` 會拋錯（錯誤訊息會印出它本來會拿到的實體名）。這是刻意的：
+  放行的代價是一個永遠改不掉的 `tbl_2`。改法是把中文移到 `labels=`
+- 離線驗證：`predict_physical_name` 與平台 `generate_physical_name` 逐案對照（中文／數字開頭／中英混／
+  SQL 保留字／流水號／48 字截斷）全一致；`assert_naming` 擋放各 8/4 案；`audit_table_naming` 分級；
+  `scan_table_references` 全字比對與動態表名偵測
+
 ## 1.36.0
 
 ### 更正：internal Hosted App 容器拿不到任何身分（實測推翻四個 X-Aigo header）
@@ -29,6 +79,7 @@
 - `references/member-admin.md` §6：整節改寫並移除四個 header 的表；§0 的陷阱清單一併更正
 - `SKILL.md` Phase 1.5 陷阱條與 references 索引：改為「拿不到任何身分」
 - `references/troubleshooting.md`：新增「internal Hosted App 讀不到現在是誰在用」一列
+
 
 ## 1.35.0
 

@@ -221,6 +221,64 @@ def detect_data_center_frontend_usage(vfs_state: dict) -> list[dict]:
     return hits
 
 
+def scan_table_references(vfs_state: dict, names: list[str]) -> dict:
+    """掃 VFS 內對指定實體名（表名／欄位名）的引用，供重建式改名的影響評估用
+    （references/data-center.md §11.4）。
+
+    `names`：要找的實體名清單（表名與欄位名混著給即可）。
+    回傳 {"hits": [{"path", "line", "name", "text"}], "dynamic": [{"path", "line", "text"}]}。
+
+    ★ 兩個刻意的設計：
+    - **全字比對**（`\\b<name>\\b`）：`tbl_2` 用鬆散 pattern 會誤中 `tbl_20`。
+    - **另收 `dynamic`**：表名由變數或字串拼接組出來時（`queryTable(tableName)`、
+      f-string），字面比對保證漏。這些點**必須人工逐一確認**，不是誤報。
+
+    掃全部檔案（不限 src/），因為 action、設定檔、測試腳本都可能寫死表名。
+    自建表是**租戶級**資源——同租戶每一支 app 都要掃過，只掃手上這支必漏。
+    """
+    dyn_pat = re.compile(
+        r"(?:queryTable|insertRow|updateRow|deleteRow"
+        r"|query_table|insert_row|update_row|delete_row)\s*\(\s*(?![\"'])"
+    )
+    name_pats = [(n, re.compile(rf"\b{re.escape(n)}\b")) for n in names if n]
+
+    hits, dynamic = [], []
+    for path, content in sorted(vfs_state.items()):
+        if not isinstance(content, str):
+            continue
+        for i, line in enumerate(content.splitlines(), 1):
+            for name, pat in name_pats:
+                if pat.search(line):
+                    hits.append({"path": path, "line": i, "name": name,
+                                 "text": line.strip()[:200]})
+            if dyn_pat.search(line):
+                dynamic.append({"path": path, "line": i, "text": line.strip()[:200]})
+    return {"hits": hits, "dynamic": dynamic}
+
+
+def format_table_reference_scan(result: dict, names: list[str]) -> str:
+    """把 scan_table_references() 的結果格式化成計畫書的「引用掃描結果」那一塊。"""
+    hits, dynamic = result.get("hits", []), result.get("dynamic", [])
+    lines = [f"🔍 引用掃描：{', '.join(names)}"]
+    if not hits:
+        lines.append("  這支 app 沒有字面引用")
+    else:
+        by_path = {}
+        for h in hits:
+            by_path.setdefault(h["path"], []).append(h)
+        lines.append(f"  {len(hits)} 處字面引用，分布在 {len(by_path)} 個檔案")
+        for path, items in by_path.items():
+            lines.append(f"  {path}")
+            for h in items:
+                lines.append(f"    L{h['line']} [{h['name']}] {h['text']}")
+    if dynamic:
+        lines.append(f"  ⚠️ {len(dynamic)} 處**動態表名**——字面比對抓不到，逐一人工確認：")
+        for d in dynamic:
+            lines.append(f"    {d['path']}:{d['line']} {d['text']}")
+    lines.append("  ⚠️ 這是單一 app 的結果。自建表跨 app 共用，同租戶每一支 app 都要掃。")
+    return "\n".join(lines)
+
+
 def detect_legacy_custom_object(vfs_state: dict) -> dict:
     """偵測 legacy CustomObject 使用痕跡（見 CONTEXT.md）。
 

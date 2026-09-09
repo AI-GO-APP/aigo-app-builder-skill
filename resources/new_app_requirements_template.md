@@ -97,6 +97,17 @@
 - 軌：引用（Data Reference）／延伸欄位／custom_data／自建表（重用既有或新建）
 - 「沒想到有」不是不採用理由；「查過 `crm_leads`，但需要唯一約束與真 FK」才是
 
+### 建表規格表（上表「軌」為「自建表（新建）」的實體逐張列）
+
+| 表實體名 | 表顯示名 | 欄位實體名 | 欄位顯示名 | 型別 | 必填 | 唯一 | relation 目標 |
+|---|---|---|---|---|---|---|---|
+| biz_xxx | | snake_case | | | | | |
+
+- **兩個實體名欄不得為空、一律英文**：表 `biz_<英文複數>`、欄位 snake_case。
+  實體名由平台從顯示名生成且**建立後永不可改**，中文顯示名會生出 `tbl_2`、`col_7`
+- 建表走**兩步命名法**：先用英文實體名當 `display_name` 建，再 `PATCH` 把顯示名改成中文
+  ——SKILL.md 規則 18.5、`references/data-center.md` §1
+
 ## app 分配表（`product-line-decision.md` §7；計畫確認後照表建 app）
 
 | alias | 產品線（Custom / Hosted） | 模式（模板 slug / visibility） | 負責的功能群 | 拆分理由 |
