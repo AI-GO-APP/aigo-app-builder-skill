@@ -15,7 +15,7 @@
 | 1 觸發 | agent，**自動** | 下方「要回報」任一條成立就進自審；不等使用者要求、不先問「要不要查」、不反覆重試 |
 | 2 自審 | agent | `pre-report-self-grill.md` 六輪，每題指令＋輸出 |
 | 3 判定 | agent | 非平台問題 → 修或等，只跟使用者說結論；前沿有待查 → 交紀錄、問「要不要繼續追」；兩條件成立 → 第 4 步 |
-| 4 詢問 | agent 問、使用者答 | 先給摘要（症狀、預期 vs 實際、重現、已排除清單）再問「要不要提交給開發團隊？」；**不得替使用者決定** |
+| 4 詢問 | agent 問、使用者答 | 先給摘要（情境、操作、結果、預期、已排除清單；情境與結果用非技術的話）再問「要不要提交給開發團隊？」；**不得替使用者決定** |
 | 5 送出 | agent | 同意 → `submit … --ruled-out … --user-confirmed`；不同意 → 紀錄留在專案，不送 |
 
 ## 什麼時候回報
@@ -44,43 +44,54 @@
 
 ## 怎麼寫（★ BDD：描述行為，不是開藥方）
 
-開發團隊需要的是**可重現的行為事實**。寫：
+開發團隊需要的是**可重現的行為事實**，重心是「**嘗試做什麼、結果是什麼**」，不是先講技術契約。
+骨架固定（★ 前三段缺一即拒收）：
 
-1. **預期行為**——依文件/常理，這一步應該發生什麼
-2. **實際結果**——實際發生什麼：完整狀態碼與錯誤訊息的關鍵段落，原文照貼
-3. **重現步驟**——從哪個狀態、做了什麼、打了哪個端點（可含 payload 形狀）
-4. **環境／補充**——租戶、app_id、發生時間、request_id（有就給）
-5. **已排除清單**（`--ruled-out`）——自審紀錄濃縮，每行一項、至少三項：版本／身分／契約／
-   生命週期／文件／重現各自排除了什麼、憑什麼證據。開發團隊靠這段 30 秒 triage
-6. **送出確認**（`--user-confirmed`）——不是內容，是旗標：代表第 4 步已做、使用者說了「送」。
+1. **情境**（`--given`）——想完成什麼、當時在什麼狀態。**一句使用者目標層的話**
+   （「想把含中文檔名的元件同步上去」），不是端點名
+2. **操作**（`--when`）——做了什麼：步驟、打了哪個端點（可含 payload 形狀）
+3. **結果**（`--then`）——實際發生什麼：狀態碼與錯誤訊息的**關鍵段落**原文照貼；
+   指令與完整輸出**不進這段**，留在已排除清單（這段超過 1200 字腳本會提醒）
+4. **預期**（`--expected`）——依文件／常理應該發生什麼。放在結果之後，是對照，不是開場
+5. **環境／補充**（`--context`）——租戶、app_id、發生時間、request_id（有就給）
+6. **已排除清單**（`--ruled-out`）——自審紀錄濃縮，每行一項、至少三項：版本／身分／契約／
+   生命週期／文件／重現各自排除了什麼、憑什麼證據。開發團隊靠這段 30 秒 triage；技術細節放這裡
+7. **送出確認**（`--user-confirmed`）——不是內容，是旗標：代表第 4 步已做、使用者說了「送」。
    卡片末尾會多一段「送出確認」，讓開發團隊知道這張卡經過人點頭
 
-**不要寫**：技術建議、猜測的 root cause、指定的修法或實作方式
-（「建議把 X 改成 Y」「應該是 Z 沒做好」）。行為描述才可驗證；
-解法判斷是開發團隊拿著完整脈絡做的事。
+**不要寫**：技術建議、猜測的根因、指定的修法或實作方式（「建議把 X 改成 Y」「應該是 Z 沒做好」
+「修法是…」）。行為描述才可驗證；解法判斷是開發團隊拿著完整脈絡做的事。
+**腳本會掃內文**：命中「建議把／應該改／修法／實作方式／根因是／root cause」等措辭即拒收並印出那句，
+改寫成「做了什麼 → 發生了什麼 → 依文件應該怎樣」再送。
 
 範例——
 
 ```
 ✅ 好：
   標題：compile 對含中文檔名的 VFS 回 422
+  情境：想把一個檔名是中文的元件（src/元件.tsx）同步上去並編譯，其他英文檔名的元件都正常
+  操作：VFS 內建立 src/元件.tsx → sync 成功 → POST /builder/apps/{id}/compile
+  結果：422 {"detail":"invalid path"}；換回英文檔名同一份內容即 200
   預期：文件未限制檔名字元，compile 應成功或明說限制
-  實際：POST /builder/apps/{id}/compile 回 422 {"detail":"invalid path"}（全文照貼）
-  步驟：VFS 內建立 src/元件.tsx → sync 成功 → compile 必現
   環境：urfit 租戶，app 1a2b3c…，2026-09-01 14:00 前後多次
 
 ❌ 壞：
   標題：compile 有 bug，建議改用 NFC 正規化處理檔名
-  （直接開藥方、無預期/實際、無重現步驟）
+  （直接開藥方、沒有情境、看不出嘗試做什麼）
+
+❌ 也壞：
+  情境：POST /builder/apps/{id}/compile 的 path validator 對非 ASCII 回 422
+  （情境寫成技術契約；「想完成什麼」不見了，開發團隊得自己反推使用者在做什麼）
 ```
 
 ## 指令
 
 ```bash
-# 提交（建議用結構化參數，會自動組成 BDD 格式）；--ruled-out 與 --user-confirmed 必帶，缺少即拒收
+# 提交（結構化參數會自動組成 BDD 格式）；--given/--when/--then 三段、--ruled-out、--user-confirmed 缺一即拒收
 uv run --project scripts python scripts/report_issue.py submit "一句話標題" \
-  --expected "預期行為" --actual "實際結果（含錯誤原文）" \
-  --steps "重現步驟" --context "租戶/app_id/時間" \
+  --given "情境：想完成什麼、當時在什麼狀態" --when "操作：做了什麼" \
+  --then "結果：實際發生什麼（錯誤原文關鍵段落）" --expected "預期：依文件應該怎樣" \
+  --context "租戶/app_id/時間" \
   --ruled-out "版本：…
 身分：…
 契約：…
@@ -93,10 +104,11 @@ uv run --project scripts python scripts/report_issue.py submit "一句話標題"
 # UI／畫面問題請附截圖（--image 可重複，最多 10 張；png/jpg/webp/gif 單張 ≤8MB）
 # 圖片會內嵌在開發團隊的卡片裡
 uv run --project scripts python scripts/report_issue.py submit "標題" \
-  --expected "…" --actual "…" --ruled-out "…" --user-confirmed --image 截圖1.png --image 截圖2.png
+  --given "…" --when "…" --then "…" --ruled-out "…" --user-confirmed --image 截圖1.png --image 截圖2.png
 
-# 內文較長時寫進檔案（內文必須含「已排除」段落，否則拒收）
+# 內文較長時寫進檔案（內文必須含「情境」「操作」「結果」三段與「已排除」段落，否則拒收）
 uv run --project scripts python scripts/report_issue.py submit "標題" --body-file report.md --user-confirmed
+# 舊旗標 --actual／--steps 仍可用，分別等於 --then／--when
 
 # 追蹤：清單（含狀態）／單筆詳情（含官方回覆）
 uv run --project scripts python scripts/report_issue.py list

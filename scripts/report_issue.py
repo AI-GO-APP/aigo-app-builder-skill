@@ -7,11 +7,13 @@ report_issue.py — 平台問題回報（直達 AI GO 開發團隊的 Scrum Boar
 
 用法：
     uv run python scripts/report_issue.py submit "一句話標題" \
-        --expected "預期行為" --actual "實際結果" --steps "重現步驟" \
+        --given "情境：想完成什麼、當時在什麼狀態" --when "操作：做了什麼" \
+        --then "結果：實際發生什麼（錯誤原文關鍵段落）" --expected "預期：依文件應該怎樣" \
         --ruled-out "已排除清單（回報前自審紀錄，每行一項）" \
         --user-confirmed \
         --image 截圖1.png --image 截圖2.png
-    uv run python scripts/report_issue.py submit "標題" --body-file report.md --user-confirmed  # 內文須含「已排除」段
+    uv run python scripts/report_issue.py submit "標題" --body-file report.md --user-confirmed
+        # 內文須含「情境」「操作」「結果」三段與「已排除」段
     uv run python scripts/report_issue.py list
     uv run python scripts/report_issue.py show <ticket_id>
 
@@ -19,7 +21,8 @@ report_issue.py — 平台問題回報（直達 AI GO 開發團隊的 Scrum Boar
 內嵌在開發團隊的卡片裡——UI 問題附截圖能大幅縮短來回。
 
 回報內容規範（BDD，詳見 references/issue-reporting.md）：
-寫「行為」不寫「解法」——預期 vs 實際 + 重現步驟；不要提技術建議或實作方式。
+骨架是「情境（想完成什麼）→ 操作（做了什麼）→ 結果（實際發生什麼）→ 預期（依文件應該怎樣）」，
+重心是「嘗試做什麼、結果是什麼」。三段缺一拒收；內文出現技術建議／修法／根因猜測也拒收。
 
 回報前自審閘門（references/pre-report-self-grill.md）：
 預設平台必定正確、失敗是自己操作有誤。`submit` 必須帶 `--ruled-out`（已排除清單，
@@ -142,11 +145,74 @@ def authenticate(client: httpx.Client, creds: dict) -> str:
 # === 指令 ===
 
 BDD_SECTIONS = [
-    ("expected", "預期行為"),
-    ("actual", "實際結果"),
-    ("steps", "重現步驟"),
+    ("given", "情境（想完成什麼、當時在什麼狀態）"),
+    ("when", "操作（做了什麼）"),
+    ("then", "結果（實際發生什麼）"),
+    ("expected", "預期（依文件應該怎樣）"),
     ("context", "環境／補充"),
 ]
+REQUIRED_BDD = ("given", "when", "then")          # 缺一不建卡
+BDD_BODY_MARKERS = ("情境", "操作", "結果")       # --body／--body-file 內文至少要有這三個段落字樣
+THEN_SOFT_LIMIT = 1200                            # 結果段超過此長度提醒：原文貼關鍵段落，完整輸出留在已排除清單
+
+# 內文出現這些措辭＝在開藥方（技術建議／修法／根因猜測），拒收。只掃 BDD 內文，不掃已排除清單。
+PRESCRIPTIVE_PATTERNS = (
+    r"建議(把|將|改|用|加|移除|採用|在)",
+    r"應該(改|把|將|用|加|移除)",
+    r"應改為",
+    r"修法",
+    r"實作方式",
+    r"實作建議",
+    r"怎麼修",
+    r"如何修",
+    r"root cause",
+    r"根因(是|在|為)",
+    r"請修改",
+)
+
+BDD_SUMMARY = """\
+❌ 拒收：缺「%s」。回報要用 BDD 骨架寫「嘗試做什麼、結果是什麼」，不是先講技術契約：
+   --given    情境：想完成什麼、當時在什麼狀態（一句使用者目標層的話，例：想把含中文檔名的元件同步上去）
+   --when     操作：做了什麼（步驟、打了哪個端點；可含 payload 形狀）
+   --then     結果：實際發生什麼（狀態碼＋錯誤原文的關鍵段落；指令與完整輸出留在 --ruled-out）
+   --expected 預期：依文件應該怎樣（對照用，放結果之後）
+   用 --body／--body-file 時，內文須含「情境」「操作」「結果」三個段落。見 references/issue-reporting.md。
+"""
+
+
+def _check_bdd(args: argparse.Namespace, body: str) -> None:
+    """BDD 骨架閘門：情境／操作／結果三段缺一不建卡。"""
+    structured = any(getattr(args, k, None) for k, _ in BDD_SECTIONS)
+    if structured and not args.body_file:
+        missing = [h.split("（")[0] for k, h in BDD_SECTIONS if k in REQUIRED_BDD and not getattr(args, k)]
+    else:
+        missing = [m for m in BDD_BODY_MARKERS if m not in body]
+    if missing:
+        raise RuntimeError(BDD_SUMMARY % "、".join(missing))
+
+
+def _check_no_prescription(body: str) -> None:
+    """開藥方閘門：內文有技術建議／修法／根因猜測就不建卡，印出命中的句子讓人改寫。"""
+    hits = []
+    for line in body.splitlines():
+        for pat in PRESCRIPTIVE_PATTERNS:
+            m = re.search(pat, line, re.IGNORECASE)
+            if m:
+                hits.append((m.group(0), line.strip()))
+                break
+    if not hits:
+        return
+    msg = "❌ 拒收：內文在開藥方（技術建議／修法／根因猜測）。回報寫行為，不寫解法——解法是開發團隊拿完整脈絡做的事：\n"
+    for phrase, line in hits[:5]:
+        msg += f"   「{phrase}」← {line[:80]}\n"
+    msg += "   改寫成「做了什麼 → 發生了什麼 → 依文件應該怎樣」再送。"
+    raise RuntimeError(msg)
+
+
+def _warn_then_length(args: argparse.Namespace) -> None:
+    then = getattr(args, "then", None) or ""
+    if len(then) > THEN_SOFT_LIMIT:
+        print(f"⚠️  「結果」段有 {len(then)} 字——錯誤原文只貼關鍵段落，指令與完整輸出留在 --ruled-out。仍照送。")
 
 RULED_OUT_HEADING = "已排除（回報前自審）"
 RULED_OUT_MARKER = "已排除"      # --body-file 內文至少要有這個字樣的段落
@@ -168,12 +234,12 @@ SELF_GRILL_SUMMARY = """\
 
 
 USER_CONFIRM_HEADING = "送出確認"
-USER_CONFIRM_LINE = "使用者已看過摘要（症狀／預期 vs 實際／重現／已排除清單）並同意送出。"
+USER_CONFIRM_LINE = "使用者已看過摘要（情境／操作／結果／預期／已排除清單）並同意送出。"
 USER_CONFIRM_SUMMARY = """\
 ❌ 拒收：缺 --user-confirmed。自審通過不等於可以送——送出與否由使用者決定，問的人是 agent：
    1. 先把摘要拿給使用者（references/pre-report-self-grill.md §3 的固定格式）：
         【疑似平台問題】<症狀一句>
-        預期：… ／ 實際：… ／ 重現：… ／ 已排除：…
+        情境：… ／ 操作：… ／ 結果：… ／ 預期：… ／ 已排除：…
         要不要提交給開發團隊？
    2. 使用者說「送」→ 原指令加 --user-confirmed 重送
    3. 使用者說「不送」→ 自審紀錄留在專案，不送
@@ -314,11 +380,12 @@ def _upload_images(client: httpx.Client, token: str, paths: list) -> list:
 def cmd_submit(args: argparse.Namespace) -> int:
     body = _compose_body(args)
     if not body:
-        print("❌ 需要內文：用 --expected/--actual/--steps（建議）、--body 或 --body-file")
+        print("❌ 需要內文：用 --given/--when/--then/--expected（建議）、--body 或 --body-file")
         return 1
-    if not ("預期" in body and "實際" in body):
-        print("⚠️  內文缺「預期行為 vs 實際結果」——請盡量用 BDD 描述行為，")
-        print("    不要寫技術建議或實作方式（見 references/issue-reporting.md）。仍照送。")
+    # ★ BDD 骨架閘門：情境／操作／結果三段缺一不建卡；內文開藥方也不建卡（references/issue-reporting.md）
+    _check_bdd(args, body)
+    _check_no_prescription(body)
+    _warn_then_length(args)
 
     # ★ 回報前自審閘門：沒有已排除清單就不建卡（references/pre-report-self-grill.md）
     ruled = _check_self_grill(args, body)
@@ -419,11 +486,14 @@ def main() -> int:
 
     p_submit = sub.add_parser("submit", help="提交回報")
     p_submit.add_argument("title", help="一句話標題（≤80 字）")
-    p_submit.add_argument("--expected", help="預期行為")
-    p_submit.add_argument("--actual", help="實際結果（含完整錯誤訊息關鍵段落）")
-    p_submit.add_argument("--steps", help="重現步驟")
+    p_submit.add_argument("--given", help="★ 情境：想完成什麼、當時在什麼狀態（一句使用者目標層的話）")
+    p_submit.add_argument("--when", "--steps", dest="when",
+                          help="★ 操作：做了什麼（步驟、打了哪個端點；--steps 是舊名）")
+    p_submit.add_argument("--then", "--actual", dest="then",
+                          help="★ 結果：實際發生什麼（狀態碼＋錯誤原文關鍵段落；--actual 是舊名）")
+    p_submit.add_argument("--expected", help="預期：依文件應該怎樣（對照用，放在結果之後）")
     p_submit.add_argument("--context", help="環境／補充（app_id、時間、request_id…）")
-    p_submit.add_argument("--body", help="自由格式內文（仍應含預期 vs 實際）")
+    p_submit.add_argument("--body", help="自由格式內文（須含「情境」「操作」「結果」三段）")
     p_submit.add_argument("--body-file", help="從檔案讀內文")
     p_submit.add_argument("--image", action="append",
                           help="附加截圖（可重複，最多 10 張；png/jpg/webp/gif ≤8MB）")
