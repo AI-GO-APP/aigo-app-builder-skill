@@ -200,6 +200,13 @@ app 仍帶舊的 30 秒 ceiling，**要 republish 一次**才會換上 manifest 
 超過 120000 的宣告會被夾回 120000；webhook（90 秒）與排程（300 秒）的 dispatcher 外層上限
 另算（`event-triggers.md` §1.6／§2.6），兩道取小。逾時回 `status: "timeout"`，長工作仍要切批次。
 
+> ⚠️ **走 `ctx.http.call` 的 action 另有一道更早的牆，跟 manifest 無關。**
+> 那道是 egress 閘道的 `timeout_ms`：**預設 10000、硬上限 30000**（設定在該外部服務上，
+> 不是 manifest）。到期時平台砍掉的是**整支 action**，回 `status: "timeout"`、`result: null`、
+> `error: "Action 執行超時(<該服務的 timeout_ms>ms)"`——括號裡的毫秒數是**閘道的值，
+> 不是 manifest 的**，兩道牆的錯誤原文同形。所以看到 `30000ms` 甚至 `10000ms`
+> 都不代表 manifest 沒生效或該 republish。四道閘道上限與分辨法見 §25.4。
+
 依權限分流（前端隱藏不算數，這裡才是強制點）：
 
 ```python
@@ -1317,8 +1324,14 @@ def execute(ctx):
 以**同名 slug** 登記，填 base_url 鎖定可打的 host。**沒有金鑰欄位**：寫入 API 對
 `auth_type ≠ none` 或非空 `connection_config` 直接回 400（域名驗證 only，ADR 0010）。
 
-而且是**兩層設定**：slug 沒建立連不出去；服務存在但**沒授權給本 App** 也連不出去
-（`egress_not_authorized`）。
+而且是**三層設定**，發布閘門分成三種互斥的 gap：slug 沒建立連不出去
+（`egress_service_not_found`）；服務**被停用**連不出去（`egress_service_inactive`）；
+服務存在且啟用但**沒授權給本 App** 也連不出去（`egress_not_authorized`）。
+
+> ⚠️ 授權**當下**會擋停用中的服務，但**之後把服務停用並不會回收授權清單裡的 id**。
+> 所以「已授權 ∧ 已停用」是可達狀態——只看「有沒有在授權清單裡」會誤判成通過，
+> 發布卻回 409 `service_inactive`。外部服務是租戶共用池，別人停用它你不會收到通知。
+> 遇到就去 Builder 重新啟用，**不要再建一個同名的**（slug 唯一）。→ `platform-behaviors.md` §13.5
 
 設定位置：**Builder（`/builder/{app_id}`）的「外部服務」tab**——唯一入口，
 同一處做租戶級建立／編輯與本 App 授權，新建預設順便授權本 App。
@@ -1339,7 +1352,8 @@ def execute(ctx):
 | 症狀 | 成因 | 處置 |
 |------|------|------|
 | timeout（約 20 秒） | raw `httpx`/`requests` 直連——default-deny egress，連線被黑洞 | 改寫成 `ctx.http.call` |
-| `ctx.http.call` 連不出去／錯誤指向 egress | slug 沒有同名外部服務（`egress_service_not_found`），或服務未授權給本 App（`egress_not_authorized`） | 引導用戶到 Builder「外部服務」tab 建立（base_url）並授權本 App |
+| timeout，且**確實走 `ctx.http.call`** | 是閘道的 `timeout_ms`（預設 10000／上限 30000），不是 manifest，也不是直連 | 見 §25.4——先確認該外部服務的 `timeout_ms` 設成多少 |
+| `ctx.http.call` 連不出去／錯誤指向 egress | slug 沒有同名外部服務（`egress_service_not_found`）、服務**被停用**（`egress_service_inactive`），或服務未授權給本 App（`egress_not_authorized`） | 引導用戶到 Builder「外部服務」tab 建立（base_url）／重新啟用，並授權本 App |
 | 401 | 外部 API 拒絕請求帶的憑證——閘道不注入也不剝除，`Authorization` 是 action 自己組的 | 檢查 action 是否有帶 `Authorization` header、`ctx.secrets` 的金鑰是否正確 |
 
 給 AI Agent 的處理準則：
@@ -1354,7 +1368,44 @@ def execute(ctx):
    `ctx.secrets` 金鑰，別再往外部服務設定找。
 5. 確認設定生效後才重試。
 
-### 25.4 規劃階段就要處理
+### 25.4 閘道的四道上限（★ 2026-09-09 prod 實打＋平台原始碼核對）
+
+| 上限 | 值 | 撞到時的樣子 |
+|---|---|---|
+| 單次對外呼叫的時間 | 該 EgressService 的 `timeout_ms`：**預設 10000 ms**、**硬上限 30000 ms** | **整支 action 被砍**：`status: "timeout"`、`result: null`、`error: "Action 執行超時(<該服務的 timeout_ms>ms)"` |
+| 送出去的請求本體 | **8388608 位元組（8 MiB）** | `status: 413`、`detail: "送往外部服務「<slug>」的請求本體超過閘道的大小上限（8388608 位元組）"` |
+| 收回來的回應本體 | **5242880 位元組（5 MiB）**＝EgressService `max_response_bytes`（**只調得下去**） | 回應被閘道擋下 |
+| 呼叫頻率 | **每分鐘 120 次**，key 是「**單一 App × 單一 slug**」 | `429`、`呼叫外部服務「<slug>」的頻率超過每分鐘 120 次上限` |
+
+四道都掛在閘道上，跟另外兩道**不同層**的限制常被混為一談：
+`actions/manifest.json` 的 `timeout_ms`（runner 執行上限，1000～120000，§7），
+以及呼叫 action 的 API 入口 request body（pad 512 KiB／4／8／12 MiB 實打全 200，**12 MiB 送得進去**）。
+
+- ⚠️ **30000 是「上限」不是「你會拿到的值」**：外部服務建立時沒明給 `timeout_ms`，
+  落庫預設是 **10000**——這種服務在**約 10 秒**就被切，不是 30 秒。排查時先去
+  Builder「外部服務」看那支服務的 `timeout_ms` 實際是多少，錯誤訊息括號裡的毫秒數也會照實印。
+- `timeout_ms` **調不高**：`PATCH` 60000 與 120000 皆回 **422**
+  「`timeout_ms` 必須是 1～30000 之間的正整數（毫秒）」。要拿滿 30 秒得自己把它設上去。
+- `ctx.http.call` **沒有** per-call timeout 參數：傳 `timeout=90` 回
+  `TypeError: HttpModule.call() got an unexpected keyword argument 'timeout'`。
+  單次對外呼叫的逾時只由 EgressService 的 `timeout_ms` 決定，action 端覆寫不了。
+- `max_response_bytes` **只調得下去**：平台預設值就是硬上限（閘道單 replica 全量緩衝回應，
+  拉高等於 OOM），送超過的值回 422。
+- **串流（SSE）不繞過這道時間牆**：閘道原樣轉送 SSE、上游也收
+  `stream_options: {"include_usage": true}`，串流路徑本身可用（短工作串流 15.6 秒成功，
+  usage 與 cost 都解得出來）；但砍的是**單次呼叫的總時間**不是 idle，同一份長工作非串流 timeout、
+  串流一樣 timeout（`duration_ms` 30350）。
+- 每分鐘 120 次那道的 key 含**呼叫端給的 slug**，換 slug 就是換一個新桶；在迴圈裡逐筆對同一個
+  服務呼叫最容易撞到，改批次或加快取。
+
+★ **怎麼分辨是這道牆還是 runner ceiling**：兩者錯誤原文同形，只能看
+「這支 action 有沒有走 `ctx.http.call`」。同一支**已發布**、manifest `timeout_ms: 120000`
+的 app：純 `time.sleep(100)`（完全不碰網路）→ `success`、`duration_ms: 100002`（ceiling 正常）；
+同一支 app 走 `ctx.http.call` 的長工作四發（該服務 `timeout_ms` 設成 30000），
+`duration_ms` 落在 **30394～30405**（離散度 11 ms，一道 wall-clock 硬牆的形狀），
+換 terra／sonnet-5／gemini-3.8-flash 三家模型都一樣。
+
+### 25.5 規劃階段就要處理
 
 Phase 1.5 實作計畫裡就該**列出所有要打出去的外部服務（egress slug + base_url）**，
 讓用戶在寫 code 前先去建立外部服務並授權本 App，同時把各 API 的金鑰存進
