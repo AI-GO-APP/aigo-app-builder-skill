@@ -256,10 +256,27 @@ HTTP 409
 ```
 
 這是保護機制（避免綁在該 action 上的 webhook／排程被靜默斷開）。
-目前**未找到可在 API 層帶的確認參數**（已試 `confirm`／`force`／
-`confirm_action_removal`／`allow_action_removal` 等 body 與 query 形式皆無效）。
+確認參數是 **query** `?confirm_removal=true`（2026-09-09 prod 實打；早先試的 `confirm`／`force`／
+`confirm_action_removal`／`allow_action_removal` 等 body 與 query 形式都不對）。
+不是要移除 → 把該 action 檔放回去再發布。
 
-暫時的解法是把該 action 檔案放回去再發布；要真的移除 action 請引導用戶到 Builder 後台操作。
+### 5.3 外部服務／金鑰未到位會回 409 `EGRESS_NOT_READY`
+
+```json
+HTTP 409
+{"code": "EGRESS_NOT_READY",
+ "message": "本 App 的外部服務／金鑰設定尚未到位，發布後呼叫會失敗",
+ "gaps": [{"kind": "unauthorized", "slug": "openai",
+           "message": "本 App 尚未授權使用外部服務「openai」",
+           "fix": "到 Builder 的「外部服務」分頁勾選「openai」後按儲存授權。…",
+           "fix_url": "/builder/{app_id}?tab=egress", "required_role": "builder.access"}]}
+```
+
+掃的是 `actions/*.py` 的字面 `ctx.http.call` slug **∪** `_template.json.required_egress` 宣告；
+起手式模板自帶後者（宣告 `openai`），所以新建 App 不清就發不出去（dev-guide §26.2）。
+略過參數 `?confirm_egress_gaps=true`，只在確定用不到那個 slug 時帶。
+第三個參數 `?auto_rollback=true`：發布後自動編譯驗證、失敗退回上一版並回 422。
+三道閘的順序：`INVALID_ACTION_CODE`(400) → `ACTION_REMOVAL` → `EGRESS_NOT_READY`（dev-guide §8）。
 
 ---
 

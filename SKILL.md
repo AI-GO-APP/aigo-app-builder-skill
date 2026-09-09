@@ -878,7 +878,14 @@ if (file) downloadFile(file);
 1. POST `/api/v1/builder/apps/{id}/publish`
    - 腳本：`scripts/aigo_publish.py` 的 `publish_app()`
    - ★ 內建二次驗證：POST 後自動 GET 確認 status == "published"
-2. 發布後執行 Publish 一致性驗證
+   - ★ POST 前內建 `egress_preflight()`：比對 `_template.json` 的 `required_egress` 宣告、`actions/*.py` 的
+     字面 `ctx.http.call` slug 與本 App 已授權的外部服務——起手式殘留的 `openai` 在這裡就會被指出來，
+     不用等 409（`troubleshooting.md` EGRESS_NOT_READY 列；起手式要清的兩個檔見 dev-guide §26.2）
+   - 三個 query 參數預設都不帶，**409 回來先讀 `code` 再決定**（dev-guide §8 分流表）：
+     `confirm_removal=true` 只在用戶確認要移除該 action；`confirm_egress_gaps=true` 只在確定用不到那個
+     slug；`auto_rollback=true` 是發布後自動編譯驗證、失敗退回上一版並回 422——要開得讓用戶知道會退版
+2. 發布後執行 Publish 一致性驗證；**發布後立刻呼叫 action 回 503 是 runner 冷啟動**，等 `Retry-After`
+   再試，不是發布失敗（`troubleshooting.md` 503 列）
 
 ### 樂觀鎖
 
@@ -934,8 +941,10 @@ Hosted App 線（不走 Phase 2–4）：
 常見狀態碼的語義分野：**403** 權限（分 `system.admin` / `builder.access` 兩種，
 降級動作不同；body 帶 `reason`／`rule_id` 則是租戶資料存取規則，見 dev-guide §27）｜
 **409** 配額或衝突｜**422** 輸入不合法｜**400** 業務規則拒絕｜
-**503「app runner 暫時不可用」且 body 帶 `quota_hint`**＝租戶運算配額吃緊（pod 建不出來），
-**不是 code 問題**——把 `quota_hint` 原文轉給用戶、引導到「運算資源」頁或找管理員，別改 action。
+**503「app runner 暫時不可用」**至少三種成因同形——**先問有沒有 publish**（`status: draft` 就是沒有，
+重試不會好）、再看是不是剛發布的冷啟動（等 `Retry-After` 試一兩次）、body 帶 `quota_hint` 才是租戶運算配額
+吃緊（pod 建不出來，**不是 code 問題**——把 `quota_hint` 原文轉給用戶、引導到「運算資源」頁或找管理員，
+別改 action）；三項都排除才退避重試（`troubleshooting.md` 503 列）。
 
 ### Action 對外呼叫失敗（★ 別急著改 code）
 

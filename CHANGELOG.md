@@ -4,6 +4,53 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.39.0
+
+### 發布閘門與 503 三成因：起手式殘留的 `required_egress`、三個 publish 確認參數、遷入的狀態層落點
+
+2026-09-09 盤點 issue #56–#62（含 #42／#43），在測試租戶用一支拋棄式 `starter-internal` App 逐項實打，
+並回平台原始碼（`publish_guard.py`、`custom_app.py` publish 端點、`action.py` runner 失敗分支）核對。
+實打為真且 skill 零覆蓋的四張（#57／#58／#59／#61）在本版處理；#56／#60／#62 已分別由
+1.36.0／1.38.0／1.37.0 處理，殘句在本版補齊；#42／#43 屬產品決定，不在本版。
+
+實打事實：
+
+- `starter-internal` 1.6.0／`starter-external` 1.4.0 建出的 App 自帶 `_template.json`，宣告
+  `required_egress: {"openai": …}`，示範 action `actions/summarize_leads.py` 也呼叫它；什麼都沒改直接發布
+  409 `EGRESS_NOT_READY`
+- 閘門掃的是「`actions/*.py` 字面 `ctx.http.call` slug ∪ `_template.json.required_egress`」聯集——
+  刪掉 action 後光靠宣告仍擋；刪掉 `_template.json` 後不帶參數就能發布；README 與 `actions/manifest.json`
+  殘留不影響（issue #61 原文說 README 會擋，不對）
+- 閘門順序 400 `INVALID_ACTION_CODE` → 409 `ACTION_REMOVAL` → 409 `EGRESS_NOT_READY`；
+  `confirm_removal`／`confirm_egress_gaps`／`auto_rollback` 三個 query 參數 prod 皆生效（`auto_rollback` 只驗成功路徑）
+- 503「app runner 暫時不可用」＋`retry_after: 30` 三種成因同形：未發布（online 恆走 per-app runner，
+  ksvc 不存在就連線失敗）、發布後冷啟動（立刻打 503，約兩分鐘後 162ms 跑通）、配額（帶 `quota_hint`）；
+  原始碼沒有「未發布」分支
+
+改動：
+
+- `references/troubleshooting.md`：`ACTION_REMOVAL` 列改成帶 `?confirm_removal=true` 重發並寫閘門順序；
+  新增 `EGRESS_NOT_READY` 列（兩個檔都要刪、刪法、何時帶 `confirm_egress_gaps`）；503 列拆三成因倒序——
+  先問有沒有 publish，重試放最後
+- `SKILL.md`：Phase 4.4 發布步驟補 `egress_preflight()`、三個參數的使用時機與「發布後立刻 503 是冷啟動」；
+  問題回報段的 503 句同步三成因
+- `references/custom-app-dev-guide.md` §8：三個參數表、閘門順序、`gaps[]` 形狀與掃描範圍；§26.2 補
+  「起手式自帶 `_template.json` 宣告 openai、兩個檔都要刪、`sync_to_cloud()` 不會刪遠端檔」
+- `references/platform-behaviors.md` §5.2：刪掉「未找到確認參數」，改為 `?confirm_removal=true`；
+  新增 §5.3 `EGRESS_NOT_READY` 回應原文與規則
+- `references/migration-workflow.md` §2.0 stack 盤點新增「狀態層」列（快照／排程產物／session 的三個落點：
+  自建表／`/data`／每次重算）（#57）；§2.4 補「自建表實體名先定英文」前置提醒（#62 殘句）
+- `references/hosted-apps.md` §7：加遷入時的反向指引，指回 §2.0 狀態層列（#57）
+- `references/pre-report-self-grill.md` Q1.2：補「文件宣稱會注入的 header 沒出現」型與最小無框架程式
+  印 header 的對照法（#56 殘句）
+- `references/product-line-decision.md`：Hosted `visibility=internal` 格補「只是門禁、容器拿不到任何身分」（#56 殘句）
+- `scripts/aigo_publish.py`：`publish_app()` 加 `confirm_removal`／`confirm_egress_gaps`／`auto_rollback`
+  三個參數（預設皆不帶）；POST 前先跑 `egress_preflight()`（AST 掃字面 slug ＋ 讀 `_template.json` 宣告 ＋
+  對照 `available-egress-services` 的授權清單），起手式殘留當場點名；409 回來把 `code` 翻成下一步，
+  不自動帶 confirm；`auto_rollback` 的 422 明講已退版；`full_deploy()` 參數透傳
+- `scripts/aigo_sync.py`：新增 `delete_remote_files()`（`DELETE /source/files` 帶 `expected_version`，
+  刪後 GET 驗證）與 `STARTER_EGRESS_LEFTOVERS` 常數；`diff_vfs()` 的 `deleted` 清單只列不做，docstring 明講
+
 ## 1.38.0
 
 ### 更正：Custom App 執行期網址與存取端點——internal／external 兩線各自的正式／測試形狀與四條通道端點總表

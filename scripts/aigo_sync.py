@@ -3,6 +3,10 @@ import os
 from typing import Any
 
 PROTECTED_FILES = {"src/api.ts", "src/db.ts", "src/action.ts", "src/data.json", "src/db.json", "src/actions.json"}
+# 起手式（starter-internal／starter-external）自帶、會讓發布 409 EGRESS_NOT_READY 的兩個檔：
+# `_template.json` 宣告 required_egress: openai，示範 action 也字面呼叫 openai。與需求無關就兩個一起刪
+# （只刪 action 仍擋；README／manifest 殘留不影響閘門）。2026-09-09 prod 實打。
+STARTER_EGRESS_LEFTOVERS = ("_template.json", "actions/summarize_leads.py")
 MAX_FILE_SIZE = 1_000_000  # 1MB
 MAX_FILE_COUNT = 200
 
@@ -51,7 +55,8 @@ def get_remote_vfs(base_url: str, token: str, app_id: str) -> tuple[dict, int]:
 
 
 def diff_vfs(local: dict[str, str], remote: dict[str, str]) -> dict:
-    """比較差異"""
+    """比較差異。`deleted` 只是「遠端有、本機沒有」的清單——sync_to_cloud() 不會刪它們，
+    要真的刪用 delete_remote_files()。"""
     remote_app = {k: v for k, v in remote.items() if k not in PROTECTED_FILES}
     added = [k for k in local if k not in remote_app]
     deleted = [k for k in remote_app if k not in local]
@@ -82,6 +87,28 @@ def sync_to_cloud(base_url: str, token: str, app_id: str, files: dict[str, str],
     for path in files:
         if path not in remote_vfs:
             raise RuntimeError(f'VFS 同步驗證失敗：檔案 {path} 未出現在遠端 VFS')
+    return resp.json()
+
+
+def delete_remote_files(base_url: str, token: str, app_id: str, paths: list[str],
+                        expected_version: int) -> dict:
+    """DELETE 遠端 VFS 檔（起手式殘留的 `_template.json`／示範 action 要用這個；PATCH 不會刪）。
+
+    `expected_version` 必填（樂觀鎖，缺就 400）；回應帶新的 `vfs_version`。刪後二次 GET 驗證檔案真的不在。
+    """
+    import httpx
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    resp = httpx.request("DELETE", f"{base_url}/api/v1/builder/apps/{app_id}/source/files",
+                         headers=headers, json={"paths": list(paths), "expected_version": expected_version},
+                         timeout=60)
+    if resp.status_code == 409:
+        raise ValueError("VFS 版本衝突 (409)。請重新取得最新版本後重試。")
+    resp.raise_for_status()
+    from aigo_auth import get_app_info
+    remote_vfs = get_app_info(base_url, token, app_id).get("vfs_state", {})
+    still_there = [p for p in paths if p in remote_vfs]
+    if still_there:
+        raise RuntimeError(f"VFS 刪除驗證失敗：{still_there} 仍在遠端 VFS")
     return resp.json()
 
 

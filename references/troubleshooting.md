@@ -29,7 +29,8 @@
 | 打 `https://ai-go.app/...` 沒反應／導去找工作區的頁面 | apex 已不是租戶入口，`/login` 被收斂成 workspace finder。全平台規則是 `https://[tenant].ai-go.app/*` → `platform-behaviors.md` §6.1 |
 | 401 | Token 過期，重新登入 |
 | 409 Conflict | VFS 版本衝突，重新 GET 後重試 |
-| 409 `ACTION_REMOVAL` | 本次發布會移除既有 action（回應的 `removed_actions` 列出是哪些）。目前未找到 API 層的確認參數，暫以「把該 action 檔放回再發布」處理 → `platform-behaviors.md` §5.2 |
+| 409 `ACTION_REMOVAL` | 本次發布會移除既有 action（回應的 `removed_actions` 列出是哪些）。用戶確認真的要移除（綁在它上面的 webhook／排程會斷）→ 帶 `?confirm_removal=true` 重發（2026-09-09 prod 實打）；不是要移除 → 把該檔放回。閘門順序：400 `INVALID_ACTION_CODE` → 409 `ACTION_REMOVAL` → 409 `EGRESS_NOT_READY`，前一道過了才會看到下一道 → `platform-behaviors.md` §5.2 |
+| **409 `EGRESS_NOT_READY`（新建 App 什麼都沒改就發不出去；或清了示範 action 還是擋）** | 閘門讀的是「`actions/*.py` 字面 `ctx.http.call` slug **∪** `_template.json` 的 `required_egress` 宣告」聯集（prod 實打＋原始碼 `publish_guard.py`）。`starter-internal`／`starter-external` 起手式自帶 `_template.json` 宣告 `openai`，示範 action `actions/summarize_leads.py` 也呼叫它——**兩個檔都要刪**（只刪 action 仍擋；README 與 `actions/manifest.json` 殘留不影響閘門）。刪法：`DELETE /builder/apps/{id}/source/files {"paths":[…],"expected_version":<vfs_version>}`（`aigo_sync.py delete_remote_files()`；`sync_to_cloud()` 只 PATCH 不會刪）。真的要用該服務 → 依回應 `gaps[].fix` 建立／授權外部服務（dev-guide §25.2）；確定用不到又暫時不清 → `?confirm_egress_gaps=true`（發布後呼叫該 slug 必失敗）。發布前 `aigo_publish.py` 的 `egress_preflight()` 會先列出來 → `platform-behaviors.md` §5.3 |
 | 423 Locked | 有待審核的發布，等待或取消 |
 | 寫入日期時間欄位回 500 `offset-naive and offset-aware` | 送了帶 `Z` 的 `toISOString()`。TIMESTAMP 欄位吃 offset-naive，改用 `toISOString().slice(0, 19)` → `platform-behaviors.md` §2 |
 | 宣告 create/update 權限回 403 `seed_table_readonly` | 該表是平台衍生表（`stock_moves`／`stock_quants`／`mrp_workorders` 等），只能 read。改寫來源單據再用 `ctx.erp.*` 觸發 → `platform-behaviors.md` §3 |
@@ -110,7 +111,7 @@
 | validate 後庫存沒動、也不報錯 | 該單沒有 `stock_moves` 明細；明細是 seed 表 App 寫不了，要先在平台模組介面補。UI 應在明細為空時停用按鈕 → `platform-behaviors.md` §4.3 |
 | 身分欄位被填成別人的 id | 前端從 token 解出的 `sub` 可被竄改。Server Action 一律用 `ctx.user_id` 覆蓋前端送來的值 → `platform-behaviors.md` §10.3 |
 | **前端 `db.update()` 回 405** | 舊版注入的 `src/db.ts` 送 `PUT`，資料代理只收 `PATCH`（2026-09-01 修 SDK 模板）。換成最新模板或直接 fetch 用 `PATCH`；不是權限問題 → SKILL.md 規則 12 |
-| **呼叫 action 回 503「app runner 暫時不可用」且 body 帶 `quota_hint`** | 租戶運算配額吃緊、pod 建不出來（2026-09-03 起 backend 會把配額說明接在 `detail` 後並帶頂層 `quota_hint`）。**不是 code 問題**：轉告用戶、引導到「運算資源」頁或找管理員；沒有 `quota_hint` 的 503 才依 `Retry-After` 退避重試 |
+| **呼叫 action 回 503「app runner 暫時不可用」（body 帶 `retry_after: 30`）** | 至少三種成因、訊息同形（2026-09-09 prod 實打；原始碼沒有「未發布」分支，503 是 per-app runner 連不到的副作用），**依序排除，重試放最後**：① **有 publish 嗎**——GET app 的 `status` 是 `draft`／`published_artifact_version` 為空就是沒發布；sync／compile 都不會讓 action 上線，**重試一萬次都不會好，先 publish**（自審 Q4.1 那一問前移到這裡） ② **剛發布**——runner 冷啟動：實測發布後立刻打是 503，約兩分鐘後同一 action 162ms 跑通；等 `Retry-After` 再試一兩次 ③ **body 帶 `quota_hint`**——租戶運算配額吃緊、pod 建不出來（2026-09-03 起 backend 會把配額說明接在 `detail` 後並帶頂層 `quota_hint`），**不是 code 問題**：轉告用戶、引導到「運算資源」頁或找管理員 ④ 前三項都排除才是平台不穩，依 `Retry-After` 退避重試；連續十分鐘以上再走回報 |
 | **資料層 403、body 帶 `reason`（`policy_denied`／`hidden_column_write`／`policy_invalid`／`runner_unavailable`／`app_data_access_suspended`）＋`rule_id`** | 租戶「資料存取規則」（Auth gate）擋的，**app 端改 code 無解**——把 `rule_id` 轉給租戶管理員到 Builder「資料存取規則」分頁看；`hidden_column_write`＝payload 碰到被遮蔽欄位；UAT on／prod off（2026-09-07）→ `custom-app-dev-guide.md` §27 |
 | 使用者開 app 看到整頁「資料存取暫停」 | 管理員對這支 app 按了「封鎖資料存取」（萬用 deny 規則），平台 host 直接接管畫面。找租戶管理員解除，app 沒壞 → dev-guide §27.2 |
 | 清單少了欄位／少了列，API 回 200 | 命中 `restrict` 規則：`where` 併進查詢、`hide` 欄位從回應消失——**預期行為**。hide 欄位寫進 `filters`／search 回 400「未授權的篩選欄位」（與欄位不存在同形）、寫進 `order_by` 被靜默略過——都不是 403，別往權限查 → dev-guide §27.2 |
