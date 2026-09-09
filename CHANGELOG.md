@@ -4,6 +4,32 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.36.0
+
+### 更正：internal Hosted App 容器拿不到任何身分（實測推翻四個 X-Aigo header）
+
+1.35.0 以前 `hosted-apps.md` §6 與 `member-admin.md` §6 寫「auth-proxy 驗過登入後會注入
+`X-Aigo-User-Id`／`-Tenant-Id`／`-App-Id`／`-Population` 四個 header」。2026-09-09 在測試租戶
+實打推翻：部署一支只把收到的 header 原樣印出來的 app（`internal` ＋ `access_role_ids=[]`），
+以成員身分走完登入交遞後開啟，容器只看到 `Host`／`Forwarded`／`X-Forwarded-*`／`X-Request-Id`
+這類轉送 header，**一個 `X-Aigo-*` 都沒有**，`Cookie` 也沒有。
+
+也就是 internal 模式**門口擋得住、門內認不出人**——app 連「這是哪一位使用者」都不知道，
+不只是「拿不到 roles」。容器內的 `AIGO_API_TOKEN` 是 app 身分不是使用者身分：打
+`/api/v1/auth/me`、`/api/v1/members*` 一律 401；`/open/proxy` 打 `users`／`roles`／
+`user_role_rel`／`members` 一律 403（平台身分表，引用面列不出來），對照組
+`/open/data-center/tables` 200。已回報平台（2026-09-09）。
+
+照舊文字寫的 app 會拿到一片空白，且症狀是「使用者永遠是同一個人」這種不會報錯的失敗，
+所以四處全部改寫，並在 `troubleshooting.md` 補一列讓症狀查得到：
+
+- `references/hosted-apps.md` §6：改寫成「容器收到的身分：一個都沒有」，附實打證據、
+  `AIGO_API_TOKEN` 打身分端點的 401／403 對照，與三條替代做法（Custom internal app／
+  Hosted `public` 當後端＋自驗簽章／按角色拆多支 app）
+- `references/member-admin.md` §6：整節改寫並移除四個 header 的表；§0 的陷阱清單一併更正
+- `SKILL.md` Phase 1.5 陷阱條與 references 索引：改為「拿不到任何身分」
+- `references/troubleshooting.md`：新增「internal Hosted App 讀不到現在是誰在用」一列
+
 ## 1.35.0
 
 ### 回報內文的 BDD 骨架升級為硬閘：情境→操作→結果→預期，開藥方措辭拒收

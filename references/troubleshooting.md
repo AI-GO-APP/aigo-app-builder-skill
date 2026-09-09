@@ -74,6 +74,7 @@
 | Hosted App 改了 env 容器讀不到 | 傳播需數分鐘（實測 1–6 分鐘），`apply_state` 不反映容器狀態。等，不要重建；用「移除變數」測最乾淨 → `hosted-apps.md` §4 |
 | Hosted App 登入後每個操作都 401／OAuth 導去 `https://0.0.0.0:8080` | 原系統 env 沒帶過來（session 密鑰、對外網址、第三方 key）。逐顆補進 runtime-settings → `hosted-apps.md` §4 遷入 env 清單 |
 | Hosted App 容器內打 `/api/v1/data-center/...` 回 401 `Invalid authentication token` | 少了 `/open` 前綴，不是憑證問題 → `hosted-apps.md` §5 |
+| **internal Hosted App 讀不到「現在是誰在用」——沒有 `X-Aigo-*` header、沒有 Cookie** | **不是設定漏了，平台就是不傳身分**（2026-09-09 實打）。拿 `AIGO_API_TOKEN` 去打 `/api/v1/auth/me`／`/members*` 一律 401（那是 app 身分不是使用者身分），`/open/proxy` 打 `users`／`roles`／`members` 一律 403。要在畫面內依角色分流就換 Custom internal app，或 Hosted 設 `public` 當後端＋自驗簽章 → `hosted-apps.md` §6、`member-admin.md` §6 |
 | `/open/proxy/{table}` 403「App 未被授權存取表」 | 「App」指隨附整合。`POST /api/v1/refs/apps/{整合 id}` 加引用（登入 session），立即生效 → `hosted-apps.md` §5 |
 | `/open/*` 403 且 body 帶 `reason`／`rule_id`，引用明明加了 | 租戶「資料存取規則」擋的：app 身分沒有 user，`restrict` 規則一用 `$user.*` 就整列判 deny。請租戶對 app 身分另設規則；app 端無解 → `hosted-apps.md` §5、dev-guide §27 |
 | 預設表 proxy query 帶了 `where` 卻回整表 | `where`／`filter`／`conditions` 被**靜默忽略**，只有 `filters:[{column,op,value}]` 生效 → `platform-behaviors.md` §1.5 |

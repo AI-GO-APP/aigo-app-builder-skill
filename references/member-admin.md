@@ -52,8 +52,8 @@
   對經銷商這類帳號**解不出→整列 deny→403 `policy_denied`**（enforce 後）。
   對外部人員的角色，規則只能用 `$user.id`／`$user.role_ids`，或另設 app 級規則放行；
   計畫裡要提醒租戶管理員這一點。
-- **Hosted internal app 內做不到依角色分功能**：proxy 只給容器四個身分 header（§6），
-  **沒有 roles／permissions**。角色分流只能在門口（`access_role_ids`）做；
+- **Hosted internal app 內做不到依角色分功能**：proxy **不給容器任何身分**（§6，2026-09-09 實打），
+  連使用者 id 都沒有。角色分流只能在門口（`access_role_ids`）做；
   要在畫面內依角色開關功能 → 該部分做成 Custom internal app（`__USER_PERMISSIONS__` 快照）。
 - **判斷授權用 permission 標籤，不用角色名**（角色可被改名，SKILL.md 規則 23）。
 - **經銷商角色的 permissions 從空集合起步**：Custom internal app 的資料存取走 Server Action
@@ -166,22 +166,27 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
 - 權限字串以 `aigo_data.py me` 印出的清單為準，不手抄；拿不到的字串（不在呼叫者權限內）
   建角色會 403（§8）。
 
-## 6. Hosted internal app 收到的身分
+## 6. Hosted internal app 收到的身分：沒有
 
-auth-proxy 驗過登入後，先剝掉 client 自帶的所有 `X-Aigo-*` header，再注入四個（空值不注入）：
+**門口擋得住，門內認不出人。** auth-proxy 驗過登入後把請求轉給容器，但**不傳遞任何身分**——
+2026-09-09 測試租戶實打（`internal` ＋ `access_role_ids=[]`，容器把收到的 header 原樣印出）：
 
-| header | 內容 |
-|---|---|
-| `X-Aigo-User-Id` | 登入者 user id |
-| `X-Aigo-Tenant-Id` | 租戶 id |
-| `X-Aigo-App-Id` | 這支 hosted app 的 id |
-| `X-Aigo-Population` | 身分族群標記（proxy 內部分類，記錄用） |
+- 容器只看到 `Host`／`Accept`／`Forwarded`／`X-Forwarded-*`／`X-Request-Id` 這類轉送 header，
+  **一個 `X-Aigo-*` 都沒有**；平台 cookie 也在進容器前被剝掉，所以 `Cookie` 同樣沒有
+- ⇒ app **連「這是哪一位使用者」都不知道**，更沒有 email／roles／permissions。
+  「app 內要『誰』可以、要『能做什麼』做不到」這個舊說法要整條退回：**兩個都做不到**
+- 容器內的 `AIGO_API_TOKEN` 是 **app 身分不是使用者身分**：打 `/api/v1/auth/me`、`/api/v1/members*`
+  一律 401；`/open/proxy` 打 `users`／`roles`／`user_role_rel`／`members` 一律 403（平台身分表，
+  引用面列不出來）。拿使用者 id 去查角色這條路**不存在**（也拿不到 id）
+- **已回報平台（2026-09-09）**，不必重複開單
 
-- **沒有 email、沒有 roles、沒有 permissions**。app 內要「誰」可以；要「能做什麼」做不到——
-  角色分流放在 `access_role_ids`（§3），或把需要分流的畫面做成 Custom internal app。
-- 這四個值**只供透傳與記錄**，proxy 的授權判定不用它們；app 也不要拿 `X-Aigo-User-Id` 再去打
-  members API 查角色——容器內只有 `AIGO_API_TOKEN`，打不到那些端點（§2 憑證）。
-- 401 處置與 cookie 剝除見 `hosted-apps.md` §6。
+⚠️ 1.35.0 以前本節列的四個注入 header（`X-Aigo-User-Id`／`-Tenant-Id`／`-App-Id`／`-Population`）
+是**錯的**——那屬於平台另一條尚未接線的資料面設計。
+
+**要在畫面內依角色開關功能**：① 該部分做成 Custom internal app（runtime 有 `__USER_ROLES__`／
+`__USER_PERMISSIONS__` 快照）；② Custom App 當前端 ＋ Hosted 設 `public` 當後端、由 app 自驗簽章
+（`hosted-apps.md` §5.1）；③ 按角色拆成多支 internal Hosted App，各掛不同 `access_role_ids`（§3）。
+401 處置與 cookie 剝除見 `hosted-apps.md` §6。
 
 ## 7. 既有系統的使用者搬遷
 
