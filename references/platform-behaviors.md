@@ -619,10 +619,14 @@ export function currentIdentity(): { userId: string; email: string; tenantId: st
 
 | 上限 | 值 | 可調性 | 撞到時的回應 |
 |---|---|---|---|
-| 單次對外呼叫時間 | EgressService `timeout_ms`：**預設 10000**、**硬上限 30000** | 只能在 1～30000 之間調 | 整支 action 被砍：`{"status":"timeout","result":null,"error":"Action 執行超時(30000ms)","duration_ms":30401.0}` |
+| 單次對外呼叫時間 | EgressService `timeout_ms`：**預設 10000**（建立時不給就是這個值，已實打）、**硬上限 30000** | 只能在 1～30000 之間調 | 整支 action 被砍：`{"status":"timeout","result":null,"error":"Action 執行超時(30000ms)","duration_ms":30401.0}` |
 | 送出的請求本體 | **8388608 位元組（8 MiB）** | 平台層常數，租戶端無欄位 | `status: 413`、`detail: "送往外部服務「openrouter」的請求本體超過閘道的大小上限（8388608 位元組）"` |
 | 收回的回應本體 | **5242880 位元組（5 MiB）**（EgressService `max_response_bytes`） | **只調得下去**：預設值即硬上限 | 回應被閘道擋下 |
 | 呼叫頻率 | **每分鐘 120 次**，key＝`egress:{app_id}:{呼叫端給的 slug}` | 平台層常數 | `429`、`呼叫外部服務「<slug>」的頻率超過每分鐘 120 次上限`（標記 retryable） |
+
+> 前三道皆 prod 實打（時間那道另在 2026-09-09 於測試租戶複驗兩個 422 與建立時的落庫預設，
+> 見 §13.5 末段）；**第四道「每分鐘 120 次」只有原始碼佐證、沒有實打**
+> （`connector_proxy.py` + `EGRESS_RATE_LIMIT_PER_MIN`），要打滿 120 次才會觸發，未做。
 
 ### 13.1 時間那道：30000 是上限，10000 才是預設
 
@@ -689,9 +693,14 @@ export function currentIdentity(): { userId: string; email: string; tenantId: st
 平台的 `list_tenant_egress_services()` 預設 `active_only=False`（ADR 0011 刻意保留，
 好讓人在 Builder 重新啟用；該端點 docstring 寫「只回 is_active=True」是過時的）。
 
-而 publish 閘門（`publish_guard.check_egress_readiness`）分成**三種**互斥的 gap：
+而 publish 閘門（`publish_guard.check_egress_readiness`）把 slug 這條線分成**三種**互斥的 gap。
 
-| gap kind | 409 的 code | 成因 |
+⚠️ **409 的 `code` 恆為 `EGRESS_NOT_READY`，成因只在 `gaps[].kind` 裡**——
+`egress_service_not_found` 那類是**執行期**（`ctx.http.call` 當下）的 error type，
+兩邊靠 `GAP_KIND_TO_ERROR_TYPE` 共用同一份文案（刻意的：preflight 說「發布後這個呼叫會失敗」、
+runtime 說「它失敗了」，是同一件事的兩個時間點），但**不會出現在 409 的 body 裡**：
+
+| `gaps[].kind`（發布 409） | 執行期對應的 error type | 成因 |
 |---|---|---|
 | `service_missing` | `egress_service_not_found` | 租戶沒有這個 slug 的 EgressService |
 | `service_inactive` | `egress_service_inactive` | 有 row 但 `is_active=False` |
@@ -699,8 +708,33 @@ export function currentIdentity(): { userId: string; email: string; tenantId: st
 
 ★ 授權當下會擋停用中的服務，但**之後把服務停用並不會回收授權清單裡的 id**。
 所以「已授權 ∧ 已停用」是可達狀態：只比對 `authorized_egress_service_ids` 會判成通過，
-publish 卻回 409 `service_inactive`。要判這格一定要一起看 `services[].is_active`
+publish 卻回 409。要判這格一定要一起看 `services[].is_active`
 （`scripts/aigo_publish.py` 的 `egress_preflight()` 即照此三分）。
+
+2026-09-09 在測試租戶把整條路徑走完（建服務 → 授權 → 停用 → 發布 → 全部刪掉）：
+
+- 建外部服務**不給 `timeout_ms`** → 落庫 `timeout_ms: 10000`、`max_response_bytes: 5242880`、
+  `is_active: true`（證實 30000 是上限、10000 才是拿到的值）
+- `PATCH {"timeout_ms": 60000}` → 422「timeout_ms 必須是 1～30000 之間的正整數（毫秒）」；
+  `PATCH {"max_response_bytes": 10485760}` → 422「max_response_bytes 必須是
+  1～5242880 之間的正整數（bytes）」（證實只調得下去）
+- 授權後把服務停用 → `available-egress-services` **照樣回它**（`is_active: false`），
+  且**還留在 `authorized_egress_service_ids` 裡**
+- 這時 POST `/publish` 回 **409**，body 形狀：
+
+```json
+{"detail": {"code": "EGRESS_NOT_READY",
+ "message": "本 App 的外部服務／金鑰設定尚未到位，發布後呼叫會失敗",
+ "gaps": [
+   {"kind": "unauthorized", "slug": "openai",
+    "message": "本 App 尚未授權使用外部服務「openai」", "fix": "…",
+    "fix_url": "/builder/{app_id}?tab=egress", "required_role": "builder.access"},
+   {"kind": "service_inactive", "slug": "<那支被停用的>",
+    "message": "外部服務「…」存在，但目前是停用狀態",
+    "fix": "服務已經建好了、只是被停用——**不要重建**（slug 唯一，重建會失敗）。…"}]}}
+```
+
+  平台自己的 `fix` 文案就寫著「不要重建」——遇到這格請照做，別去建同名服務。
 
 另外閘門還會檢查 `ctx.secrets` 必填金鑰（`secret_missing` → `gaps[].key`），
 那一格從 `available-egress-services` 看不到，只能等 409。
