@@ -530,9 +530,11 @@ SKILL.md 規則 18、§22 遷移映射、`migration-workflow.md` §2.4 的分流
 ```
 一個資料需求（新功能的表／欄位，或遷入映射中的外部表／欄位）
 │
-├─ 表級：這個實體要與平台既有功能連動嗎？（看板、專案、發票、客戶…）
-│   ├─ 是 → Data Reference 軌：把該預設表加入引用；每個欄位進下面「欄位級」
-│   └─ 否（租戶自有業務實體——遷入案例的主力）→ 自建表軌：
+├─ 表級：平台有沒有同語意的實體？（案件追蹤→商機、往來機關→客戶、交付物→里程碑、待辦→活動…
+│        先用業務語言查 default-table-lookup.md §2 ＋ Meta API 標題；新建與遷入同一問，
+│        舉證責任在「為什麼不用預設表」）
+│   ├─ 有 → Data Reference 軌：把該預設表加入引用；每個欄位進下面「欄位級」
+│   └─ 沒有（查過查表與 Meta 仍無，並把對照結果寫進資料承載表）→ 自建表軌：
 │       租戶已有語意相同的自建表？
 │       ├─ 有 → 重用；欄位不足 → 加實體欄位（data-center.md §7）
 │       └─ 無 → 新建自建表（建表規格 → 用戶確認 → POST /data-center/tables）
@@ -549,9 +551,11 @@ SKILL.md 規則 18、§22 遷移映射、`migration-workflow.md` §2.4 的分流
 
 ### 決策流程（動手前的盤點順序）
 
-1. **先盤點兩邊**：
-   - `GET /api/v1/data-center/tables` — 租戶既有自建表（★ 不可跳過）
-   - `GET /api/v1/refs/available-tables` — 可引用的預設表（見 §20）
+1. **先盤點兩邊**（★ 兩邊都不可跳過）：
+   - `GET /api/v1/data-center/tables` — 租戶既有自建表
+   - **預設表語意對照**：每個實體用業務語言查 `default-table-lookup.md` §2，再用 Meta API 看標題
+     （`aigo_data.py meta tables --source erp --grep`）。`GET /api/v1/refs/available-tables`（§20.1）
+     只是表名清單、`comment` 實務上為空，不能當語意來源。結果寫進資料承載表（SKILL.md Phase 1.5 第 3 項）
 2. 既有自建表語意相同 → **直接重用**，不要新建；重用的表**欄位不足 → 加實體欄位**
    （`data-center.md` §7），不要因缺欄就另建表或把結構化欄位塞進 json 欄
 3. 對候選預設表查欄位（§20.2），確認權限是否足夠；缺欄位時依決策樹的欄位級分流——
@@ -568,10 +572,10 @@ SKILL.md 規則 18、§22 遷移映射、`migration-workflow.md` §2.4 的分流
 
 | 條件 | 選擇 | 說明 |
 |------|------|------|
-| 要與平台既有功能連動（看板、專案、發票、客戶） | **Data Reference** | 與平台功能共用同一份資料 |
+| 平台有同語意的實體（`default-table-lookup.md` §2 或 Meta API 命中） | **Data Reference** | 與平台功能共用同一份資料；舉證責任在「為什麼不用」 |
 | 租戶已有語意相同的自建表 | **重用該自建表** | 自建表跨 app 共用，重複建 = 資料分裂 |
 | 重用的自建表缺欄位 | **加實體欄位** | `data-center.md` §7；不要另建表或塞 json |
-| 租戶自有的新業務實體（外部系統遷入的主力） | **自建表** | 真實資料表、真外鍵、200 張配額 |
+| 平台沒有同語意實體（查過查表與 Meta 仍無，理由已寫進資料承載表） | **自建表** | 真實資料表、真外鍵、200 張配額 |
 | 需要真正的關聯完整性（刪除被引用列要被擋） | **自建表** | relation → 自建表會建真 FK（但**沒有 cascade**，`data-center.md` §3） |
 | 需要唯一約束／冪等寫入／併發防線 | **自建表 unique 欄** | 預設表**沒有**唯一約束可用；需要冪等的預設表寫入要先在自建表搶錨點（§23.9） |
 | 自建表要指回預設表實體（遷入案的 `user_id` 等） | **`text` 存 UUID** | relation → 預設表只有部分表可用、無法事先查（`data-center.md` §3）；規劃時一律當不支援 |
@@ -632,6 +636,12 @@ Authorization: Bearer {access_token}
 ```
 
 功能：列出資料庫中所有目前可以被 Custom App 引用的資料表名稱與備註。自動排除系統敏感黑名單表。
+
+> ⚠️ **`comment` 實務上是空字串**（2026-09-09 核自原始碼：它取資料庫的表註解，平台的業務表沒有宣告；
+> issue #53 實查 359 張全空）。下面回應範例裡的備註是理想樣貌，**不要拿本端點做語意判斷**——
+> 表的中文標題與功能區在 Meta API（`GET /api/v1/data-center/meta/tables`，
+> `aigo_data.py meta tables --source erp`），業務語言的索引在 `default-table-lookup.md` §2；
+> 本端點只用來確認「引用面有沒有這張表」。
 
 權限限制：帳號必須擁有 `builder.access` 權限。
 
@@ -724,6 +734,10 @@ Authorization: Bearer {access_token}
 不在表上的欄位：先打 Meta API；再不行，把該欄留空或填 `draft` 一類最保守的值先建列，
 值域確認後再 PATCH——**不要**在正式租戶用試寫法窮舉。
 
+**必填欄**（`nullable=False` 且無預設值，如 `customers.customer_type`、`hr_expenses.employee_id`、
+`project_milestones.project_id`）與**唯讀表**（`stock_moves`、`analytic_lines` 等平台獨寫表）的清單在
+`default-table-lookup.md` §4——匯入 payload 缺必填欄、或寫到唯讀表，都不是值域問題，先查那裡。
+
 > 上面的回應範例是 `customers` 這類「自帶 `tenant_id`」的表。**不是每張表都有 `tenant_id`**，
 > 缺了也不代表沒保護——見 §20.3。
 
@@ -737,7 +751,7 @@ Authorization: Bearer {access_token}
 | 形態 | 邊界怎麼來 | 例子 |
 |---|---|---|
 | 自帶 `tenant_id` | 直接過濾（多數表） | `customers`、`sale_orders` |
-| **欄位別名** | 租戶欄位存在，但沿用 Odoo 血統叫 `company_id` | `ir_sequences`、`partner_banks` |
+| **欄位別名** | 租戶欄位存在，但欄位名是歷史欄位名 `company_id` | `ir_sequences`、`partner_banks` |
 | **父表歸屬** | 子表本身無租戶欄位，靠 `EXISTS` 子查詢繞父表驗證 | `msg_messages`→`msg_threads`、`announcement_reads`→`announcements`、`import_mappings`→`import_jobs` |
 | **全域表** | 平台 seed 的參考資料，全租戶共用，**刻意不過濾**；讀放行、寫 403 | `countries`、`currencies`、`account_accounts` |
 
@@ -816,13 +830,14 @@ TypeScript（前端）和 Python（後端 Server Action）是 AI GO 精選的開
 
 ```
 1. 列出外部系統的所有資料表與欄位
-2. 盤點兩邊：GET /data-center/tables（既有自建表）＋ Refs API（可用預設表，見 §20）
+2. 盤點兩邊：GET /data-center/tables（既有自建表）＋ 預設表語意對照
+   （default-table-lookup.md §2 ＋ Meta API 標題；Refs API 只有表名，見 §20.1）
 3. 逐表比對：
    租戶已有語意相同的自建表？    → 重用；欄位不足 → 加實體欄位（data-center.md §7）
-   要與平台既有功能連動？      → 預設表原生欄位；無原生對應 →
-                                   正式欄位用延伸欄位（data-center.md §10）、
+   平台有同語意的實體？        → 預設表原生欄位（外部表名不是語意，用業務語言查）；
+                                   無原生對應 → 正式欄位用延伸欄位（data-center.md §10）、
                                    app 私有標記用 custom_data JSONB
-   租戶自有的新業務實體？        → 自建表（遷入案例主力）
+   查過查表與 Meta 仍沒有？      → 自建表（映射表寫下「已對照 X／不採用理由」）
 4. 處理外鍵 / 關聯
 5. 產出映射表（模板見 resources/migration_mapping_template.md）
 ```

@@ -4,6 +4,39 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.34.0
+
+### issue #53：預設表語意對照升級為硬閘、新增「AI GO 預設表查表」、詞彙清理
+
+起因：一個 46 張表的遷入案，第一版計畫把 38–42 張判成自建表，使用者追問後才對照出 13 張自建＋11 張預設表引用。
+根因一半是 skill 把自建表寫成遷入的預設答案、第一問「要不要與平台功能連動」把舊系統推向「否」，
+另一半是沒有任何閘門會在跳過預設表對照時擋下來。全部對回原始碼核實後修：
+
+- **第一問改寫**（六處同構全改：SKILL.md 規則 18 表、dev-guide §19 決策樹／選擇矩陣／§22.1、
+  `migration-workflow.md` §2.4、`hosted-apps.md` §7.1）：「平台有沒有同語意的實體？有 → 引用；查過仍無 → 自建」，
+  新建與遷入同一句，舉證責任放在「為什麼不用預設表」
+- **拿掉「遷入案例的主力」定調**（六處）：改為「語意落在 CRM、專案、銷售採購、HR、會計的表預設引用預設表，
+  只有平台真的沒有對應實體才自建」；「自建表不是最後手段」一句保留但加「也不是遷入的預設答案」
+- **資料承載表硬閘**：Phase 1.5 第 3 項新增產物 `| 實體 | 用業務語言說是什麼 | 已對照的預設表 | 採用／不採用理由 | 軌 |`，
+  計畫閘門加兩條——沒有資料承載表不算完成計畫；任一自建表缺「已對照／不採用理由」不算完成計畫
+  （與 Phase 0 步驟 6 自建表盤點同級）。`new_app_requirements_template.md` 新 §五、
+  `migration_mapping_template.md` 每張表加「對照項」四列、§2.5 匯入閘門視缺對照為映射表未產出、
+  `data-center.md` §2 建表流程加 2.5 步
+- **新 `references/default-table-lookup.md`（AI GO 預設表查表）**：§0 三步查法、§1 表名前綴讀法與 Meta 面／引用面
+  兩套命名、§2 業務語言→預設表速查（七個功能區、含「常被誤建成」欄）、§3 Meta key↔引用面表名對照
+  （核自平台 Meta 標注與 model：`crm_clients`→`customers`、六個 `accounting_*` 全是 `account_moves`、
+  `project_stages`→`project_project_stages` 等；Meta 404 ≠ 表不存在）、§4 常用表必填欄（核自 model
+  `nullable=False` 無預設值）與唯讀表（平台獨寫 `stock_moves`／`analytic_lines`／`mrp_workorders`…、
+  全域參考表）、§5 遷入常見誤判（issue #53 的前後對照）。**糾正 issue 一處**：`analytic_lines` 是平台獨寫表，
+  「專案費用」不能對到它，報支人非員工時自建表是正解——這是「查過沒有」的正例
+- **dev-guide §20.1 修正**：`available-tables` 的 `comment` 實務上為空（原始碼取 DB 表註解，業務表沒宣告），
+  回應範例是理想樣貌，語意要從 Meta API 拿；§20.2.1 加必填欄與唯讀表的指標
+- **詞彙清理**：repo 內唯一一處外部產品名（dev-guide §20.3「欄位別名」列）改為「歷史欄位名」；
+  正文四處「ERP」（`platform-behaviors.md` §4.3 兩處與 §保留名一處、`troubleshooting.md` validate 列）改為
+  「平台模組介面」「預設表撞名」；`CONTEXT.md` 稱謂對照新增「禁用詞」列，查表檔頭寫死撰寫規範
+  （只用「功能區前綴」「Meta 面／引用面」「歷史欄位名」解釋命名，原始碼註解裡的外部系統名稱不得帶進文件或對話）
+- 未做（另開）：`aigo_data.py suggest-refs` 工具提醒；平台側 `available-tables` 補 `comment` 走五步流程回報
+
 ## 1.33.0
 
 ### `always_on` 決策閘補齊結構化落點；問題回報改為「自動自審 → 主動詢問 → 同意才送」

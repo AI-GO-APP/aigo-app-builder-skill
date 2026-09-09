@@ -221,14 +221,14 @@ if all_done:
 
 **沒有 `stock_moves` 明細的單據，呼叫 validate 不會產生任何庫存異動**——不報錯、
 也不回 `False`，就是什麼都沒發生。而 `stock_moves` 是 seed 表、App 寫不了（§3），
-所以由 Custom App 自行建立的 `stock_pickings` 必須先在平台 ERP 補上明細才可扣帳。
+所以由 Custom App 自行建立的 `stock_pickings` 必須先在平台模組介面補上明細才可扣帳。
 **UI 應該在明細為空時就把按鈕停用**，不要讓使用者按一個必定無效的按鈕：
 
 ```typescript
 const moves = await query("stock_moves", { picking_id: picking.id });
 const canValidate = moves.length > 0 &&
   !moves.every((m) => ["done", "cancel"].includes((m.state || "").toLowerCase()));
-// moves.length === 0 → 提示「請先於 ERP 補上明細」，而不是讓他按下去
+// moves.length === 0 → 提示「請先於平台模組介面補上明細」，而不是讓他按下去
 ```
 
 ---
@@ -523,7 +523,7 @@ export function currentIdentity(): { userId: string; email: string; tenantId: st
 
 **現在就生效的一條**：自建表實體名的保留名母體已擴大到**平台地板表名**
 （`users`／`tenants`／`audit_logs`／`api_keys`／`countries` 等 76 張）。
-撞名在**建表當下就回 409**（訊息「與平台保留表名衝突」；ERP 撞名與 SQL 保留字
+撞名在**建表當下就回 409**（訊息「與平台保留表名衝突」；預設表撞名與 SQL 保留字
 各有自己的訊息）。只擋新建、不回溯既有表。撞到地板名**沒有事後補救管道**，
 建表規格階段就要避開（→ `data-center.md` §1）。
 
