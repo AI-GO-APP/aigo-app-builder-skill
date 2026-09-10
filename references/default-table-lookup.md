@@ -20,16 +20,36 @@
 
 1. **用業務語言在 §2 找候選**——不是拿外部表名硬對，是問「這張表在講什麼」：追蹤中的案件、往來機關、
    協力廠商、里程碑、費用、待辦提醒……§2 依功能區列了使用者會怎麼說、對應哪張預設表、最常被誤建成什麼。
-2. **拿候選去 Meta API 看標題與欄位**：`uv run --project scripts python scripts/aigo_data.py meta tables --source erp --grep <關鍵字>`
-   列出預設表的中文標題與功能區；`meta table <key>` 看欄位 label、select 值域、relation 目標。
-   Meta 面的 key 與引用面的表名不一定相同（§3），查欄位時用 §3 換成引用面表名再打
-   `GET /api/v1/refs/tables/{table_name}/columns`（`custom-app-dev-guide.md` §20.2）。
-3. **定案並寫下理由**：命中 → Data Reference 軌（缺欄走延伸欄位／`custom_data`，§19 欄位級）；
+2. **兩個端點分工，缺一不可**（★ 順序與職責都不能換）：
+   - **找表、讀語意**用 Meta 面：`uv run --project scripts python scripts/aigo_data.py meta tables --source erp --grep <關鍵字>`
+     列出預設表的中文標題與功能區；`meta table <key>` 看欄位的中文 label、select 值域、relation 目標。
+   - **判「有沒有這個欄位」一律用引用面**：依 §3 把 key 換成引用面表名，打
+     `GET /api/v1/refs/tables/{table_name}/columns`（`custom-app-dev-guide.md` §20.2）。
+     Meta 面的 key 與引用面的表名不一定相同（§3）**只是換名的理由之一**；
+     真正的理由是下面那條 ⚠️ ——**Meta 面的欄位清單本身就不完整**。
+3. **定案並寫下理由**：命中 → Data Reference 軌（缺欄走 §19 欄位級分流——**app 要讀寫的欄位用
+   `custom_data` 或改走自建表**，延伸欄位只給 app 不讀的租戶級正式欄位，`data-center.md` §10）；
    沒命中 → 自建表，但資料承載表那一列要寫「已對照 <候選表>，不採用因為 <欄位語意／必填欄／唯讀>」。
    「沒想到有」不是理由，「查過沒有」才是。
 
+⚠️ **Meta 面的 `fields` 是策展白名單，不是欄位全集——絕對不能拿來判定「平台有沒有這個欄位」。**
+平台在後端維護一份「哪些欄位要出現在 Workspace 的 grid 與表單」的標注清單，
+`GET /meta/tables/{key}` 的 `fields` **就等於那份清單**；實體表有、但清單未列的欄位一律不輸出
+（核自平台原始碼 `erp_field_annotations.py` 檔頭與 `meta_registry._reflect_fields`，2026-09-10）。
+清單的內容是 2026-07 一次性從舊前端快照機械遷移來的，**逐表落差隨機**：
+
+| 表 | Meta 面 fields | 引用面 columns | 缺了什麼 |
+|---|---|---|---|
+| `hr_employees` | 20 | 42 | `registered_address`（戶籍地址）、`contact_address`（通訊地址）、`private_zip`、`passport_id`、`emergency_contact`、`work_location_id`… |
+| `customers`（Meta key `crm_clients`） | 含地址欄 | — | 同樣的地址欄在這張表**有**標注 |
+
+所以「別的表 Meta 有這個欄位」推不出「這張表沒有」，反之亦然。集合關係恆為
+**Meta 面 ⊆ 引用面**，判定站在引用面永遠安全。依 Meta 面判「沒有 → 自建表」會系統性地
+把該走 Data Reference 的實體推去自建（issue #70）。
+
 ⚠️ `GET /api/v1/refs/available-tables` 回的 `comment` **實務上是空的**（平台的業務表沒有宣告表註解），
-359 張純表名不能當語意來源——標題要從 Meta API 拿，本檔 §2 是它的業務語言索引。
+359 張純表名不能當語意來源——**標題**要從 Meta API 拿，本檔 §2 是它的業務語言索引。
+（只有標題；欄位仍以引用面為準，見上一條。）
 
 ---
 
@@ -58,8 +78,12 @@ AI GO 預設表的命名慣例是 **`<功能區前綴>_<實體複數>`**。看�
 
 - **Meta 面**（`/api/v1/data-center/meta/tables/{key}`、延伸欄位端點的 `{erpKey}`）：key 依功能區分組，
   例如 `crm_clients`、`purchase_suppliers`、`accounting_invoices`。約 85 張，有中文標題與欄位 label。
+  ⚠️ 它的 `fields` 是**表現層策展白名單**（Workspace grid／表單），比實體表少欄是常態——
+  只能用來讀語意（標題、label、值域），**不能用來判欄位有無**（§0 的 ⚠️）。
 - **引用面**（`/api/v1/refs/*`、Open Proxy、`ctx.db`／`db.ts`）：key 就是實體表名，例如 `customers`、
   `suppliers`、`account_moves`。359 張，含子表與明細表。
+  **這一面才是欄位的權威**：`GET /refs/tables/{t}/columns` 回的是實體表全欄，也正是 app 執行期
+  `ctx.db.query` 撈到的 key 集合（實測 `hr_employees` 兩邊皆 42）。
 
 多數表兩面同名（`crm_leads`、`sale_orders`、`project_tasks`、`hr_employees`…）；不同名的列在 §3。
 **Meta 回 404 不代表表不存在**——可能只是這張表不在 Meta 的 85 張裡（例如 `hr_expenses`、`customer_contacts`），

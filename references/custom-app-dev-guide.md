@@ -605,12 +605,16 @@ SKILL.md 規則 18、§22 遷移映射、`migration-workflow.md` §2.4 的分流
 │
 └─ 欄位級（只有預設表需要走這段；自建表缺欄一律加實體欄位）：
     原生欄位語意對得上？ → 原生欄位（永遠優先）
-    對不上 → 這欄位是「租戶級業務欄位」還是「app 私有標記」？
-    ├─ 租戶級正式欄位（要型別驗證、資料中心 UI 全租戶可見可管理、跨 app 一致）
-    │   → 延伸欄位（EAV，data-center.md §10；★ ctx.db／db.ts 不回傳其值，
-    │     讀寫走獨立端點——app 要大量讀寫時回頭考慮改自建表）
-    └─ app 私有標記（app_domain 恆在此）、暫時性、鬆散擴充
-        → custom_data JSONB（標記規範見 SKILL.md 規則 19）
+    對不上 → ★ 第一問：**這個 app 執行期要讀或寫這個欄位嗎？**
+    ├─ 要（前端顯示、帶進表單、action 計算…）
+    │   → custom_data JSONB，或整個實體改走自建表
+    │     （★ **延伸欄位在 app 執行期取不到值**——action 打 EAV 端點 401、
+    │      前端要 builder.access；四條通道全斷見 data-center.md §10）
+    └─ 不要（只在資料中心 UI 由管理者維護、給平台功能／報表看）
+        ├─ 租戶級正式欄位（要型別驗證、資料中心 UI 可見可管理）
+        │   → 延伸欄位（EAV，data-center.md §10；ctx.db／db.ts 不回傳其值）
+        └─ app 私有標記（app_domain 恆在此）、暫時性、鬆散擴充
+            → custom_data JSONB（標記規範見 SKILL.md 規則 19）
 ```
 
 ### 決策流程（動手前的盤點順序）
@@ -622,9 +626,10 @@ SKILL.md 規則 18、§22 遷移映射、`migration-workflow.md` §2.4 的分流
      只是表名清單、`comment` 實務上為空，不能當語意來源。結果寫進資料承載表（SKILL.md Phase 1.5 第 3 項）
 2. 既有自建表語意相同 → **直接重用**，不要新建；重用的表**欄位不足 → 加實體欄位**
    （`data-center.md` §7），不要因缺欄就另建表或把結構化欄位塞進 json 欄
-3. 對候選預設表查欄位（§20.2），確認權限是否足夠；缺欄位時依決策樹的欄位級分流——
-   租戶級正式欄位用**延伸欄位**（EAV，`data-center.md` §10）、
-   app 私有標記與鬆散擴充用 `custom_data` JSONB（預設表本體不可加實體欄位）
+3. 對候選預設表查欄位（§20.2，**欄位有無只認引用面 columns**），確認權限是否足夠；
+   缺欄位時依決策樹的欄位級分流——**app 要讀寫的欄位**用 `custom_data` JSONB 或改走自建表、
+   只在資料中心 UI 維護的租戶級正式欄位才用**延伸欄位**（EAV，`data-center.md` §10）
+   （預設表本體不可加實體欄位）
 4. 每張表／每個欄位走上面的決策樹定案
 5. 走 Data Reference → 把表加入引用（引用狀態一律以 `GET /api/v1/refs/apps/{app_id}` 為準，
    **不要看 `db.json`**，見 `platform-behaviors.md` §6）。
@@ -643,7 +648,8 @@ SKILL.md 規則 18、§22 遷移映射、`migration-workflow.md` §2.4 的分流
 | 需要真正的關聯完整性（刪除被引用列要被擋） | **自建表** | relation → 自建表會建真 FK（但**沒有 cascade**，`data-center.md` §3） |
 | 需要唯一約束／冪等寫入／併發防線 | **自建表 unique 欄** | 預設表**沒有**唯一約束可用；需要冪等的預設表寫入要先在自建表搶錨點（§23.9） |
 | 自建表要指回預設表實體（遷入案的 `user_id` 等） | **`text` 存 UUID** | relation → 預設表只有部分表可用、無法事先查（`data-center.md` §3）；規劃時一律當不支援 |
-| 預設表缺「租戶級正式欄位」 | **延伸欄位** | EAV overlay；讀寫走獨立端點（`data-center.md` §10） |
+| 預設表缺欄位，且 **app 執行期要讀寫它** | **`custom_data`**，或整個實體改走自建表 | ★ 延伸欄位在 app 內取不到值（`data-center.md` §10 通道表） |
+| 預設表缺「租戶級正式欄位」，且**只在資料中心 UI 維護、app 不讀** | **延伸欄位** | EAV overlay；讀寫走獨立端點、需 `builder.access`（`data-center.md` §10） |
 | app 私有標記、臨時、鬆散、不值得定義欄位 | **預設表 `custom_data`** | 免定義成本；`app_domain` 恆在此 |
 
 ### 入口情景對照（同一棵樹的三個入口）
@@ -732,6 +738,11 @@ Authorization: Bearer {access_token}
 功能：列出指定資料表下可用的欄位資訊（含欄位名稱、資料型別、是否可為 Null、是否為系統欄位）。
 
 權限限制：帳號必須擁有 `builder.access` 權限。
+
+★ **這一面是欄位的唯一權威**。`GET /data-center/meta/tables/{key}` 的 `fields` 是給 Workspace
+grid／表單用的**策展白名單**，實體表有、白名單未列的欄位不輸出（`hr_employees`：Meta 20 欄
+vs 引用面 42 欄，缺的正是戶籍／通訊地址那批）。判「平台有沒有這個欄位」只看本端點，
+Meta 面只用來讀中文標題與值域——理由與逐表落差見 `default-table-lookup.md` §0（issue #70）。
 
 回應範例：
 
@@ -842,6 +853,7 @@ Phase 1.5 實作計畫時：
 
 2. 對每個候選表 GET /api/v1/refs/tables/{name}/columns
    → 確認欄位結構、是否有 custom_data (JSONB)
+   ★ 欄位判定只認這一步；Meta 面的 fields 是策展白名單會少欄（§20.2）
 
 3. 決定資料架構：哪些需求用預設表、哪些用自建表（見 §19）
 
@@ -898,9 +910,10 @@ TypeScript（前端）和 Python（後端 Server Action）是 AI GO 精選的開
    （default-table-lookup.md §2 ＋ Meta API 標題；Refs API 只有表名，見 §20.1）
 3. 逐表比對：
    租戶已有語意相同的自建表？    → 重用；欄位不足 → 加實體欄位（data-center.md §7）
-   平台有同語意的實體？        → 預設表原生欄位（外部表名不是語意，用業務語言查）；
-                                   無原生對應 → 正式欄位用延伸欄位（data-center.md §10）、
-                                   app 私有標記用 custom_data JSONB
+   平台有同語意的實體？        → 預設表原生欄位（外部表名不是語意，用業務語言查；
+                                   欄位有無只認引用面 columns，Meta 面會少欄——§20.2）；
+                                   無原生對應 → app 要讀寫的欄位用 custom_data JSONB 或改走自建表、
+                                   只在資料中心 UI 維護的正式欄位才用延伸欄位（data-center.md §10）
    查過查表與 Meta 仍沒有？      → 自建表（映射表寫下「已對照 X／不採用理由」）
 4. 處理外鍵 / 關聯
 5. 產出映射表（模板見 resources/migration_mapping_template.md）
@@ -1155,14 +1168,19 @@ def execute(ctx):
    從回傳的 `id_mapping` 拿到每列的 AI GO row id
 2. **再寫延伸值**：**本地腳本**逐列
    `PATCH /api/v1/data-center/ext-values/{erpKey}/{rowId}`（`builder.access`），
-   body 帶該列的延伸欄位值——**沒有批次寫入端點**（`:batch-get` 只管讀），
-   每列一發；PATCH 覆寫語意天然冪等，斷點續傳不會重複
+   body 是 **`{"values": {"<欄位實體名>": <值>}}`**——⚠️ **少包那層 `values` 會靜默 no-op 回 200**
+   （連未定義欄位都吞掉，422 只保護包了 `values` 的請求；對照組見 `data-center.md` §10）。
+   **沒有批次寫入端點**（`:batch-get` 只管讀），每列一發；
+   PATCH 覆寫語意天然冪等，斷點續傳不會重複
 3. **驗證**：抽驗列用 `POST /ext-values/{erpKey}:batch-get`（`row_ids` ≤ 200）
    取回比對。⚠️ 「缺值不回填」——回傳空 `{}` 代表**沒寫進去**，不是預設值，
    別把空回應當成功
 4. **量的紅線**：逐列 PATCH 意味 N 列＝N 個請求。上千列且欄位多時，
    先回頭重新評估這個實體是否該整個走自建表（§10 的建議同源）——
    「大量讀寫延伸欄位」本身就是分流錯誤的訊號
+5. ★ **遷入前先確認 app 不需要讀這些值**：本節這條路只有本地腳本走得通，
+   遷完之後 **app 執行期讀不到**（`data-center.md` §10 通道表）。
+   遷入的欄位若要在 app 畫面上出現，回 §19 改分流——不要先遷完才發現
 
 - 延伸欄位定義（建欄）需 `datacenter.schema_write`：匯入前先確認欄位已建好
   （`GET /ext-fields/{erpKey}`），缺欄請有權限者先建，匯入腳本不要動結構

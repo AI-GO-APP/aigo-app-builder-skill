@@ -181,11 +181,15 @@
 - 逐表對照（先跑 Phase 1.5 第 3 點的雙邊盤點；**每張外部表都先用業務語言查 `default-table-lookup.md` §2**——
   外部表名不是語意：`tenders` 是商機、`agencies` 是客戶、`deliverables` 是里程碑）：
   - 平台有同語意的實體 → 預設表原生欄位；無原生對應的欄位 →
-    租戶級正式欄位用**延伸欄位**（EAV，`data-center.md` §10）、
-    app 私有標記與鬆散擴充用 `custom_data` JSONB
+    **app 執行期要讀寫的一律 `custom_data` JSONB 或自建表**；
+    延伸欄位（EAV，`data-center.md` §10）只給「app 不讀、管理者在資料中心 UI 維護」的欄位
+    ——app 的前端與 action 都取不到 EAV 值（§10 的通道表、issue #71）
   - 查過查表與 Meta API 仍沒有同語意實體 → 自建表，映射表寫下「已對照 <預設表>／不採用理由」
     （語意落在 CRM、專案、銷售採購、HR、會計的表**預設引用預設表**，只有平台真的沒有對應實體才自建；
     常見誤判見查表 §5）
+  - ★ **欄位級的「平台有沒有這個欄位」只認引用面 `GET /refs/tables/{t}/columns`**——
+    Meta 面的 `fields` 是策展白名單會少欄（`hr_employees` 20 vs 42，缺地址欄），
+    依 Meta 判會把整批欄位誤推去自建／EAV（查表 §0、issue #70）
   - 租戶已有語意相同的自建表 → 直接重用；**欄位不足 → 加實體欄位**
     （`data-center.md` §7 加欄），不要因缺欄就新建表或把結構化欄位塞進 json
 - 欄位型別對不上時，查降級對照表（`custom-app-dev-guide.md` §23.7）

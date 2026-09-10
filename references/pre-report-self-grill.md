@@ -61,6 +61,10 @@
 - **Q2.1 租戶網址**：`aigo_auth.py status` 印出的生效租戶是不是目標租戶？
   401「帳號或密碼錯誤」與打錯租戶**平台刻意同形**（`platform-behaviors.md` §6.1）。
 - **Q2.2 token 狀態**：401＝過期、403＝權限。重新登入後症狀是否消失？
+  ★ **從 Server Action 內打使用者面 REST（`/api/v1/data-center/*` 等）恆為 401**——
+  runner 沒有使用者身分，這不是權限不足，提權到 `system.admin` 也一樣；
+  `ctx` 白名單沒封裝的能力在 action 裡就是做不到（`data-center.md` §7.5、§10）。
+  把「401 → 也許提權就能打」當推論起點，會把能力限制誤判成權限 bug。
 - **Q2.3 權限層級**：這步需要 `system.admin`、`builder.access` 還是 `datacenter.schema_write`？
   這顆帳號有沒有？一般員工帳號的 403 是否其實是 `builder.access` 破口（`data-center.md` §7.5）？
   **403 body 有沒有 `reason`／`rule_id`**？有＝租戶「資料存取規則」（Auth gate）擋的，不是
@@ -76,6 +80,9 @@
 ### 第 3 輪：請求契約
 
 - **Q3.1 payload 包裝**：records 寫入有沒有包 `{"data": {...}}`？（422 `not_null_violation` 但欄位明明有給）
+  ★ **回 200 但值沒進去 = 先懷疑少包一層**：未知鍵被忽略是預設解析行為，
+  包裝層錯掉會變成「零欄要寫」的合法請求 → 200 帶回舊值，沒有任何錯誤訊號。
+  已知例：延伸欄位寫值必須 `{"values": {...}}`，扁平 body 靜默 no-op（`data-center.md` §10）。
 - **Q3.2 實體名 vs 顯示名**：所有 API 用實體名；`/impact` 確認值也是實體名。
 - **Q3.3 查詢契約**：只有 `filters:[{column,op,value}]` 生效，`where`／`filter` 靜默忽略；
   records 平面只有 `eq/contains/gte/lte`；`custom_data` 不能伺服器端過濾（`platform-behaviors.md` §1.5）。
@@ -86,8 +93,12 @@
 - **Q3.6 平台有沒有既有路徑**：想要的能力可能已存在於別的入口（型別檢查在 Builder AI 的
   `check_types`、值域在 Meta API、路由權威在 `/api/v1/openapi.json`）。
   「API 沒提供」要先查 `references/` 與 openapi 再說。
+- **Q3.7 「平台缺這張表／這個欄位」的權威面**：宣稱預設表缺欄位前，
+  **打過引用面 `GET /refs/tables/{t}/columns` 了嗎**？Meta 面的 `fields` 是 Workspace 用的
+  策展白名單、比實體表少欄（`hr_employees` 20 vs 42），依它判「平台沒有」是必錯的
+  （`default-table-lookup.md` §0）。同理表級：**Meta 404 不代表表不存在**。
 
-- **Q3.7 資料操作線的契約**（不開發 app、以使用者身分直打模組 REST 時才問）：
+- **Q3.8 資料操作線的契約**（不開發 app、以使用者身分直打模組 REST 時才問）：
   ① `aigo_data.py perm-check` 是**推估不是權威**——它說 ✅ 仍可能 403（少數端點有細權限如
   `hr.leave_manage`、`accounting.post`），「perm-check 過了所以權限沒問題」不是排除。
   ② **表名分面**：Meta API 的 key 不一定等於 proxy／refs 面的表名（客戶是 `crm_clients`，

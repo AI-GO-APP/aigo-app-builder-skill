@@ -4,6 +4,68 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.40.0
+
+### 預設表欄位判定改站引用面：Meta 面的 `fields` 是策展白名單（issue #70）
+
+`GET /data-center/meta/tables/{key}` 的 `fields` **不是欄位全集**——平台後端維護一份
+「哪些欄位出現在 Workspace grid／表單」的標注清單，實體表有、清單未列的欄位一律不輸出
+（核自 `erp_field_annotations.py` 檔頭與 `meta_registry._reflect_fields`）。清單是 2026-07
+從舊前端快照機械遷移來的，**逐表落差隨機**：`hr_employees` Meta 20 欄 vs 引用面 42 欄，
+缺的正是 `registered_address`／`contact_address` 那批；同樣的地址欄在 `crm_clients` 反而有標注。
+集合關係恆為 **Meta 面 ⊆ 引用面**。
+
+依 Meta 面判「平台沒有這個欄位 → 自建表」會系統性地把該走 Data Reference 的實體推去自建，
+正是 `default-table-lookup.md` 要防的事。舊文件把打引用面的理由只寫成「key 不一定相同」，
+又把 Meta 面描述成「有中文標題與欄位 label」，讀起來像完整清單。
+
+- `default-table-lookup.md` §0：三步的第 2 步改成**兩個端點分工**（Meta 面找表讀語意／
+  引用面 columns 判欄位有無），新增策展白名單的 ⚠️ 與 20 vs 42 對照表；
+  §1 兩個命名面各補一句（Meta 面不能判欄位有無、引用面才是欄位權威）
+- `SKILL.md` Phase 1.5 第 3 項與規則 18、`custom-app-dev-guide.md` §20.2／§20.4／§22.1、
+  `migration-workflow.md` §2.4 同步這條硬規則
+- `pre-report-self-grill.md` 新增 **Q3.7**：宣稱「平台缺表／缺欄位」前必須打過引用面 columns
+  （原 Q3.7 資料操作線契約改號 Q3.8）
+
+### 延伸欄位在 app 執行期取不到值：選型第一問改成「app 要不要讀它」（issue #71）
+
+延伸欄位（EAV）**建得起來、寫得進去、用登入帳號讀得回來，但 app 跑起來完全取不到**。
+2026-09-10 實測＋源碼核對，app 執行期四條通道全斷：`ctx` 白名單無延伸欄位方法；
+action 內直打 `/data-center/ext-*` 回 **401**（端點吃 `get_current_user`，runner 無使用者身分
+——**與 `builder.access` 高低無關**）；前端 SDK 無封裝、手打要 `builder.access`（一般員工 403，
+且沒有「包 action」的解，因為 action 打不到）；external 線 `/ext/data-center/*` 沒有 `ext-*` 路由。
+值只有資料中心 UI、持 `builder.access` 的人、遷入用的本地腳本讀寫得到。
+
+舊文件把這寫成「app 執行期要用得自己打 REST」＋「大量讀寫時再考慮自建表」，
+讀起來像多打一支 API 就好、只讀幾個欄位不受影響——實際是能力限制。
+
+- `data-center.md` §10：決策表加「app 要讀寫 → `custom_data` 或自建表」列並前置
+  「**選型第一問不是要不要型別，是 app 要不要讀它**」；「沒有封裝」那條 bullet 改成四條通道的事實表
+- `data-center.md` §7.5：通道表補 ⚠️——action 內直打 `/data-center/*` REST 不是第四條路，恆 401 不是 403
+- `SKILL.md` 規則 18、`CONTEXT.md` 延伸欄位段、`custom-app-dev-guide.md` §19 決策樹／選擇矩陣／
+  §22.1、`migration-workflow.md` §2.4、`data-operations.md` 匯入 `tier-2` 那條同步
+- `custom-app-dev-guide.md` §23.8 新增第 5 步：遷入前先確認 app 不需要讀這些值
+- `resources/new_app_requirements_template.md` §五與 `resources/migration_mapping_template.md`
+  的「軌」說明各加限制條件（延伸欄位只能填在 app 不讀時；欄位有無只認引用面）
+
+### PATCH `ext-values` 少包一層 `values` 會靜默 no-op 回 200
+
+`{"payslip_probe":"V2"}` → 200 帶**上一次**的值、沒寫入；該列本來沒值時回 `200 {}`，像成功。
+`{"values":{...}}` 才寫得進去。未定義欄位的 422 `invalid_field` **只保護包了 `values` 的請求**，
+扁平 body 連 `no_such_field` 都吞掉（成因：`values` 有預設空 dict＋未知鍵被忽略 →
+解析成「零欄要寫」的合法請求）。
+
+- `data-center.md` §10 端點速查後新增 body 形狀規則與四列對照組；
+  `custom-app-dev-guide.md` §23.8 步驟 2 補 body 形狀與這個陷阱
+- `pre-report-self-grill.md` Q3.1 擴充：**回 200 但值沒進去 → 先懷疑少包一層**
+
+### 兩張都判「不回報平台」
+
+Meta 面白名單與 EAV 的身分模型都是刻意設計，修完文件後 skill 不再依賴；
+扁平 body 的寬鬆解析使用者側寫對 body 就完全避得開。
+`issue-reporting.md`「什麼時候回報」新增**「不要回報刻意的能力邊界」**三列（含這兩項），
+避免同一個症狀再被當平台事故送出。
+
 ## 1.39.3
 
 ### `requirements.txt` → 500 HeadObject 403：做了對照組，**不重現**，因此不回報平台

@@ -30,6 +30,12 @@
 **不要回報**：App 自己的 bug、troubleshooting 已有解的症狀、
 還沒讀完錯誤訊息就想丟出去的問題。
 
+**也不要回報「刻意的能力邊界」**——症狀真實但平台是照設計走，缺的是 skill 文件（→ 報 skill repo，Q5.4）：
+
+- Meta 面 `fields` 比實體表少欄（Workspace 用的策展白名單）→ 欄位判定用引用面 columns（issue #70）
+- Server Action 打使用者面 REST 回 401（runner 無使用者身分）→ 能力限制，不是權限（issue #71）
+- `ctx.erp` 白名單 403、seed 表唯讀、`__IS_AUTHENTICATED__` 恆 false（Q4.5 那批）
+
 **回報前先窮盡使用者側的可能**（★ 平台事故單發錯的代價很高）：
 
 1. **乾淨環境對照**：無痕視窗／新 profile 開同一支 app，或新建 hello-world app 對照。

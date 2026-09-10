@@ -330,6 +330,12 @@ def execute(ctx):
 | 前端 SDK（external，`/ext/data-center/*`） | app 憑證脈絡 | 無 |
 | Server Action（`ctx.db.*`，`/internal/ctx/invoke`） | app 憑證（invocation token） | 無——走 allowlist + scope gate，不驗使用者權限 |
 
+⚠️ **這張表只描述三條「有封裝」的通道；action 內直打 `/api/v1/data-center/*` REST 不是第四條路**——
+runner 沒有使用者身分，那些端點吃 `get_current_user`，一律 **401**（不是 403）。
+症狀看起來像權限不足，實際是未認證，**提權到 `system.admin` 也一樣**。
+`ctx` 白名單（`core/ctx_allowlist.py`）沒封裝的資料中心能力，在 action 裡就是做不到——
+最常撞到的是延伸欄位（§10 的通道表）。
+
 後果：internal app 的受眾大多是**沒有** `builder.access` 的一般員工，
 前端直呼 `queryTable`／`insertRow` 等方法時，他們拿到的是 403——
 症狀是「畫面資料載不出來／按鈕按了沒反應」，network 面板可見 `/data-center/...` 403。
@@ -427,31 +433,50 @@ def execute(ctx):
 > 對不存在的 row 回 200 `{}`（「缺值不回填」同步證實）——**功能已上線**。
 > **2026-09-02 寫值端點形狀探測**：`PATCH /ext-values/...` 對未定義欄位回
 > 422 `invalid_field`——寫入端點已上線且做欄位定義驗證。
-> 建欄／改欄／刪欄與完整寫值流程仍未實測；拿到非預期回應先懷疑部署落差。
+> **2026-09-10 完整寫值流程實測通**（建欄 → PATCH 寫值 → `:batch-get` 取回，`system.admin`）；
+> 同日實測釘死兩件事：**app 執行期完全取不到 EAV 值**（下方通道表）、
+> **PATCH body 少包一層 `values` 會靜默 no-op 回 200**（端點速查）。刪欄仍未實測。
 
 ### 定位：Data Reference 軌的第三種擴充機制
 
 預設表**本體 schema 不可改**（平台定義，沒有任何 API 能對它 ALTER TABLE）。
-要讓預設表「更符合使用者的資料結構需求」，有三個選項，**不是只有 custom_data**：
+要讓預設表「更符合使用者的資料結構需求」，有三種機制（原生欄位／延伸欄位／`custom_data`），
+**不是只有 custom_data**；下表按情況列，選哪個先看「app 要不要讀它」：
 
 | 需求 | 選 | 理由 |
 |------|-----|------|
 | 原生欄位語意能對上 | **原生欄位** | 永遠優先 |
-| 租戶級的正式欄位：要有型別、要在資料中心 UI 對全租戶可見可管理 | **延伸欄位**（本節） | 有型別驗證、有欄位定義、跨 app 一致 |
+| 租戶級的正式欄位，且**只在資料中心 UI 由管理者維護、app 不讀不寫** | **延伸欄位**（本節） | 有型別驗證、有欄位定義 |
+| app 執行期要讀或寫這個欄位（前端顯示、帶進表單、action 計算…） | `custom_data` JSONB，或整個實體改走**自建表** | ★ **app 取不到 EAV 值**——見下方通道表，這是能力限制不是權限問題 |
 | app 私有標記（`app_domain` 必在此）、鬆散或暫時性的擴充 | `custom_data` JSONB | 免定義成本，但無型別、僅該 app 自己認得 |
 
-讀寫頻繁且 app 是該資料的主要使用者時，回頭重新考慮：這個實體也許該整個走自建表。
+★ **選型第一問不是「要不要型別」，是「app 要不要讀它」**——要讀就別選延伸欄位。
+會落在延伸欄位的典型只有一種：使用者在資料中心 UI 自己維護、給平台功能／報表看的租戶級欄位。
+讀寫頻繁且 app 是該資料的主要使用者時，這個實體整個走自建表。
 
 ### 是 overlay，不是實體欄位（★ 讀寫契約，最容易踩）
 
 延伸欄位的定義與值存在**獨立的 EAV 表**，預設表本體零改動。後果：
 
 - **`ctx.db.query`／`db.ts` 的查詢結果不會包含延伸欄位值**——讀 = 主列查詢
-  ＋另打 `:batch-get` 自己合成；寫 = 原生欄位走既有路徑、延伸欄位另打 PATCH
+  ＋另打 `:batch-get` 自己合成；寫 = 原生欄位走既有路徑、延伸欄位另打 PATCH。
+  ⚠️ 這個「自己合成」**只有持 `builder.access` 的使用者身分（含本地腳本）做得到**，
+  app 執行期做不到——見下方通道表
 - 「缺值不回填」：batch-get 只回傳實際存在的值，**不代入 `default_value`**
 - relation 型別一律**軟關聯無 FK**；required／unique 由應用層保證，DB 不擋
-- Custom App SDK（`api.ts`／`ctx.db`）**沒有封裝**——app 執行期要用得自己打 REST；
-  需要在 app 內大量讀寫延伸欄位時，優先重新評估改走自建表
+- **app 執行期四條通道全斷（★ 2026-09-10 實測＋源碼核對，這是能力限制）**：
+
+  | 通道 | 結果 | 原因 |
+  |---|---|---|
+  | Server Action `ctx.db.*` | 沒有任何延伸欄位方法 | `core/ctx_allowlist.py` 白名單未收錄 |
+  | Server Action 內直打 `/api/v1/data-center/ext-*` | **401 Unauthorized** | 端點吃 `get_current_user`，runner 沒有使用者身分——**與 `builder.access` 高低無關，提權無效** |
+  | 前端 SDK（`api.ts`／`db.ts`） | 沒有封裝 | 模板未提供；手動 `fetch` 帶 `__APP_TOKEN__` 技術上可行，但下一列 |
+  | internal 前端手打 REST | 一般員工 **403** | 端點掛 `builder.access`（§7.5 同一個病），而這裡**沒有「包 action」的解**——action 打不到 |
+  | external 線 `/ext/data-center/*` | 端點不存在 | 該 router 只有 `tables`／`records` 五條，無 `ext-*` |
+
+  → 結論：延伸欄位的值只有**資料中心 UI**、**持 `builder.access` 的人**、
+  **遷入用的本地腳本**（§23.8）讀寫得到。**app 內要用的欄位不要放這裡**（issue #71）。
+  已經放了才發現要在 app 內讀 → 遷成 `custom_data` 或自建表欄位，沒有旁路可繞。
 
 ### 端點速查（前綴 `/api/v1/data-center`）
 
@@ -463,6 +488,21 @@ def execute(ctx):
 | 刪欄（兩段式：impact → confirm） | GET `.../{fieldKey}/impact` → DELETE | **`system.admin`**（帶走該欄所有值，刻意不下放） |
 | 批取值 | POST `/ext-values/{erpKey}:batch-get`（body `row_ids` ≤ **200**） | `builder.access` |
 | 寫值 | PATCH `/ext-values/{erpKey}/{rowId}` | `builder.access` |
+
+★ **寫值的 body 一定要包一層 `values`**：`{"values": {"<欄位實體名>": <值>}}`。
+少包那層是**靜默失敗**——`values` 有預設空 dict 且未知鍵被忽略，扁平 body 解析成「零欄要寫」，
+回 **200 帶該列當前的值**（該列本來沒值時回 `200 {}`），看起來像成功。
+對照組（同一列、同一個已定義欄位，2026-09-10 實測）：
+
+| body | 回應 | 實際寫入 |
+|---|---|---|
+| `{"payslip_probe":"V2"}` | 200 `{"payslip_probe":"V1"}` | **沒寫** |
+| `{"values":{"payslip_probe":"V2"}}` | 200 `{"payslip_probe":"V2"}` | 寫入 |
+| `{"values":{"no_such_field":"X"}}` | 422 `invalid_field` | — |
+| `{"no_such_field":"X"}` | **200** | **沒寫**（連未定義欄位都吞掉） |
+
+所以 422 的欄位定義驗證**只保護包了 `values` 的請求**；扁平 body 拿不到任何錯誤訊號。
+寫完一律用 `:batch-get` 取回比對（「缺值不回填」，空 `{}` ≠ 寫入成功）。
 
 - `{erpKey}` 是預設表的表 key（平台內部命名帶 erp 字樣，見 CONTEXT.md 稱謂對照）；`{fieldKey}` 是延伸欄位實體名
 - 遷入情景要把外部資料批次寫進延伸欄位 → 匯入機制與量的紅線見

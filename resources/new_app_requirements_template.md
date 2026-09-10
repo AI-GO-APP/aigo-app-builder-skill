@@ -94,7 +94,9 @@
 
 - 每個實體先查 `references/default-table-lookup.md` §2，再 `aigo_data.py meta tables --source erp --grep <關鍵字>`；
   使用者的口語與原系統表名都不是語意，「這張表在講什麼」才是
+- **欄位有無只認引用面** `GET /refs/tables/{t}/columns`——Meta 面的 `fields` 是策展白名單會少欄（查表 §0）
 - 軌：引用（Data Reference）／延伸欄位／custom_data／自建表（重用既有或新建）
+  ——**延伸欄位只能填在「app 執行期不讀這個欄位」時**（app 內取不到 EAV 值，`data-center.md` §10）
 - 「沒想到有」不是不採用理由；「查過 `crm_leads`，但需要唯一約束與真 FK」才是
 
 ### 建表規格表（上表「軌」為「自建表（新建）」的實體逐張列）
