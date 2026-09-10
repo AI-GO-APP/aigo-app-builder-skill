@@ -67,10 +67,13 @@ SDK 雙軌並存所以存量 app 不會壞；舊模型與端點尚未移除。
 延伸欄位是 **EAV overlay**：定義與值存在獨立表，與自建表同一套 9 型別與欄數配額。
 
 **它不是實體欄位，也不是 `custom_data`。** 三者的分工：原生欄位永遠優先；
-延伸欄位給「要型別、全租戶可見可管理」的正式欄位；`custom_data` 給 app 私有標記與鬆散擴充。
+延伸欄位給「只在資料中心 UI 維護、app 不讀」的租戶級正式欄位；
+`custom_data` 給 app 私有標記、鬆散擴充，以及**任何 app 執行期要讀寫的擴充欄位**。
 
-⚠️ 最大陷阱：**預設表既有 CRUD（`ctx.db`／`db.ts`）不回傳延伸欄位的值**——
-讀寫走獨立的 `ext-fields`／`ext-values` 端點（`references/data-center.md` §10）。
+⚠️ 最大陷阱：**app 執行期取不到延伸欄位的值**。`ctx.db`／`db.ts` 不回傳；
+action 直打 `ext-values` 端點是 401（無使用者身分）；前端手打要 `builder.access`。
+值只有資料中心 UI、持 `builder.access` 的人、遷入用的本地腳本讀寫得到
+（通道表與 PATCH body 形狀見 `references/data-center.md` §10）。
 
 ### app_domain
 

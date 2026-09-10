@@ -410,6 +410,10 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 執行期網域�
        `GET /api/v1/refs/available-tables` 只是表名清單（`comment` 實務上為空），不能當語意來源
      - 對候選預設表呼叫 `GET /api/v1/refs/tables/{name}/columns` 查欄位結構
        （Meta key 與引用面表名不同時依查表 §3 換名再打）
+       ★ **兩個端點分工是硬的：Meta 面找表讀語意、引用面 columns 判欄位有無。**
+       Meta 面的 `fields` 是 Workspace 用的策展白名單，比實體表少欄是常態
+       （`hr_employees`：Meta 20 欄 vs 引用面 42 欄）——**「Meta 沒列 → 平台沒有」是錯的推論**，
+       這樣判會把該走 Data Reference 的實體推去自建（查表 §0 的 ⚠️、issue #70）
        ⚠️ **查到的表沒有 `tenant_id` 是正常的**，不代表不安全，也不要自補過濾——見規則 25
    - 列出所有需要的資料表（來源：§1.0 的資料實體清單），逐表判定走哪一軌（判定標準見規則 18）
    - **產出：資料承載表**（每個實體一列，寫進計畫；模板在 `new_app_requirements_template.md` §五、
@@ -539,7 +543,8 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 執行期網域�
     | 資料性質 | 走哪一軌 | 理由 |
     |---------|---------|------|
     | **平台有同語意的實體**（案件追蹤、往來對象、專案、交付物、待辦…——先用業務語言查 `references/default-table-lookup.md` §2） | **Data Reference**（原生欄位優先） | 與平台功能共用同一份資料；舉證責任在「為什麼不用預設表」 |
-    | 預設表缺「租戶級正式欄位」 | Data Reference 的**延伸欄位**（EAV） | 有型別、全租戶可見；讀寫走獨立端點（`data-center.md` §10） |
+    | 預設表缺欄位，且 **app 執行期要讀寫它** | 預設表的 `custom_data` JSONB，或整個實體改走**自建表** | ★ **延伸欄位在 app 內取不到值**（action 打 EAV 端點 401、前端要 `builder.access`）——`data-center.md` §10 通道表 |
+    | 預設表缺「租戶級正式欄位」，且**只在資料中心 UI 維護、app 不讀** | Data Reference 的**延伸欄位**（EAV） | 有型別、全租戶可見；讀寫走獨立端點（`data-center.md` §10） |
     | 平台**沒有**同語意實體（查過查表與 Meta API 仍無：領域專屬紀錄、公開爬蟲資料…） | **自建表** | 租戶級真實資料表，跨 app 共用 |
     | app 私有標記（`app_domain`）、臨時、鬆散、不值得定義欄位 | 預設表的 `custom_data` JSONB | 免定義成本 |
 
@@ -551,9 +556,13 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 執行期網域�
       只有平台真的沒有對應實體才自建。每張自建表都要附「已對照 <預設表>／不採用理由」
       （Phase 1.5 第 3 項的資料承載表；issue #53：跳過對照的計畫把 13 張表做成 40 張）
     - **既有表欄位不夠 ≠ 換軌或塞 json**：自建表可直接**加實體欄位**
-      （`data-center.md` §7）；預設表本體不可改，但可加**延伸欄位**
-      （租戶級正式欄位，EAV，`data-center.md` §10）——`custom_data` 不是
-      預設表唯一的擴充點，它留給 app 私有標記（`app_domain`）與鬆散暫時性擴充。
+      （`data-center.md` §7）；預設表本體不可改，擴充點有兩個——
+      **app 要讀寫的欄位一律 `custom_data`（或整個實體改走自建表）**，
+      **延伸欄位**（EAV，`data-center.md` §10）只給「app 不讀、管理者在資料中心 UI 維護」的
+      租戶級正式欄位。選型第一問是「app 要不要讀它」，不是「要不要型別」（issue #71）。
+    - **判「平台有沒有這個欄位」只認引用面 `GET /refs/tables/{t}/columns`**——
+      Meta 面的 `fields` 是 Workspace 用的策展白名單，比實體表少欄是常態
+      （`hr_employees`：20 vs 42）；依 Meta 面判會誤以為欄位不存在（issue #70、查表 §0）。
     - **建表前必須先 `GET /api/v1/data-center/tables` 盤點**（Phase 0 步驟 6）。
       語意相同的表已存在就重用，不要新建——自建表跨 app 共用，重複建表 = 資料分裂。
     - 建表需 `system.admin`。收到 **403 不重試、不繞路**：輸出可照抄的建表規格，

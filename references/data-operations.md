@@ -125,7 +125,9 @@
   - **同檔重匯不去重**（★）：mapping 顯示 `dedup_key: ["email"]`、`on_conflict: null`，同一份 3 列 CSV 匯兩次 →
     表裡 6 列、`skipped_count: 0`。匯入前先用同 filter GET 估影響面（§3.5），匯錯要自己用模組 REST 逐筆刪
   - `column_map` 每欄必帶 `tier`（缺了 422 `Field required`）；`tier-2`（對不到既有欄）的來源欄去向
-    是延伸欄位，模組 REST 讀不到，**未實打驗證**；`transform` 目前 passthrough
+    是延伸欄位，模組 REST 讀不到，**未實打驗證**；`transform` 目前 passthrough。
+    ⚠️ 進了延伸欄位的資料 **app 執行期也讀不到**（`data-center.md` §10 通道表）——
+    匯入的欄位若要在 app 畫面上出現，`tier-2` 這條路不能用，回 dev-guide §19 改分流
   - **引導用戶「匯出檔案丟給 AI IDE」而不是給 DB 連線字串**：檔案走這條有 profiling、必填預警與覆核；
     DB 直連只能在本地做（`custom-app-dev-guide.md` §23.6），只在需要 ID 映射、FK 轉換或遷後持續同步時才要，
     且要求唯讀帳號、用完撤銷；Supabase 直接走 REST 匯出，不必給連線字串
