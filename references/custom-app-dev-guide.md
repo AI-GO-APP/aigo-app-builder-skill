@@ -1590,6 +1590,13 @@ PATCH /api/v1/builder/apps/{app_id}/runtime-settings   （builder.publish）
   回 `locked_reason: "messaging_trigger"`，UI 鎖定不可切——trigger 要常駐收訊息
 - `apply_state` 是 k8s 重套結果，設定已落 DB；`failed` 不代表沒存，稍後 publish 會再套
 - 草稿（draft runner）**固定冷啟動**，本設定只作用於已發布 runner
+- **怎麼讀回現況**（2026-09-11 測試租戶實查 prod openapi＋實打）：Builder 線**只有 `PATCH`，沒有
+  `GET /runtime-settings`**（該路徑只存在於 Hosted 線）；`GET /builder/apps/{id}` 明細（`CustomAppResponse`）
+  **也不含** `always_on`。唯一的讀回點是**列表** `GET /api/v1/builder/apps`——`CustomAppListItem`
+  每筆帶 `always_on` 與 `has_messaging_trigger`。
+  ⚠️ 列表的 `always_on` 是**存的設定值、不是生效值**：實查到的那支綁通訊渠道的 app
+  `always_on=false` 但 `has_messaging_trigger=true`，實際是常駐——兩個欄位要一起讀。
+  （同一次實查：該租戶 66 支 app 的 `always_on` 全是 `false`，這就是這條線的常態）
 - 常駐會佔租戶機器的保留量（運算資源頁「App 佔用」卡把常駐 app 的副本 0 也列出來）；
   共用池租戶要考慮 ResourceQuota，撞牆症狀見 SKILL.md 錯誤處理的 503 `quota_hint`
 - **per-app CPU／記憶體上限（`runner_resources`）沒有租戶 UI**——Builder App 這組值由 ops 直改 DB；
@@ -1621,12 +1628,12 @@ request/response，沒有「容器內排程」與「長連線」兩題（平台�
 
 agent 不自行開、也不把「要不要常駐」丟給 owner 選。決策的落點：
 **需求盤點表 §四.1-B ＋ app 分配表該列**（`new_app_requirements_template.md`），
-交付前在里程碑清單核對一次（SKILL.md「驗證流程快速參照」）：**本 skill 沒下過 `PATCH` ＝ 關**，
-判「關」的 app 到此為止、不必再打任何端點；判「開」的才要拿出 `PATCH` 回應的
-`effective_mode: "always_on"`＋計畫裡那句「理由 X；退場條件 Y」，拿不出來＝未通過。
-⚠️ Builder 線有沒有 `GET /runtime-settings` **未查證**（Hosted 線才確定有，`hosted-apps.md` §3.4），
-不要假設可以另外讀回；接手別人建的 app 要確認現況，看 Builder App 設定 Dialog 的「執行模式」radio。
-綁了通訊渠道的 app 是平台鎖的（`locked_reason: "messaging_trigger"`），不必填也不算違反本閘。
+交付前在里程碑清單核對一次（SKILL.md「驗證流程快速參照」）：用 **`GET /api/v1/builder/apps`
+列表**讀回該 app 的 `always_on`（Builder 線沒有 `GET /runtime-settings`、明細也不帶這個欄位，見 §28 末列），
+**必須等於計畫 app 分配表那列的結論**；讀到 `true` 就要拿得出「理由 X；退場條件 Y」，拿不出來＝未通過。
+接手別人建的 app 用同一支列表看現況（UI 則在 Builder App 設定 Dialog 的「執行模式」radio）。
+綁了通訊渠道的 app 列表會是 `always_on=false` ＋ `has_messaging_trigger=true`——**平台鎖的常駐**
+（`locked_reason: "messaging_trigger"`），不必填也不算違反本閘。
 
 ## 29. 存取通道端點總表：internal／external／匿名／Hosted（★ 四條通道，四種憑證）
 

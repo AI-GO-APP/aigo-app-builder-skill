@@ -85,12 +85,17 @@ verify_server_action(base_url, token, app_id, action_name, params)
 
 9. **常駐狀態對帳**（每次里程碑必做，一分鐘的事）— 對照計畫 app 分配表該列的常駐結論
    （`custom-app-dev-guide.md` §28.1）：
-   - 寫 `常駐＝關（預設）`（**絕大多數 app**）→ 確認本 skill 全程沒下過
-     `PATCH /builder/apps/{id}/runtime-settings`，不必打任何端點，到此為止
+   - 讀回的唯一端點是**列表** `GET /api/v1/builder/apps`（每筆帶 `always_on`、`has_messaging_trigger`）
+     ——Builder 線沒有 `GET /runtime-settings`，`GET /builder/apps/{id}` 明細也不含這個欄位
+     （2026-09-11 測試租戶實查）
+   - 寫 `常駐＝關（預設）`（**絕大多數 app**）→ 列表讀回應為 `always_on: false`，且本 skill
+     全程沒下過 `PATCH /builder/apps/{id}/runtime-settings`
    - 寫 `常駐＝開` → 在 publish 之後才 `PATCH .../runtime-settings {"always_on": true}`（`builder.publish`），
      回應要是 `effective_mode: "always_on"`；交付說明留一句「常駐＝開，理由 X；退場條件 Y」，
      拿不出這句＝未通過。免費租戶會 403 `ALWAYS_ON_REQUIRES_PAID_PLAN`（設不上去，改回關並告知 owner）、
      未發布會 422
-   - 綁通訊渠道的 app 回 `locked_reason: "messaging_trigger"` 是平台鎖的，不算違反
+   - 綁通訊渠道的 app：列表是 `always_on: false` ＋ `has_messaging_trigger: true`，**實際是常駐**
+     （平台鎖的，`locked_reason: "messaging_trigger"`），不算違反——兩個欄位要一起讀，
+     只看 `always_on` 會誤判成冷啟動
 
 可使用 `scripts/aigo_e2e.py` 和 `scripts/aigo_runtime_verify.py`。

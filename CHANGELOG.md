@@ -24,7 +24,12 @@ skill 的預設答案，缺口落在流量最大的那條線上。
   **不必每支 app 主動問 owner**——只有命中即時互動訊號（櫃檯、掃碼、來電查詢、客戶在線上等回覆，
   或需求寫明「幾秒內要出結果」）才問「閒置後第一個人打開等 N 秒能不能接受」；「第一發慢」本身
   不是理由，純排程／批次／webhook app 一律關。判「開」要先確認付費方案與 publish 時點。
-  ⚠️ Builder 線有沒有 `GET /runtime-settings` 未查證，不要假設可以另外讀回
+- **常駐現況的讀回點實查定案**（2026-09-11 測試租戶查 prod openapi＋實打）：Builder 線
+  **只有 `PATCH`，沒有 `GET /runtime-settings`**（該路徑只在 Hosted 線），`GET /builder/apps/{id}`
+  明細也不含 `always_on`；唯一讀回點是**列表** `GET /api/v1/builder/apps`（`CustomAppListItem` 帶
+  `always_on` ＋ `has_messaging_trigger`）。⚠️ 列表的 `always_on` 是**存的設定值不是生效值**——
+  綁通訊渠道的 app 讀到 `always_on=false` 但 `has_messaging_trigger=true`，實際是常駐，兩欄要一起讀。
+  同一次實查該租戶 66 支 app `always_on` 全 `false`，佐證「Custom 線常態就是冷啟動」
 - `new_app_requirements_template.md` §四.1 拆成 **§四.1-A（Hosted 三問）／§四.1-B（Custom 一問）**，
   標題改成「每支 app 都要有一個結論」；app 分配表改成**每一列**都附常駐結論（預設列直接帶
   `常駐＝關（預設）`），需求形狀結論那行同步

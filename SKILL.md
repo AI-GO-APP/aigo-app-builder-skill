@@ -946,8 +946,9 @@ if (file) downloadFile(file);
 
 里程碑交付：
   上述全部 + 角色白名單實測（用不在 `access_role_ids` 內的帳號開 app 應 404）+ 匿名存取（僅判進 external 的 app）
-  + 常駐狀態對帳（dev-guide §28.1）：計畫寫「關」＝本 skill 沒下過 `PATCH runtime-settings`，到此為止；
-    寫「開」才在 publish 後 `PATCH .../runtime-settings {"always_on": true}` 並確認回 `effective_mode: "always_on"`
+  + 常駐狀態對帳（dev-guide §28.1）：用 `GET /builder/apps` **列表**讀回 `always_on`＋`has_messaging_trigger`
+    （Builder 線沒有 `GET /runtime-settings`），必須等於計畫那列的結論；寫「開」才在 publish 後
+    `PATCH .../runtime-settings {"always_on": true}` 並確認回 `effective_mode: "always_on"`
   + 交付連結實開（照 `platform-behaviors.md` §6.2 組**正式版**網址，用非開發者帳號／external 使用者開一次；`verification-details.md` 第 8 項）
 
 Hosted App 線（不走 Phase 2–4）：
