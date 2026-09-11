@@ -4,6 +4,38 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.41.0
+
+### Custom App 線補上 `always_on` 決策閘：常駐的引導與選擇不再只有 Hosted 有
+
+`always_on` 兩條線都有（Custom `PATCH /builder/apps/{id}/runtime-settings`、Hosted
+`PUT /{id}/runtime-settings`），立場也一直是同一套「預設不開」，但**流程只掛在 Hosted 線**：
+SKILL.md §1.5 只對判走 Hosted 的列要求常駐決策、需求盤點表 §四.1 標題寫死「只有判走 Hosted 的
+app 才填」、里程碑交付只有 Hosted §3.4 讀回 `always_on`。Custom 線的唯一出口是 dev-guide §28
+（要主動翻到）與 troubleshooting「第一發很慢」那列（要等使用者先抱怨）——而 Custom App 正是本
+skill 的預設答案，缺口落在流量最大的那條線上。
+
+補的形狀不照抄 Hosted：Custom 的 action 是 request/response，Hosted 三問裡「容器內排程」
+（平台排程是入站請求、會喚醒 runner）與「長連線」都不存在，**只剩冷啟動一題**；而且 Custom
+多了兩個 Hosted 沒有的前提——免費租戶 403 `ALWAYS_ON_REQUIRES_PAID_PLAN`（判「開」也設不上去）、
+未發布 422（設定時點在首次 publish 之後）。
+
+- `custom-app-dev-guide.md` 新增 **§28.1 `always_on` 決策閘（Custom 線）**：預設 `false`，
+  **不必每支 app 主動問 owner**——只有命中即時互動訊號（櫃檯、掃碼、來電查詢、客戶在線上等回覆，
+  或需求寫明「幾秒內要出結果」）才問「閒置後第一個人打開等 N 秒能不能接受」；「第一發慢」本身
+  不是理由，純排程／批次／webhook app 一律關。判「開」要先確認付費方案與 publish 時點。
+  ⚠️ Builder 線有沒有 `GET /runtime-settings` 未查證，不要假設可以另外讀回
+- `new_app_requirements_template.md` §四.1 拆成 **§四.1-A（Hosted 三問）／§四.1-B（Custom 一問）**，
+  標題改成「每支 app 都要有一個結論」；app 分配表改成**每一列**都附常駐結論（預設列直接帶
+  `常駐＝關（預設）`），需求形狀結論那行同步
+- `SKILL.md`：§1.5 加「兩條線都要有結論」一段並改寫分配表產出；**計畫閘門新增一條**——任何一列
+  沒有常駐結論＝不算完成計畫；「驗證流程快速參照」的里程碑交付新增常駐狀態對帳
+- `verification-details.md` §2 新增第 9 項「常駐狀態對帳」：寫「關」＝確認全程沒下過 `PATCH`、
+  不必打端點；寫「開」才在 publish 後設定並確認 `effective_mode: "always_on"`
+- `product-line-decision.md` §7、`project_deconstruction_template.md`（遷入案的 Custom app 幾乎
+  一律維持關）、`hosted-apps.md` §3.0（加一句本節只管 Hosted）、`troubleshooting.md`「第一發很慢」
+  列同步指向 §28.1
+
 ## 1.40.0
 
 ### 預設表欄位判定改站引用面：Meta 面的 `fields` 是策展白名單（issue #70）

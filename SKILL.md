@@ -363,13 +363,17 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 執行期網域�
      `internal` 的 proxy 會把 Server Action 的呼叫導去登入（`product-line-decision.md` §5）
    - 判走 Hosted App 的 app → `references/hosted-apps.md`，不走本 skill 的 Phase 2–4；
      「Hosted = 整套搬」指程式不指資料，業務資料一律落平台的表（`hosted-apps.md` §7.1）；
-     **部署前必過 `hosted-apps.md` §3.0 的 `always_on` 決策閘**——預設 `false`，只有容器內自跑排程／長連線／
-     冷啟動業務上不可接受三種情況才開，問 owner 的是業務問題不是「要不要常駐」
+     **部署前必過 `hosted-apps.md` §3.0 的 `always_on` 決策閘**（下一項）
+   - **常駐（`always_on`）兩條線都要有結論，預設都是 `false`**——Hosted 過 `hosted-apps.md` §3.0 三問；
+     **Custom App 過 `custom-app-dev-guide.md` §28.1，而且答案幾乎一律是「關」**：action 是 request/response，
+     沒有「容器內排程」與「長連線」兩題，只剩冷啟動等待，**不必主動問 owner**——除非命中即時互動訊號
+     （現場等待：櫃檯、掃碼、來電查詢、客戶在線上等回覆，或需求寫明「幾秒內要出結果」）才問那一題；
+     「第一發慢」本身不是理由，純排程／批次／webhook app 一律關
    - **產出：app 分配表**（每個 app 一列，寫進計畫、確認後照表建 app）
      `| alias | 產品線 | 模式（模板 slug / visibility） | 負責的功能群 | 拆分理由 |`
-     ——預設情況就是一列 `| <alias> | Custom | starter-internal | 全部 | — |`
-     ——判走 Hosted 的列，拆分理由欄後附常駐決策：`常駐＝關（預設）`，或 `常駐＝開；理由 X；退場條件 Y`
-     （`hosted-apps.md` §3.0 三問的結果，問答填在需求盤點表 §四.1；§3.4 部署後會讀回核對）
+     ——預設情況就是一列 `| <alias> | Custom | starter-internal | 全部 | —；常駐＝關（預設） |`
+     ——**每一列**都在拆分理由欄後附常駐決策：`常駐＝關（預設）`，或 `常駐＝開；理由 X；退場條件 Y`
+     （問答填在需求盤點表 §四.1：Hosted 填 §四.1-A、Custom 填 §四.1-B；Hosted 另有 §3.4 部署後讀回核對）
 
 1.7. **授權架構選型**（★ 強制；SSOT 在 `references/member-admin.md` §1，兩條路共用）
    - **立場**：AI GO 帳號體系是內外人員共用的——凡要登入的人都是租戶成員，用**角色**分「能做什麼」、
@@ -483,6 +487,9 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 執行期網域�
 
 - **新建情景：§1.0 四問未齊、或計畫裡沒有「需求形狀結論」「app 分配表」「授權架構表」「資料承載表」→ 不算完成計畫，
   不得送閘門**——先回 §1.0／1.7／第 3 項補；遷入情景同樣要有這四張表
+- **app 分配表任何一列沒有常駐結論 → 不算完成計畫**——兩條線預設都是 `false`；
+  Custom App 沒命中即時互動訊號就直接寫 `常駐＝關（預設）`（§28.1，不必問 owner），
+  寫「開」的列必須同時有「理由 X；退場條件 Y」，還要先確認租戶是付費方案（免費 403 設不上去）
 - **資料承載表裡任何一張自建表缺「已對照的預設表／不採用理由」→ 不算完成計畫**——
   這道閘與 Phase 0 步驟 6 的自建表盤點同級（issue #53：少了它，46 張表的遷入案第一版判了 40 張自建表，對照後只剩 13 張）
 - **必須等待用戶明確回覆「同意」或提供修改意見後，才可進入 Phase 2**
@@ -939,6 +946,8 @@ if (file) downloadFile(file);
 
 里程碑交付：
   上述全部 + 角色白名單實測（用不在 `access_role_ids` 內的帳號開 app 應 404）+ 匿名存取（僅判進 external 的 app）
+  + 常駐狀態對帳（dev-guide §28.1）：計畫寫「關」＝本 skill 沒下過 `PATCH runtime-settings`，到此為止；
+    寫「開」才在 publish 後 `PATCH .../runtime-settings {"always_on": true}` 並確認回 `effective_mode: "always_on"`
   + 交付連結實開（照 `platform-behaviors.md` §6.2 組**正式版**網址，用非開發者帳號／external 使用者開一次；`verification-details.md` 第 8 項）
 
 Hosted App 線（不走 Phase 2–4）：
@@ -1049,7 +1058,7 @@ uv run --project scripts python scripts/report_issue.py submit "一句話標題"
 | 檔案 | 內容 |
 |------|------|
 | `CONTEXT.md` | ★ 術語表——預設表／自建表兩大類＋四個機制詞（含稱謂對照與禁用詞：舊稱 SaaS 表與外部產品名都不出現） |
-| `references/custom-app-dev-guide.md` | 核心 API 規格與架構理念；**§6.0 SDK 依模式分流表**、**§29 四條存取通道端點總表（internal／external／匿名／open）**、**§15.1 匿名存取的平台核可三態**、§12 Storage 坑表、**§27 租戶資料存取規則（Auth gate：403 帶 `reason` 的來源）**、§28 冷啟動／常駐（`always_on`） |
+| `references/custom-app-dev-guide.md` | 核心 API 規格與架構理念；**§6.0 SDK 依模式分流表**、**§29 四條存取通道端點總表（internal／external／匿名／open）**、**§15.1 匿名存取的平台核可三態**、§12 Storage 坑表、**§27 租戶資料存取規則（Auth gate：403 帶 `reason` 的來源）**、§28 冷啟動／常駐（`always_on`）＋**§28.1 Custom 線常駐決策閘（預設關）** |
 | `references/data-center.md` | 自建表完整規格（型別、配額、權限、SDK）＋ 延伸欄位（§10） |
 | `references/default-table-lookup.md` | **判「平台有沒有同語意實體」時（Phase 1.5 第 3 項、遷入 §2.4 每張表必查）**：業務語言→預設表速查、表名前綴讀法、Meta 面↔引用面對照、必填欄與唯讀表、遷入常見誤判 |
 | `references/event-triggers.md` | Webhook 與 App 排程（冪等要求、宣告、限制） |

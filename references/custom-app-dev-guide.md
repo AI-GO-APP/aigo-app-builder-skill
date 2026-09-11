@@ -1594,11 +1594,39 @@ PATCH /api/v1/builder/apps/{app_id}/runtime-settings   （builder.publish）
   共用池租戶要考慮 ResourceQuota，撞牆症狀見 SKILL.md 錯誤處理的 503 `quota_hint`
 - **per-app CPU／記憶體上限（`runner_resources`）沒有租戶 UI**——Builder App 這組值由 ops 直改 DB；
   Hosted App 才有 `resources` 自設（`hosted-apps.md` §4.1）
-- **何時建議常駐（預設不開；與 `hosted-apps.md` §3.0 同一套立場）**：Builder App 的 action 是
-  request/response，沒有「容器內排程」與「長連線」兩題（平台排程是入站請求會喚醒 runner；綁通訊渠道的
-  平台自己鎖常駐），所以**只剩一題**——問 owner「閒置後第一個人打開要等 N 秒能不能接受」，問出實際秒數，
-  容忍不了才開並寫下依據；「第一發慢」本身不是理由，純排程／批次 app 不開。agent 不自行開、
-  也不把「要不要常駐」丟給 owner 選；開了在交付說明留一句「常駐＝開，理由 X；退場條件 Y」
+
+### 28.1 `always_on` 決策閘（★ Custom App 線；預設 `false`，**絕大多數 Custom App 就是冷啟動**）
+
+與 `hosted-apps.md` §3.0 同一套立場，但 **Custom App 只剩一題**：Builder App 的 action 是
+request/response，沒有「容器內排程」與「長連線」兩題（平台排程是入站請求、會喚醒縮到零的 runner；
+綁通訊渠道的 app 平台自己鎖常駐），剩下的只有冷啟動等待。
+
+**預設結論是「關」，而且不必每支 app 都主動去問 owner。** 多數 Custom App 是內部業務介面，
+閒置後第一個人等幾十秒是可接受的；「第一發慢」本身不是開的理由，純排程／批次／webhook app 一律不開。
+只有**命中即時互動訊號**才問那一題：owner 自己提到現場等待（櫃檯、掃碼、來電查詢、客戶在線上等回覆）、
+或需求寫明「幾秒內要出結果」。沒有訊號就直接寫 `常駐＝關（預設）`，不用在計畫裡追加問答。
+
+| 命中訊號後問 owner 的業務問題 | 答案 | 設定 |
+|---|---|---|
+| 「閒置一陣子後，第一個人打開要等 **N 秒**能不能接受？」——要問出實際容忍秒數，不要預設「快比較好」 | 忍得了（或答不出具體場景） | **`false`**（預設，不要動） |
+| 同上 | 忍不了，且說得出是哪個場景在等 | `true`，並寫下秒數與場景 |
+
+**判「開」之後還有兩個前提要先確認，否則寫進計畫也設不上去**：
+
+- **租戶方案**：免費租戶 `PATCH` 直接 403 `ALWAYS_ON_REQUIRES_PAID_PLAN`——開不了。
+  此時不要把「已開常駐」寫進計畫，改成「已知冷啟動等待 N 秒，方案不支援常駐」攤開給 owner，
+  或走減少冷啟動影響的設計（前端先給 loading 與預期秒數、把第一次呼叫提前到使用者還在填表時）
+- **時序**：未發布 422 `RUNTIME_SETTINGS_REQUIRE_PUBLISHED`——只能在**首次 publish 之後**才設，
+  所以這是交付前的一步，不是建 app 當下的一步
+
+agent 不自行開、也不把「要不要常駐」丟給 owner 選。決策的落點：
+**需求盤點表 §四.1-B ＋ app 分配表該列**（`new_app_requirements_template.md`），
+交付前在里程碑清單核對一次（SKILL.md「驗證流程快速參照」）：**本 skill 沒下過 `PATCH` ＝ 關**，
+判「關」的 app 到此為止、不必再打任何端點；判「開」的才要拿出 `PATCH` 回應的
+`effective_mode: "always_on"`＋計畫裡那句「理由 X；退場條件 Y」，拿不出來＝未通過。
+⚠️ Builder 線有沒有 `GET /runtime-settings` **未查證**（Hosted 線才確定有，`hosted-apps.md` §3.4），
+不要假設可以另外讀回；接手別人建的 app 要確認現況，看 Builder App 設定 Dialog 的「執行模式」radio。
+綁了通訊渠道的 app 是平台鎖的（`locked_reason: "messaging_trigger"`），不必填也不算違反本閘。
 
 ## 29. 存取通道端點總表：internal／external／匿名／Hosted（★ 四條通道，四種憑證）
 

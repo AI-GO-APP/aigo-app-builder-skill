@@ -119,7 +119,10 @@ Custom 不夠就**搭** Hosted，不是整個換線：
 | alias | 產品線（Custom / Hosted） | 模式（模板 slug / visibility） | 負責的功能群 | 拆分理由 |
 ```
 
-- 預設情況就是一列：`| <alias> | Custom | starter-internal | 全部 | — |`
+- 預設情況就是一列：`| <alias> | Custom | starter-internal | 全部 | —；常駐＝關（預設） |`
+- **每一列的拆分理由欄後都要附常駐結論**（沒填＝關）：Hosted 走 `hosted-apps.md` §3.0 三問、
+  Custom 走 `custom-app-dev-guide.md` §28.1（**幾乎一律是關**，沒命中即時互動訊號就不必問 owner）；
+  寫「開」的列要帶「理由 X；退場條件 Y」。問答落在需求盤點表 §四.1-A／§四.1-B
 - 多列時每個 app 各自過問題一，不是複製同一個答案
 - 多系統遷入時同步記入 `migration-workflow.md` §1 的全景表
 - 分配表定案後接著填**授權架構表**（`member-admin.md` §1）：每支 app 誰能開、掛什麼角色、人怎麼進來
