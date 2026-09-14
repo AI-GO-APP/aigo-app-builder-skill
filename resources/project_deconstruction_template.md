@@ -46,6 +46,11 @@
 > 容器裡（cron／APScheduler／queue worker）才需要常駐，能改成平台排程的就改、常駐維持 `false`；
 > 第三題（冷啟動容忍秒數）要另外問 owner。結論寫成 `常駐＝關（預設）`／`常駐＝開；理由；退場條件`，
 > 抄進 app 分配表該列。
+>
+> **判走 Custom App 的 app 也要有常駐結論**，但走的是 `custom-app-dev-guide.md` §28.1 的一問閘：
+> 上表「背景排程」改成平台排程後會喚醒 runner、Realtime 那列在 Custom 線根本沒有，
+> 所以**遷入案的 Custom app 幾乎一律 `常駐＝關（預設）`**；只有原系統本來就是即時互動場景
+> （櫃檯、掃碼、來電查詢、客戶在線上等回覆）才問一次冷啟動容忍秒數。
 > 盤點時把原專案所有「開 DB 連線／下 SQL」的位置列成清單，這份清單就是改寫工作量的依據。
 > ⚠️ **DB 與 storage 不得自立成 Hosted App**（含 PostgREST 類 REST 包裝，
 > SKILL.md 規則 32）——原專案若有 docker-compose 帶 db／redis service，
