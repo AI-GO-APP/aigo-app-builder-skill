@@ -423,6 +423,8 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
 | 平台資料（Open Proxy 寫入的自建表等） | ✅ 在平台側 |
 
 - **複製（clone）不複製 `/data` 內容**，也不複製 Deploy Token 與部署歷史
+- Custom App 的 action runner 同一套語意：`open()` 寫得進 `/tmp`，但那是隨 pod 消失的 emptyDir，
+  沒有 `/data` 可開——業務資料與 app 狀態一律落表（`custom-app-dev-guide.md` §19「禁止項」）
 - 縮到零**不會**因**容器內**的排程或背景工作自動喚醒——這正是 §3.0 決策閘的第一題；
   要開 `always_on` 先過閘，不要看到這句就開（平台排程是入站請求，會喚醒，不算）
 - **遷入既有系統時**，原系統的快取／快照／排程產物先在這張表上找落點再寫 code

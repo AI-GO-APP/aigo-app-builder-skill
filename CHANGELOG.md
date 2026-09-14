@@ -4,6 +4,38 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.42.0
+
+### 「用 `.json`／sqlite 當輕量 db」補成三線硬閘：runner 不擋寫檔，但檔案隨 pod 消失
+
+skill 原本只有 Hosted 線靠「容器 FS 不持久」＋「業務資料一律落表」間接擋到，
+Custom App 線（Server-Side Action 與前端）完全沒有對應條文——規則 18／§19 SSOT 只列
+預設表／自建表／`custom_data` 三軌，沒有一句話說「runner 本機檔案、程序全域變數、
+`localStorage` 不是資料層」。AI IDE 面對小量設定、計數器、對照表最省事的直覺就是寫一個 json，
+而且開發期永遠測不出問題。
+
+實查（2026-09-13 測試租戶＋平台原始碼）：語言級沙箱已整個拆掉（`infra/runner/runner/sandbox.py`
+檔頭：白名單 import／builtins 限制／黑名單全移除，隔離只剩 pod＋NetworkPolicy），
+`open()` 寫 `/tmp`、`/var/tmp` 成功，連跑三次 count 1→2→3、sqlite rows 累加、程序內計數器同 pid 累加；
+`/app` 只是 uid 65532 寫不進。`/tmp` 是 operator 掛的 1 GiB `emptyDir`（`resources.go`），
+隨 pod 消失；已發布 runner 縮到零與 publish 換 revision 都會清空。**試跑跑在租戶共用的 dev-runner**
+（一顆 pod、同租戶所有 app 共用，實測跑兩天多沒換 pid），所以開發期檔案一直在、上線才「回到舊數字」，
+與規則 31 同一類「開發時測不出來、上線就爆」。
+
+- `SKILL.md` 規則 18 新增 ★ **不是資料層的東西**：runner 本機檔案（`.json`／sqlite／pickle）、
+  程序內全域變數、前端 `localStorage`／IndexedDB 不得承載業務資料或 app 狀態，一律落三軌之一
+- `custom-app-dev-guide.md` §19「禁止項」新增三列對照表（東西｜為什麼不行｜改放哪）＋「為什麼開發期測不出來」；
+  §28 補「縮零時 `/tmp` 與程序記憶體一起消失」；§25.1 修正過時宣稱
+- **修正過時宣稱**：`SKILL.md` Server-Side Action 段與 dev-guide §25.1 原寫 `httpx`／`requests`
+  「在沙箱 denylist 上」——實打全部 importable，擋的是 NetworkPolicy 不是沙箱。改成
+  「import 得進來、連不出去」，避免 agent 把「能 import」誤判成能連、或把 import 成功當成閘道已放行
+- `troubleshooting.md` 新增症狀列「上線後資料回到舊數字／歸零；試跑時都對」指回 §19
+- `migration-workflow.md` §2.0 狀態層落點補「本機 `.json`／sqlite 不是落點」；
+  `hosted-apps.md` §7 補一句 Custom App runner 同一套語意（沒有 `/data` 可開）
+
+未實打：已發布 per-app runner 縮零後 `/tmp` 消失是從 emptyDir 語意推出，沒有發布探針去等縮零；
+文件已如實標註。
+
 ## 1.41.0
 
 ### Custom App 線補上 `always_on` 決策閘：常駐的引導與選擇不再只有 Hosted 有

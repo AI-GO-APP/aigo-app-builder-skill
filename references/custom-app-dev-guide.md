@@ -666,6 +666,21 @@ SKILL.md 規則 18、§22 遷移映射、`migration-workflow.md` §2.4 的分流
   存量維護、新需求禁用（`CONTEXT.md`、`data-center.md` §8）
 - **app 內自建使用者／角色表**——身分與權限沿用平台（SKILL.md 規則 23）；
   遷入專案的 users 表走 `project_deconstruction_template.md` 的認證映射
+- ★ **不是資料層的東西**（強制；「寫得進去」不等於「可以放」）：
+
+  | 東西 | 為什麼不行 | 改放哪 |
+  |---|---|---|
+  | **runner 本機檔案**：action 用 `open()` 寫 `.json`／sqlite／pickle 當輕量 db | runner **不擋寫檔**——語言級沙箱已整個拆掉（`infra/runner/runner/sandbox.py` 檔頭：白名單 import／builtins 限制／黑名單全移除，隔離只剩 pod＋NetworkPolicy）；`/tmp` 是 1 GiB `emptyDir`、`/var/tmp` 也可寫，只有 `/app` 因 uid 65532 寫不進。但 emptyDir 隨 pod 消失：已發布 runner 預設縮到零（§28）、每次 publish 換新 revision，檔案都清空 | 自建表（決策樹）。一次請求內的暫存檔可以用 `/tmp`，請求結束就當它不存在 |
+  | **程序內全域變數／module-level cache** 當狀態 | 同一顆 pod 連續呼叫看得到（實測 pid 不變、計數累加），縮零與重部署就歸零 | 自建表；跨請求快取一律不做、每次重算（§23.9 的 Loader 只限一個請求範圍） |
+  | **前端 `localStorage`／IndexedDB** 存業務資料 | 只在該瀏覽器、該裝置；換機或清站台資料就沒了，其他人也看不到 | 自建表／`custom_data`；localStorage 只放 UI 偏好（§9 首訪提示那種 per-slug 記憶） |
+
+  **為什麼開發期測不出來**：`use_dev=true` 的試跑跑在**租戶共用的 dev-runner**（一顆 pod、
+  同租戶所有 app 共用；實測連續跑兩天多沒換過 pid），檔案會一直在——A app 寫的 B app 還讀得到。
+  上線後走 per-app runner 才開始消失，症狀是「打開是舊數字」「資料隔一陣子回到初始值」
+  「count 從頭數」，與規則 31 同一類「開發時測不出來、上線就爆」。
+  （2026-09-13 測試租戶實打：探針 action `open()` 寫 `/tmp` 連跑三次 count 1→2→3、
+  sqlite rows 累加到 3、`httpx`／`requests`／`subprocess` 全部 importable；已發布 runner
+  縮零後 `/tmp` 消失這一點是從 operator `resources.go` 的 emptyDir 掛載推出，未實打）
 
 ### 兩軌的關鍵差異
 
@@ -1323,7 +1338,9 @@ def execute(ctx):
 
 - **不要直接 `import httpx / requests / urllib.request`**：runner pod 是
   **default-deny egress**（出口網路只放行平台閘道），raw 連線**必定 timeout**
-  （實測約 20 秒後才失敗，還會把 action 拖到逾時）；這些套件也在沙箱 denylist 上。
+  （實測約 20 秒後才失敗，還會把 action 拖到逾時）。這些套件 **import 得進來**——
+  語言級沙箱已拆（`sandbox.py` 檔頭；2026-09-13 實打 `httpx`／`requests`／`urllib.request`／
+  `subprocess` 全部 importable），擋的是 NetworkPolicy，別把「能 import」誤判成能連。
 - **閘道只做域名驗證，不碰憑證**（平台 ADR 0010，2026-07-29 起）：閘道**不代管、
   不注入、也不剝除**任何認證標頭——呼叫端 headers（含 `Authorization`）**原樣轉送**，
   只擋 hop-by-hop（`Host`、`Content-Length`、`proxy-*`）。API 金鑰是 **app 自己的
@@ -1590,6 +1607,8 @@ PATCH /api/v1/builder/apps/{app_id}/runtime-settings   （builder.publish）
   回 `locked_reason: "messaging_trigger"`，UI 鎖定不可切——trigger 要常駐收訊息
 - `apply_state` 是 k8s 重套結果，設定已落 DB；`failed` 不代表沒存，稍後 publish 會再套
 - 草稿（draft runner）**固定冷啟動**，本設定只作用於已發布 runner
+- **縮到零時 pod 的 `/tmp`（emptyDir）與程序記憶體一起消失**——action 寫在本機的 `.json`／sqlite
+  不是資料層，常駐也擋不住 publish 換 revision；業務資料與 app 狀態一律落表（§19「禁止項」）
 - **怎麼讀回現況**（2026-09-11 測試租戶實查 prod openapi＋實打）：Builder 線**只有 `PATCH`，沒有
   `GET /runtime-settings`**（該路徑只存在於 Hosted 線）；`GET /builder/apps/{id}` 明細（`CustomAppResponse`）
   **也不含** `always_on`。唯一的讀回點是**列表** `GET /api/v1/builder/apps`——`CustomAppListItem`

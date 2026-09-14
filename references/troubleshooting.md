@@ -65,6 +65,7 @@
 | **匯入 job 停在 `ready` 一分多鐘** | worker 是 scale-to-zero，冷啟動 40 秒～1.5 分鐘是正常；超過 3 分鐘才 `POST /{job}/execute` 重派 → `data-operations.md` §5 |
 | **外部人員（無員工列的帳號）在 app 內全部 403 `policy_denied`** | 租戶資料存取規則的 `restrict` 用到 `$user.employee_id`／`department_id`／`manager_id`，對非員工帳號解不出→整列 deny。app 端無解；請管理員對外部角色改用 `$user.id`／`$user.role_ids` 或設 app 級規則放行 → `custom-app-dev-guide.md` §27、`member-admin.md` §1 |
 | **一般使用者用 internal app 時資料載不出來／操作沒反應，network 見 `/data-center/...` 403** | **builder.access 破口**：前端直呼了自建表 SDK（`queryTable` 等），以登入者身分過 `builder.access` 閘，無開發權限的員工必 403。修法**只有一條**：包成 Server Action（`ctx.db.*`）＋前端 `runAction`，並在 action 內補授權分流；**不要**發 `builder.access` 給全員、也**不能**改成 external（`access_mode` 不可改）。開發帳號測不出此問題（必有 `builder.access`）→ `data-center.md` §7.5、SKILL.md 規則 31 |
+| **上線後資料「回到舊數字」／隔一陣子歸零；試跑時明明都對** | action 把狀態寫在 runner 本機檔（`open()` 寫 `.json`／sqlite）或程序全域變數：runner **不擋寫檔**，但 `/tmp` 是隨 pod 消失的 emptyDir，已發布 runner 縮到零或 publish 換 revision 就清空；試跑跑在**租戶共用 dev-runner**，檔案一直在所以測不出來。不是平台丟資料——改落自建表／`custom_data` → `custom-app-dev-guide.md` §19「禁止項」 |
 | **呼叫 action 回 403** | 依序查：① **有 publish 嗎**——sync 與 compile 都不會讓 action 上線，觸發看的是**發布快照**（最常見成因）② action 在 `actions/manifest.json` 裡嗎、`is_enabled` 是不是 false、名字與 `runAction()` 傳的字串是否完全一致 ③ `use_dev=true`（開發預覽）才要求 `builder.access`——**已發布 action 只需登入＋app 可見度**；一般使用者連已發布 action 都 403 時查 app 的存取角色設定，不是叫他要開發權限（403 是權限，401 才是 token 過期）④ 403 是否其實來自 action **內部**——看執行紀錄的 `error`，不要只看外層狀態碼 |
 | Compile 產物驗證失敗 | 檢查 main.tsx 入口和 App.css import |
 | CRUD 驗證失敗 | 確認自建表已建立且欄位實體名正確 |

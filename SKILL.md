@@ -558,6 +558,14 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 執行期網域�
     完整決策樹（表級 → 欄位級，直接開發與遷入同一棵）見
     `references/custom-app-dev-guide.md` **§19（SSOT）**——與本表出入時以 §19 為準。
 
+    - ★ **不是資料層的東西（強制）**：runner 本機檔案（action 用 `open()` 寫 `.json`／sqlite／
+      pickle 當輕量 db）、程序內全域變數、前端 `localStorage`／IndexedDB
+      **都不能承載業務資料或 app 狀態**，一律落上表的三軌之一。
+      runner **不擋** `open()`——語言級沙箱已整個拆掉，`/tmp` 可寫、連續呼叫讀得回前一次的檔
+      （2026-09-13 測試租戶實打）——但檔案只活在 pod 的 `emptyDir`：已發布 runner 縮到零即清空，
+      每次 publish 換新 revision 也清空。**試跑跑在租戶共用的 dev-runner，開發期永遠測不出來**，
+      上線後才「打開是舊數字」。要「不能消失」＝自建表；要「跨請求快取」＝不做、每次重算。
+      機制、實測與症狀對照見 `references/custom-app-dev-guide.md` §19「禁止項」。
     - **自建表不是「最後手段」，也不是遷入的預設答案**——它是租戶級的真實 Postgres 表（200 張配額，付費檔），
       該用就用；但遷入的表語意落在 CRM、專案、銷售採購、HR、會計時**預設引用預設表**，
       只有平台真的沒有對應實體才自建。每張自建表都要附「已對照 <預設表>／不採用理由」
@@ -790,7 +798,8 @@ def execute(ctx):
 
 **呼叫外部 API：一律走 `ctx.http.call(<egress-slug>, <path>)` 閘道**，
 **不要**直接 `import httpx / requests / urllib.request`——runner pod 是
-default-deny egress，raw 連線出不去（實測 20 秒 timeout），且這些套件在沙箱 denylist 上。
+default-deny egress，raw 連線出不去（實測 20 秒 timeout）。這些套件 **import 得進來**
+（語言級沙箱已拆，2026-09-13 實打全部 importable），擋的是網路層，別把「能 import」當成能用。
 
 ```python
 def execute(ctx):
