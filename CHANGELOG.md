@@ -4,6 +4,62 @@
 **每次改動 Skill 內容（SKILL.md / CONTEXT.md / references / scripts）都要同步更新 `VERSION`**，
 否則使用者端的更新檢查（`scripts/check_update.py`）不會提示。
 
+## 1.43.0
+
+### issue #80：app 的身分/ACL 來源、薪資家族、available-tables 混表、延伸欄位與 proxy 面（7 項逐條實測）
+
+一個 82 張自建表的遷入案盤點錯了三處，逐條回平台原始碼核對＋2026-09-16 測試租戶實打之後，
+7 項裡 5 項成立、1 項現象成立但提的規則不可用、1 項的一半是誤判。
+
+**🔴 最貴的那一條，結論與回報相反**：回報主張「app 該打 `GET /api/v1/members` 拿 email／角色，
+把 ACL 交給平台成員面」。實打確實回 200，但**那不是能力**——
+
+- **路由軸**：成員面不在 app-scoped token 的 route catalog（`core/app_scope_routes.py` 的
+  `BROWSER_ROUTES`），被判 `route_not_registered`；該判定只有 `APP_SCOPED_TOKEN_MODE=enforce`
+  才轉 403，`audit` 記完 log 放行，而 prod／UAT 現役值都是 `audit`。實打證據：一個 `scopes`
+  只有 `["db.read"]` 的 token，打 `/members`、`/members/roles`、`/invitations`、`/auth/me` 全 200。
+- **權限軸**：`GET /api/v1/members` 掛 `require_permission("hr.member_manage")`（`api/members.py`）。
+  開發者帳號多半有、**一般員工沒有** ⇒ 照這條做會得到「自己測全綠、使用者全 403」的 app。
+
+- `SKILL.md` 規則 23 新增兩條 ★：禁止把成員管理面當 app 的身分來源；「打過回 200」不是能力證明
+- `member-admin.md` 新增 **§3.6「app 的 ACL 來源」**來源對照表（前端快照／`ctx.user_permissions`／
+  `access_role_ids`／`hr_employees`），並**修正一處事實錯誤**——`GET /api/v1/members/roles`
+  是**登入即可**（`get_current_user`），原本標成 `system.roles_manage`；同時補上缺漏的
+  `GET /api/v1/members` 那一列與其 `hr.member_manage` 閘
+- `custom-app-dev-guide.md` §29 通道表新增「身分與 ACL 的來源」列，並標明 `/refs` 與平台管理面
+  不在 catalog 內、今天打得到是 audit 放行
+- `hosted-apps.md` 的 401 條目補「這只適用 Hosted，internal 是另一回事但同樣不能用」
+
+**🟠 薪資家族**：`hr_payroll_settings`（15 欄）／`hr_payroll_runs`（17 欄）／`hr_payroll_bonus_rules`
+（14 欄）**可引用**，原文一句「薪資明細與合約表不可引用（黑名單）」語感上把整族關掉。
+但回報主張的「403＝授權決策、404＝租戶不存在、可能隨版本出現」是**誤判**：
+`hr_payroll_contracts`／`hr_payroll_slips`／`hr_salary_items` 的 404 就是黑名單
+（`references.columns` 濾掉黑名單後查無此表），判準在 `utils/table_inspector.py`——
+薪資族 ∧ 可指向個別員工 ∧ 有金額欄。`default-table-lookup.md` 改寫該列並新增 403／404 對照表，
+明寫**不要把這三張排進「等平台補上」的待辦**。
+
+**🟠 `available-tables` 混著自建表**：這是刻意設計（否則引用 UI 列不出自建表）。
+回報提的辨識規則「濾掉 `_[0-9a-f]{6}$` 尾碼」**不可用**——自建表實體名由
+`generate_physical_name` 生成，唯一化尾綴是 `_2`／`_3` 不是 hex。測試租戶實測 375 張裡
+**139 張是自建表，該規則命中 0 張**。改成兩份精確相減：
+`available-tables` − `GET /data-center/tables` ＝ 預設表。
+
+**🟡 延伸欄位建欄**（`data-center.md` §10）：補 body 形狀（必填只有 `display_name`＋`field_type`）、
+`field_key` 被忽略、實體名由 `display_name` 生成且建後不可改。回報留的開放問題
+「第二個中文名會不會撞到同一個 `ext`」——**不會**，實打是 `ext`／`ext_2`／英文名原樣，
+與自建表的 `tbl_2`／`col_7` 同一支函式。新增硬規定：延伸欄位 `display_name` 一律用英文。
+
+**🟢 刪欄**：檔頭「刪欄仍未實測」已拆——走完 impact → DELETE `?confirm={physical_name}` → 表回 `[]`，
+並記下不帶 confirm 的 400 `confirm_required`。
+
+**🟡 預設表 proxy 面**（§29＋`platform-behaviors.md` §1.5）：寫入 body 必須包 `data`
+（裸物件 400「無有效欄位資料」，與 records 面的靜默忽略不同）；路徑表原本列 `…/{row_id}`，
+但**單列 GET 是 405**，`{row_id}` 只支援 PATCH／DELETE。
+
+**🟡 走錯面的錯誤訊息**：預設表打 `/data-center/tables/{key}/records` → 404
+`table_not_found`「自建表不存在：<表>」。訊息讀起來像「這張表沒有」，其實是走錯面。
+全 references 原本零記載，已補進 §29 與 §1.5。
+
 ## 1.42.0
 
 ### 「用 `.json`／sqlite 當輕量 db」補成三線硬閘：runner 不擋寫檔，但檔案隨 pod 消失

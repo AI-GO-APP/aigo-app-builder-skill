@@ -398,6 +398,10 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
   （API Key 只在 `/api/v1/open/*` 有效）；open proxy 打 `users`／`roles`／`user_role_rel`／`members`
   一律 **403**「App 未被授權存取表」（這四張是平台身分表，引用面根本列不出來）。
   對照組 `/api/v1/open/data-center/tables` 200，證明憑證本身有效。**已回報平台（2026-09-09）**，不必重複開單
+  - ⚠️ **這一條只適用 Hosted**（app 身分）。internal Custom App 的 app-scoped token 是**使用者**身分，
+    打 `/api/v1/members` 今天會回 200——但那是 `APP_SCOPED_TOKEN_MODE=audit` 的放行，
+    **不是可以用的能力**，而且一般員工沒有 `hr.member_manage` 會 403。
+    兩條線的 ACL 都不從成員面拿，見 `member-admin.md` §3.6
 - ⇒ **角色分流只能在門口用 `access_role_ids`**（`member-admin.md` §6）。要在畫面內依角色開關功能，
   三選一：① 該部分做成 Custom internal app（runtime 有 `__USER_ROLES__`／`__USER_PERMISSIONS__`）；
   ② Custom App 當前端 ＋ Hosted 設 `public` 當後端、由 app 自驗簽章（§5.1）；
