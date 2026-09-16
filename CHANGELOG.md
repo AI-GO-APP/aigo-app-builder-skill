@@ -1,3 +1,35 @@
+## 1.44.0
+
+### SKILL.md 瘦身：1092 → 471 行，主檔只留路由與硬閘門
+
+官方 Skill 規範建議主檔 **500 行以內**（Anthropic skill authoring best practices），本檔原本 1092 行、
+約 3 萬 token——**一觸發就先吃掉三萬**，而且規則埋在細節裡。issue #76「已存在的規則沒被執行」
+最可能的成因之一就是這個：主檔長到 agent 讀不完就開始動手。本版只搬家與濃縮，**沒有改任何規則語義**。
+
+搬出去（原文完整保留，主檔留路由與閘門）：
+
+| 原本在主檔 | 行數 | 搬到 | 主檔留下 |
+|---|---|---|---|
+| Phase 3 核心規則 18–32 | 218 | **`references/dev-rules.md`**（新） | 16 列速查表（編號＋標題＋★／⚠️ 標記） |
+| Phase 1.5 §1.0 四問＋計畫九項＋閘門 | 199 | **`references/planning.md`**（新） | 四問表、計畫九項表、閘門五條 |
+| Phase 1 租戶網址／三層模型／config／設定流程／憑證 | 130 | **`references/environment.md`**（新） | 三條硬規則＋最短設定路徑 |
+| Phase 0 九步細節 | 71 | **`references/review-workflow.md`**（新） | 九步概要＋三道不可跳過的盤點 |
+
+濃縮（內容原本就與 reference 重複，主檔不再重述）：
+
+- 「問題回報」58 → 17 行：五步與三個硬條件（行為不寫解法／`--ruled-out`／`--user-confirmed`）
+  留在主檔，指令與規範回 `issue-reporting.md`
+- 「Server-Side Action 撰寫」72 → 32 行：`ctx` 清單回 dev-guide §7，主檔只留四條硬規則與兩道逾時的分辨
+- 「錯誤處理」38 → 16 行：狀態碼語義與「指向 Egress 就停止改 code」留下，細節回 `troubleshooting.md`
+
+其他：
+
+- **13 份 reference 補上目錄**（官方建議超過 100 行要有，之前一份都沒有）——
+  Claude 預覽檔案時會只讀開頭，沒目錄就看不到全貌
+- 規則 18 以後的交叉引用從「SKILL.md 規則 N」改指 `dev-rules.md`（10 個檔案）
+
+未做（下一步）：reference 之間仍有互相引用（官方建議只保持一層）、eval 仍未建立。
+
 # Changelog
 
 版本號採 [Semantic Versioning](https://semver.org/lang/zh-TW/)。

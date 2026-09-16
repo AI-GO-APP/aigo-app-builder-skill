@@ -56,7 +56,7 @@
 > **兩個實體名欄不得為空、一律英文**（表 `biz_<英文複數>`、欄位 snake_case）。
 > 實體名建立後永不可改，且系統是從顯示名生成的——純中文顯示名會生出 `tbl_2`、`col_7`。
 > 建表時用**兩步命名法**（先用英文實體名當 display_name 建、再 PATCH 改回中文）：
-> SKILL.md 規則 18.5、`references/data-center.md` §1。
+> `dev-rules.md` 規則 18.5、`references/data-center.md` §1。
 > 外部欄位名是中文時，這張對照表就是「中文欄位名 → AI GO 英文實體名」的 SSOT，
 > 匯入程式的欄位映射一律回查這裡。
 
