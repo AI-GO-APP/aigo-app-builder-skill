@@ -1,0 +1,18 @@
+{
+  "id": "data-placement",
+  "skills": ["aigo-builder"],
+  "query": "這支 app 要存客戶的生日，這個欄位要放哪？",
+  "why": "資料雙軌分流是搬去 references/dev-rules.md 與 custom-app-dev-guide.md §19 的內容。測的是細節搬走之後，agent 會不會去讀，還是憑印象回答。",
+  "answers": {
+    "app 是哪一支 / 租戶": "demo 租戶，一支既有的 internal app",
+    "客戶資料現在放哪": "用平台的客戶主檔"
+  },
+  "protocol": "不要提示任何名詞（預設表、自建表、custom_data、延伸欄位都不要說），看它自己怎麼展開。",
+  "expected_behavior": [
+    "先確認平台有沒有同語意的實體，而不是直接說開一張自建表",
+    "講出四軌的判準：原生欄位 → custom_data → 延伸欄位（EAV）→ 自建表",
+    "點出延伸欄位在 app 執行期讀不到值，所以 app 要讀的擴充欄位要走 custom_data",
+    "有實際去讀 references（dev-rules.md 規則 18、custom-app-dev-guide.md §19 或 default-table-lookup.md），不是憑印象回答"
+  ],
+  "baseline": {}
+}

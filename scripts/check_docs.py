@@ -6,6 +6,10 @@ check_docs.py — Skill 文件結構自檢（零相依、離線可跑）
 2. 被引用的 references/ 與 resources/ 檔案都存在（斷鏈會讓 agent 讀不到規則）
 3. 超過 TOC_THRESHOLD 行的 reference 都有目錄
    （Claude 預覽長檔時可能只讀開頭，沒目錄就看不到全貌）
+3.5 每份 reference 都能從 SKILL.md 直接找到
+   （官方建議引用只保持一層：只能靠別的 reference 才發現的檔案，Claude 常只讀開頭）
+3.6 文件裡的 `xxx.md §N` 指向真的存在
+   （章節重編號時最容易斷，斷了 agent 會讀到錯的地方或放棄）
 4. 搬移不掉東西：與 git 基準版（預設 main）比，SKILL.md 移除的實質行必須能在
    新版主檔或任何 reference 裡找到；找不到的列出來讓人逐條判斷
 
@@ -75,6 +79,55 @@ def check_toc() -> list[str]:
     return errs
 
 
+ALIAS = {"dev-guide": "custom-app-dev-guide.md", "dev guide": "custom-app-dev-guide.md"}
+SECTION_REF = re.compile(r"`?([a-z-]+(?:\.md)?)`?\s*(?:的\s*)?§\s*(\d+(?:\.\d+)*)")
+
+
+def _docs() -> dict[str, str]:
+    docs = {p.name: p.read_text(encoding="utf-8") for p in (ROOT / "references").glob("*.md")}
+    for extra in ("SKILL.md", "CONTEXT.md"):
+        docs[extra] = (ROOT / extra).read_text(encoding="utf-8")
+    return docs
+
+
+def check_orphan_refs() -> list[str]:
+    """每份 reference 都要從 SKILL.md 直接指到——一層深。"""
+    skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+    errs = []
+    for path in sorted((ROOT / "references").glob("*.md")):
+        name = path.name
+        if not re.search(rf"(references/)?{re.escape(name)}|`{re.escape(name[:-3])}`", skill):
+            errs.append(f"{name} 在 SKILL.md 裡找不到——只能靠別的 reference 發現，加進參考文件表")
+    if not errs:
+        print("✅ 每份 reference 都能從 SKILL.md 直接找到")
+    return errs
+
+
+def check_section_refs() -> list[str]:
+    """`xxx.md §N` 指到的章節必須存在。"""
+    docs = _docs()
+    sections = {}
+    for name, text in docs.items():
+        found = set()
+        for m in re.finditer(r"^#{2,4}\s*§?(\d+(?:\.\d+)*)", text, re.M):
+            found.add(m.group(1))
+        sections[name] = found
+
+    errs, total = [], 0
+    for src, text in docs.items():
+        for m in SECTION_REF.finditer(text):
+            raw, num = m.group(1), m.group(2)
+            target = ALIAS.get(raw, raw if raw.endswith(".md") else raw + ".md")
+            if target not in docs:
+                continue  # 不是文件名（例如 `§25` 前面接的是別的詞）
+            total += 1
+            if num not in sections[target]:
+                errs.append(f"{src} 指向 {target} §{num}，但該章節不存在")
+    if not errs:
+        print(f"✅ {total} 個 `檔名 §章節` 指向都存在")
+    return errs
+
+
 def check_moved_content(base: str) -> list[str]:
     try:
         old = subprocess.run(
@@ -109,7 +162,7 @@ def main() -> int:
     ap.add_argument("--skip-moved", action="store_true", help="不跑搬移檢查")
     args = ap.parse_args()
 
-    errs = check_skill_length() + check_links() + check_toc()
+    errs = check_skill_length() + check_links() + check_toc() + check_orphan_refs() + check_section_refs()
     if not args.skip_moved:
         errs += check_moved_content(args.base)
 
