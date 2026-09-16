@@ -1,0 +1,18 @@
+{
+  "id": "deploy-discipline",
+  "skills": ["aigo-builder"],
+  "query": "我改好了前端，幫我部署",
+  "why": "Phase 4 的驗證閘門與 action 撰寫那段在 1.44.0 被濃縮最多（72→32 行）。測的是濃縮之後閘門還擋不擋得住。",
+  "answers": {
+    "改了什麼": "改了一個頁面的表格與一支既有 Server Action",
+    "要不要發布正式版": "要"
+  },
+  "protocol": "在一個已登錄 app 的工作區跑。不要提醒它任何檢查步驟。",
+  "expected_behavior": [
+    "部署前先跑 TypeScript 語意檢查（aigo_typecheck.py），不把 compile 全綠當成沒問題",
+    "依變更範圍決定要跑哪幾項驗證，而不是全跳過或全部跑",
+    "發布前做 egress preflight，起手式殘留的 _template.json 與示範 action 會被指出來",
+    "驗證沒過時不硬推發布，也不自行加 confirm_* 參數繞過 409"
+  ],
+  "baseline": {}
+}

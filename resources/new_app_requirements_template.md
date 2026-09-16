@@ -128,7 +128,7 @@ Custom App 的 action 是 request/response，沒有 A 的前兩題（平台排�
 - **兩個實體名欄不得為空、一律英文**：表 `biz_<英文複數>`、欄位 snake_case。
   實體名由平台從顯示名生成且**建立後永不可改**，中文顯示名會生出 `tbl_2`、`col_7`
 - 建表走**兩步命名法**：先用英文實體名當 `display_name` 建，再 `PATCH` 把顯示名改成中文
-  ——SKILL.md 規則 18.5、`references/data-center.md` §1
+  ——`dev-rules.md` 規則 18.5、`references/data-center.md` §1
 
 ## app 分配表（`product-line-decision.md` §7；計畫確認後照表建 app）
 

@@ -2,6 +2,40 @@
 
 > 完整文件：https://www.ai-go.app/zh-TW/docs/custom-app-dev
 
+## 目錄
+
+- 1. 什麼是 Custom App
+- 2. 認證與連線
+- 3. VFS 標準檔案樹
+- 4. 程式碼注入 API
+- 5. 編譯 API
+- 6. 內建 SDK
+- 7. Server-Side Actions
+- 8. 發布
+- 9. Shadow DOM CSS 規範
+- 10. VFS 注入規範
+- 11. 自建表 API
+- 12. Storage API
+- 13. Runtime 全域變數
+- 14. External Auth API
+- 15. 匿名存取 API（/pub/* 端點）
+- 16. 套件管理
+- 17. 常見問題速查
+- 18. 核心策略：app_domain 標籤
+- 19. 資料承載體總決策（★ SSOT——所有分流指引以本節為準）
+- 20. Data Reference 探索 API
+- 21. 架構設計理念
+- 22. 外部 Schema 映射指引
+- 23. 資料遷移方法
+- 24. 簽核工作流攔截（Approval）
+- 25. 對外 API 呼叫與 Egress 閘道
+- 26. 建立與刪除 App（API，不必走 UI）
+- 27. 租戶資料存取規則（Auth gate）：平台側人軸執法（2026-09 起）
+- 28. 執行模式：冷啟動／常駐（`always_on`，租戶自選；v1.13.0 起，prod openapi 已實查）
+- 29. 存取通道端點總表：internal／external／匿名／Hosted（★ 四條通道，四種憑證）
+
+---
+
 ## 1. 什麼是 Custom App
 
 - VFS（Virtual File System）：以 JSON `{"路徑": "內容"}` 儲存原始碼
@@ -582,7 +616,7 @@ const myRecords = allRecords.filter(
 
 平台可用的資料承載體有**四種**＋一種已退場：**預設表原生欄位／預設表延伸欄位（EAV）／
 預設表 `custom_data` JSONB／自建表（重用加欄或新建）**；CustomObject 已退場僅存量維護。
-SKILL.md 規則 18、§22 遷移映射、`migration-workflow.md` §2.4 的分流都是本節這棵樹的投影
+`dev-rules.md` 規則 18、§22 遷移映射、`migration-workflow.md` §2.4 的分流都是本節這棵樹的投影
 ——彼此如有出入，以本節為準。
 
 **直接開發與現有應用遷入用同一棵樹**，只是輸入不同：直接開發的輸入是需求分析的
@@ -614,7 +648,7 @@ SKILL.md 規則 18、§22 遷移映射、`migration-workflow.md` §2.4 的分流
         ├─ 租戶級正式欄位（要型別驗證、資料中心 UI 可見可管理）
         │   → 延伸欄位（EAV，data-center.md §10；ctx.db／db.ts 不回傳其值）
         └─ app 私有標記（app_domain 恆在此）、暫時性、鬆散擴充
-            → custom_data JSONB（標記規範見 SKILL.md 規則 19）
+            → custom_data JSONB（標記規範見 `dev-rules.md` 規則 19）
 ```
 
 ### 決策流程（動手前的盤點順序）
@@ -664,7 +698,7 @@ SKILL.md 規則 18、§22 遷移映射、`migration-workflow.md` §2.4 的分流
 
 - **CustomObject**（`data.json`／`listRecords`／`ctx.db.query_object`）——已退場，
   存量維護、新需求禁用（`CONTEXT.md`、`data-center.md` §8）
-- **app 內自建使用者／角色表**——身分與權限沿用平台（SKILL.md 規則 23）；
+- **app 內自建使用者／角色表**——身分與權限沿用平台（`dev-rules.md` 規則 23）；
   遷入專案的 users 表走 `project_deconstruction_template.md` 的認證映射
 - ★ **不是資料層的東西**（強制；「寫得進去」不等於「可以放」）：
 
@@ -1097,7 +1131,7 @@ def execute(ctx):
 |------|---------|
 | 無明確型別（全部是字串） | 遷入時在 Server Action 中做型別轉換（數字、日期） |
 | 無外鍵 | 需人工識別哪些欄位是關聯欄位（如「客戶名稱」→ 對應到 customers 表） |
-| 欄位名稱為中文 | 映射時建立「中文欄位名 → AI GO 英文**實體名**」對照表。★ 英文實體名不是自動來的：建表時把英文名填進 `display_name` 才會生成（兩步命名法，SKILL.md 規則 18.5）；直接拿中文欄位名建會得到 `col_2`、`col_3` |
+| 欄位名稱為中文 | 映射時建立「中文欄位名 → AI GO 英文**實體名**」對照表。★ 英文實體名不是自動來的：建表時把英文名填進 `display_name` 才會生成（兩步命名法，`dev-rules.md` 規則 18.5）；直接拿中文欄位名建會得到 `col_2`、`col_3` |
 | 空行 / 重複行 | 遷入前先清洗：去除空行、依關鍵欄位去重 |
 | 格式不一致（日期混用） | 在 Server Action 中統一格式化 |
 
@@ -1161,7 +1195,7 @@ def execute(ctx):
 | INT / BIGINT / FLOAT / NUMERIC | `number` | 金額等高精度欄位遷移後**必做抽驗比對**；不容許任何精度損失時改 `text` 保存原字串 |
 | BOOLEAN / TINYINT(1) | `boolean` | |
 | DATE | `date` | |
-| TIMESTAMP / DATETIME | `datetime` | 時區語意先確認（平台側行為見 SKILL.md 規則 28） |
+| TIMESTAMP / DATETIME | `datetime` | 時區語意先確認（平台側行為見 `dev-rules.md` 規則 28） |
 | ENUM / CHECK IN (...) | `select` | 正好對應——必須提供選項集，值受 CHECK 約束 |
 | JSON / JSONB | `json` | |
 | ARRAY | `json` | 存成 JSON 陣列 |

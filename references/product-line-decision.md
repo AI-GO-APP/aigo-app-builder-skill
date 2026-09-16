@@ -8,6 +8,18 @@
 
 ---
 
+## 目錄
+
+- 1. 預設立場：新建 App 以 Custom App 為主
+- 2. Custom App 能力邊界核對表（§1.0 問題四用）
+- 3. 兩問定位
+- 4. 四象限落點
+- 5. 混合方案的分工原則
+- 6. 不可逆與硬前提（判斷前必讀）
+- 7. 產出：app 分配表
+
+---
+
 ## 1. 預設立場：新建 App 以 Custom App 為主
 
 實務上客戶要新建的 app **絕大多數是一個 Custom App**——在平台內用、吃租戶資料、
@@ -91,7 +103,7 @@ Custom 不夠就**搭** Hosted，不是整個換線：
 - 公開站、常駐進程／WebSocket、自選框架 → **Hosted App**
 - 兩邊共用的資料一律落**平台側**（預設表引用＋自建表），Hosted App 走 Open Proxy 讀寫
   （`hosted-apps.md` §5、§7.1）；**不因共用而硬併成一個 app**，
-  也**不得**把 DB 立成 Hosted App 給對方打（SKILL.md 規則 32）
+  也**不得**把 DB 立成 Hosted App 給對方打（`dev-rules.md` 規則 32）
 - 每個 app 各自過問題一：官網 `public` ＋ 後台 `internal` 是最常見的組合
 - **Hosted App 當 Custom App 的後端**（常駐進程、自選框架接在 Custom 介面後面）：
   Hosted 要設 **`visibility=public` ＋ app 自驗簽章**——Custom 的 Server Action 用 `ctx.http.call`
@@ -102,7 +114,7 @@ Custom 不夠就**搭** Hosted，不是整個換線：
 ## 6. 不可逆與硬前提（判斷前必讀）
 
 - Custom App 的 `access_mode` 由模板決定、**建立後不可改**（dev-guide §26.1）——
-  所以 **app 要等計畫確認後才建**（SKILL.md Phase 1 步驟 3 照 app 分配表建）
+  所以 **app 要等計畫確認後才建**（SKILL.md Phase 1.5 計畫閘門第 5 條：照 app 分配表建）
 - **`internal` 不能開匿名存取**（回 400，`CONTEXT.md`）——「內部工具但想給訪客看一頁」
   要在此刻攤開：那一頁拆成 Hosted public 靜態頁，或放棄匿名；拆不成才落到 §4 的例外列
 - **external 開了匿名還要平台核可**（dev-guide §15.1）：核可前匿名訪客拿 404，

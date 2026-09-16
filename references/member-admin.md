@@ -10,6 +10,21 @@
 
 ---
 
+## 目錄
+
+- 0. 立場（★ 判任何授權問題前先讀）
+- 1. 授權架構選型（計畫第 1.7 項）
+- 2. 端點與權限對照
+- 3. app 角色白名單 `access_role_ids`（兩條產品線）
+- 4. 邀請：批次建連結的固定流程
+- 5. 角色 CRUD 流程
+- 6. Hosted internal app 收到的身分：沒有
+- 7. 既有系統的使用者搬遷
+- 8. 回應怎麼讀（2026-09-08 測試租戶擁有者帳號實打；★ 標記＝實測字串）
+- 9. 這條線不做的事
+
+---
+
 ## 0. 立場（★ 判任何授權問題前先讀）
 
 - **AI GO 的帳號體系是內外人員共用的**：員工、外部經銷商、合作夥伴、客戶……凡是要**登入**的人
@@ -18,7 +33,7 @@
 - 因此**「誰在登入」不再決定 app 模式**：只要有登入者，Custom App 一律 `starter-internal`、
   Hosted App 一律 `visibility=internal`。「員工後台＋客戶前台」不是拆成兩種模式的理由——
   同一支 internal app 用角色分流，或拆成兩支 internal app 各掛不同 `access_role_ids`。
-- **不在 app 內另建使用者表、角色表、登入流程**（SKILL.md 規則 23）。遷入案的 `users` 表
+- **不在 app 內另建使用者表、角色表、登入流程**（`dev-rules.md` 規則 23）。遷入案的 `users` 表
   也不例外（§7）。
 - 「角色群組」在平台裡**沒有獨立物件**——`Role` 只有 `category` 分類欄（如 `System`、`Sales`）。
   你要的「外部經銷商群組」就是一個角色，`category` 填 `External` 之類方便管理員辨識。
@@ -55,9 +70,9 @@
 - **Hosted internal app 內做不到依角色分功能**：proxy **不給容器任何身分**（§6，2026-09-09 實打），
   連使用者 id 都沒有。角色分流只能在門口（`access_role_ids`）做；
   要在畫面內依角色開關功能 → 該部分做成 Custom internal app（`__USER_PERMISSIONS__` 快照）。
-- **判斷授權用 permission 標籤，不用角色名**（角色可被改名，SKILL.md 規則 23）。
+- **判斷授權用 permission 標籤，不用角色名**（角色可被改名，`dev-rules.md` 規則 23）。
 - **經銷商角色的 permissions 從空集合起步**：Custom internal app 的資料存取走 Server Action
-  （app 憑證，SKILL.md 規則 31），成員本身不需要模組權限就能用 app；只有 app 前端要直呼
+  （app 憑證，`dev-rules.md` 規則 31），成員本身不需要模組權限就能用 app；只有 app 前端要直呼
   模組 REST 或平台功能頁時才逐項加。權限給多了，這個人在平台主站也拿得到——
   `system.*`、`hr.*`、`accounting.*` 這類不要給外部人員。
 - **邀請一人一連結、48 小時過期、受邀者要驗證信箱**（§4 邊界）——批次邀請經銷商時要規劃
@@ -108,7 +123,7 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
 | 不在名單的人看到 | **404「App 不存在」**（fail-closed，與查無此 app 同形，不用 403 洩漏存在性）；資料面、action、compile、cron 端點同一守門 | proxy 依 `is_hosted_app_visible_with` 判定，不可見同樣不放行 |
 
 - `access_role_ids` 是**可見度**，不是資料授權：進得了 app 的人能打到 app 所有 action，
-  action 內仍要用 `ctx.user_permissions` 分流（SKILL.md 規則 23／31）；資料層的人軸交給
+  action 內仍要用 `ctx.user_permissions` 分流（`dev-rules.md` 規則 23／31）；資料層的人軸交給
   Auth gate（dev-guide §27）。
 - 角色 id 從 `GET /members/roles` 取；寫入前把「角色名 → id」對照印給用戶確認。
 - 開發者自己有 `builder.access` 也**不再無條件繞過**白名單（action／compile 端點已收緊）——
@@ -125,7 +140,7 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
 | app 要什麼 | 正確來源 | 不要用 |
 |---|---|---|
 | 目前使用者的角色／權限（前端做條件顯示） | `__USER_ROLES__`／`__USER_PERMISSIONS__` 唯讀快照（`src/user.ts` SDK 反序列化；internal＋已登入才注入） | `GET /members`、`GET /auth/me` |
-| **授權強制**（真正擋得住的那一層） | Server Action 內的 `ctx.user_permissions`／`ctx.user_id`（SKILL.md 規則 23／31） | 前端任何判斷 |
+| **授權強制**（真正擋得住的那一層） | Server Action 內的 `ctx.user_permissions`／`ctx.user_id`（`dev-rules.md` 規則 23／31） | 前端任何判斷 |
 | 進得了 app 的人是誰（可見度） | `access_role_ids` 白名單（§3） | app 自建的名單表 |
 | 員工的 email／部門／到職等主檔欄位 | 預設表 `hr_employees`（引用後走 proxy 面；它在 `sensitive_ack_tables()`，授權時要明示確認） | `GET /members` |
 | 自建表要記「哪個使用者」 | `text` 欄存 user UUID ＋ `GET /api/v1/users` 解顯示名（`data-center.md` §9） | 自建 user／role 表 |
@@ -134,7 +149,7 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
 
 1. **權限軸**：`GET /api/v1/members` 掛 `require_permission("hr.member_manage")`
    （`api/members.py` 的 `list_members`）。開發者自己通常有，**一般員工沒有**——
-   用擁有者帳號測會全綠，換成真正的使用者就 403。與 SKILL.md 規則 31 同一類
+   用擁有者帳號測會全綠，換成真正的使用者就 403。與 `dev-rules.md` 規則 31 同一類
    「開發時測不出來、上線就爆」。
 2. **路由軸**：成員面不在 app-scoped token 的 route catalog 裡，今天打得到純粹是
    `APP_SCOPED_TOKEN_MODE=audit` 的放行（見 §2 憑證段）。旗標切 `enforce` 就整批 403，
