@@ -69,8 +69,9 @@
 |---|---|---|
 | 建邀請（回連結） | `POST /api/v1/invitations`，body `{email, name, role_ids[], redirect_url?, send_email?}` → 回 `token`、`chat_invite_link` | `system.invitations` |
 | 列／作廢邀請 | `GET /api/v1/invitations`、`DELETE /api/v1/invitations/{token}` | `system.invitations` |
+| 列成員（含 email／roles／permissions） | `GET /api/v1/members` | `hr.member_manage`（★ 一般成員打會 403，見下方「不要拿它做 app 的 ACL」） |
 | 邀請成員（另一入口） | `POST /api/v1/members`（body 含 `role_ids`、`redirect_url`、`send_email`）→ 回 `chat_invite_link`；`POST /members/{id}/resend-invite` 重寄 | `hr.member_manage` |
-| 列角色 | `GET /api/v1/members/roles` | `system.roles_manage` |
+| 列角色 | `GET /api/v1/members/roles` | **登入即可**（掛 `get_current_user`，不是 `system.roles_manage`；核自 `api/members.py` 的 `list_roles`，2026-09-16 測試租戶實打 200） |
 | 建角色 | `POST /api/v1/members/roles`，body `{name, comment?, category?, permissions[]}` | `system.roles_manage` |
 | 改角色（含權限字串） | `PUT /api/v1/members/roles/{role_id}` | `system.roles_manage` |
 | 刪角色 | `DELETE /api/v1/members/roles/{role_id}` | `system.roles_manage` |
@@ -82,6 +83,13 @@
 `aigo_auth.get_token()` 取的就是登入者本人的平台 JWT。隨附整合 API Key 只走 `/open/*`、
 Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角色的 service account 上
 （403）、app-scoped 瀏覽器憑證的路由表不含 members／invitations／roles。
+
+★ **「路由表不含」目前不等於「打不到」——不要據此把成員面當成 app 的能力**
+（2026-09-16 測試租戶實打）。app-scoped token 打 `GET /api/v1/members`、`/members/roles`、
+`/invitations`、`/auth/me` 全部回 **200**，而該 token 當次發出的 `scopes` 只有 `["db.read"]`。
+成因是 `APP_SCOPED_TOKEN_MODE`：未登記路由確實被判 `allowed=False, reason=route_not_registered`，
+但那個判定**只有 `enforce` 才轉成 403**，`audit` 記完 log 就放行——而 prod／UAT 兩份 manifest
+現役值都是 `audit`（`infra/k8s/{prod,uat}/backend.yaml`）。詳見 §3.6。
 
 **後端硬閘**（AI 不用自己判，但要能解讀 403，§8）：
 
@@ -108,6 +116,37 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
 - 2026-09-08 測試租戶實打：兩條線設定後 GET 立即讀回一致；錯的角色 id 兩線同一句 400「角色不存在或不屬於此租戶：<id>」；
   Custom 送非 UUID 400「access_role_ids 含無效的角色 ID（需為 UUID 格式）」；Hosted `public`＋角色 422
   「public visibility 不可搭配 access_role_ids」。受限帳號側的 404 未實打（§8）。
+
+### 3.6 app 的 ACL 來源：**不要打成員 API**（★ 最貴的錯誤結論）
+
+問「app 要怎麼知道這個人是誰、有什麼角色」時，**正確答案不是 `GET /api/v1/members`**。
+那支是管理面，拿它當 app 的身分來源會做出「開發者能用、一般使用者一律 403」的 app。
+
+| app 要什麼 | 正確來源 | 不要用 |
+|---|---|---|
+| 目前使用者的角色／權限（前端做條件顯示） | `__USER_ROLES__`／`__USER_PERMISSIONS__` 唯讀快照（`src/user.ts` SDK 反序列化；internal＋已登入才注入） | `GET /members`、`GET /auth/me` |
+| **授權強制**（真正擋得住的那一層） | Server Action 內的 `ctx.user_permissions`／`ctx.user_id`（SKILL.md 規則 23／31） | 前端任何判斷 |
+| 進得了 app 的人是誰（可見度） | `access_role_ids` 白名單（§3） | app 自建的名單表 |
+| 員工的 email／部門／到職等主檔欄位 | 預設表 `hr_employees`（引用後走 proxy 面；它在 `sensitive_ack_tables()`，授權時要明示確認） | `GET /members` |
+| 自建表要記「哪個使用者」 | `text` 欄存 user UUID ＋ `GET /api/v1/users` 解顯示名（`data-center.md` §9） | 自建 user／role 表 |
+
+**兩個獨立的理由，任一個都足以讓成員 API 在 app 內不可用**（2026-09-16 測試租戶實打＋源碼核對）：
+
+1. **權限軸**：`GET /api/v1/members` 掛 `require_permission("hr.member_manage")`
+   （`api/members.py` 的 `list_members`）。開發者自己通常有，**一般員工沒有**——
+   用擁有者帳號測會全綠，換成真正的使用者就 403。與 SKILL.md 規則 31 同一類
+   「開發時測不出來、上線就爆」。
+2. **路由軸**：成員面不在 app-scoped token 的 route catalog 裡，今天打得到純粹是
+   `APP_SCOPED_TOKEN_MODE=audit` 的放行（見 §2 憑證段）。旗標切 `enforce` 就整批 403，
+   那是部署面的決定，不由 app 控制。
+
+⚠️ **實打 200 不等於那是一個能力**。判斷一支端點 app 能不能用，看的是
+「它在不在 route catalog」＋「一般使用者有沒有那個 permission」，不是自己打一次的狀態碼。
+
+★ **App 一律不自建 user／role 模型**：身分、角色、可見度全部交給平台這三樣
+（`__USER_PERMISSIONS__`／`ctx.user_permissions`／`access_role_ids`）。
+遷入既有系統時，來源的 `can_login`／`is_admin`／`is_super` 這類欄位與整張「公司成員表」
+是**要被平台取代的東西**，不是要照搬的自建表（§7）。
 
 ## 4. 邀請：批次建連結的固定流程
 

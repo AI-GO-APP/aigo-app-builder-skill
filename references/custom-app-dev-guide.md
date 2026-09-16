@@ -1662,7 +1662,7 @@ agent 不自行開、也不把「要不要常駐」丟給 owner 選。決策的�
 
 | 通道 | 誰在用 | 憑證 | 前綴 | 權限閘 |
 |---|---|---|---|---|
-| **internal** | internal Custom App 前端（登入者） | `__APP_TOKEN__`＝app-scoped JWT（代表登入者；`POST /app-scoped-token/{app_id}`／`app-runtime-session` 發） | `/api/v1/data-center`、`/proxy/{app_id}`、`/actions/apps/{app_id}`、`/storage`、`/approvals`、`/refs` | 登入者的權限（自建表記錄 CRUD 掛 `builder.access`，§7.5；預設表看 Data Reference 授權） |
+| **internal** | internal Custom App 前端（登入者） | `__APP_TOKEN__`＝app-scoped JWT（代表登入者；`POST /app-scoped-token/{app_id}`／`app-runtime-session` 發） | `/api/v1/data-center`、`/proxy/{app_id}`、`/actions/apps/{app_id}`、`/storage`、`/approvals`（★ `/refs` 與平台管理面**不在** route catalog 內，今天打得到是 audit 放行，見下） | 登入者的權限（自建表記錄 CRUD 掛 `builder.access`，§7.5；預設表看 Data Reference 授權） |
 | **external** | external／self_built Custom App 前端（app 使用者） | `__APP_TOKEN__`＝`custom-app-auth` 發的使用者 token（claim 帶 `custom_app_id`） | `/api/v1/ext/{data-center,proxy,actions,storage,data,compile,preview-token,runtime-errors}`＋`/custom-app-auth/{slug}/*` | app 脈絡，不驗使用者權限；別種憑證一律 401「無效或已過期的 Token」（實打） |
 | **匿名** | 未登入訪客（只有 external／self_built 可開） | 無 | `/api/v1/pub/{data-center,proxy,data}/{slug}/…`（**唯讀**：只有 GET／`query`） | 表要 `is_public_readable`＋app 開旗標＋**平台核可**（§15.1）；120 次/分/IP |
 | **Hosted／self_built 後端** | Hosted App 容器、第三方自建應用 | `Authorization: Bearer <API key>`（容器內 `AIGO_API_TOKEN`；`X-API-Key` 相容） | `/api/v1/open/{data-center,proxy,data}` | app 身分（沒有 user）；預設表零授權起步，600 次/分/key（`hosted-apps.md` §5） |
@@ -1676,9 +1676,36 @@ agent 不自行開、也不把「要不要常駐」丟給 owner 選。決策的�
 | 增 | `POST …/records` | `POST /ext/…/records` | — | `POST /open/…/records` |
 | 改 | `PATCH …/records/{id}` | `PATCH /ext/…/records/{id}` | — | `PATCH /open/…/records/{id}` |
 | 刪 | `DELETE …/records/{id}` | `DELETE /ext/…/records/{id}` | — | `DELETE /open/…/records/{id}` |
-| 預設表 proxy | `/proxy/{app_id}/{table}`、`…/query`、`…/{row_id}` | `/ext/proxy/{table}`（無 `app_id`） | `GET /pub/proxy/{slug}/{table}`、`POST …/query` | `/open/proxy/{table}` |
+| 預設表 proxy | `GET …/{table}`、`POST …/{table}/query`、`POST …/{table}`、`PATCH`／`DELETE …/{table}/{row_id}`（★ **單列 GET 不存在**，見下） | `/ext/proxy/{table}`（無 `app_id`） | `GET /pub/proxy/{slug}/{table}`、`POST …/query` | `/open/proxy/{table}` |
 | 跑 action | `POST /actions/apps/{app_id}/run/{name}` | `POST /ext/actions/run/{name}`（只讀已發布） | — | —（Hosted 沒有 action） |
 | 結構操作（建表／欄位） | `/data-center/tables…`（`system.admin`） | **無** | **無** | **無** |
+| **身分與 ACL 的來源** | `__USER_ROLES__`／`__USER_PERMISSIONS__` 快照＋action 的 `ctx.user_permissions`／`ctx.user_id`（★ **不是** `/members`，見 `member-admin.md` §3.6） | app 脈絡的使用者，**沒有**平台角色（快照恆為空陣列） | 無身分 | **app 身分、沒有 user**——容器內打 `/api/v1/members*`、`/auth/me` 一律 401（`hosted-apps.md` §6） |
+
+★ **預設表 proxy 面的兩條寫入契約**（2026-09-16 測試租戶實打，自己寫 client 或用本地腳本時會踩）：
+
+| 打法 | 結果 |
+|---|---|
+| `POST /proxy/{app}/{表}` body `{"data": {...}}` | **201** |
+| `POST /proxy/{app}/{表}` body 裸物件 `{"name": …}` | **400「無有效欄位資料」** |
+| `PATCH /proxy/{app}/{表}/{row_id}` body `{"data": {...}}` | 200 `{"id":…,"updated":true}` |
+| `DELETE /proxy/{app}/{表}/{row_id}` | 204 |
+| **`GET /proxy/{app}/{表}/{row_id}`** | **405 Method Not Allowed** |
+
+- **寫入 body 必須包一層 `data`**（handler 取的是 `payload.get("data", {})`）。這與 records 面同一條契約，
+  但**反應不同**：records 面裸物件是靜默忽略後 422 抱怨必填欄（`data-center.md` §7），
+  proxy 面是明確 400——proxy 這側比較好認。前端 `db.ts` 的 `insert()`／`update()` 已經包好（§3 的 DB Proxy 段）。
+- **`{row_id}` 只支援 PATCH／DELETE，沒有單列 GET**。取單列走列表或 `POST …/query` 過濾；
+  照「`…/{row_id}`」的字面直打 GET 會拿到 405。
+
+★ **打錯「面」的錯誤訊息會指向錯的方向**（2026-09-16 實打）：
+
+```
+GET /api/v1/data-center/tables/hr_employees/records
+  → 404 {"detail":{"error":"table_not_found","message":"自建表不存在：hr_employees"}}
+```
+
+**「自建表不存在」＝你走錯面了**，不是「這張預設表在這個租戶沒有／名字拼錯」。
+預設表要走 `/proxy/{app_id}/{表}`（上表那一列）。反過來也一樣：自建表打 proxy 面不會通。
 
 - **不要在 app 內硬編任何一組前綴**：SDK 讀 `__IS_EXTERNAL__` 自動分流（§6.0）。本地腳本要重現
   external 鏈路時先走 §14 登入拿使用者 token，再打 `/ext/*`；拿平台 JWT 或 app-scoped token 打
@@ -1689,4 +1716,16 @@ agent 不自行開、也不把「要不要常駐」丟給 owner 選。決策的�
   不驗使用者權限，`data-center.md` §7.5）——它不在上表，因為前端碰不到。
 - `/ext/data`、`/open/data`、`/pub/data` 是 legacy CustomObject 的對應面（`data-center.md` §8），
   只讀不加。
+
+🚨 **internal 這一列「打得到」≠「是 app 的能力」。** app-scoped token 的可呼叫面由平台的
+route catalog 界定（`core/app_scope_routes.py` 的 `BROWSER_ROUTES`），未登記的路由被判
+`allowed=False, reason=route_not_registered`——但那個判定**只有 `APP_SCOPED_TOKEN_MODE=enforce`
+才轉成 403**，`audit` 記完 log 就放行，而 prod／UAT 現役值都是 `audit`
+（`infra/k8s/{prod,uat}/backend.yaml`）。2026-09-16 測試租戶實打：一個 `scopes` 只有
+`["db.read"]` 的 app-scoped token，打 `/api/v1/members`、`/members/roles`、`/invitations`、
+`/auth/me`、`/refs/available-tables` **全部 200**。
+
+⇒ **判一支端點 app 能不能用，不能靠自己打一次的狀態碼**：要看它在不在上表登記的前綴內，
+以及**一般使用者**（不是開發者帳號）有沒有那支端點要的 permission。身分與 ACL 該從哪裡拿，
+見 `member-admin.md` §3.6。
 

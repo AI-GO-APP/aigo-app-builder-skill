@@ -685,7 +685,15 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 執行期網域�
       UI 要有合理的降級路徑（不要因為空陣列就整頁空白）
     - **外部人員也是租戶成員**：經銷商／客戶登入後同樣走這套快照，他們的角色由計畫第 1.7 項定；
       app 內不要另做「外部使用者」的登入或身分判斷
-    - 詳見 `references/custom-app-dev-guide.md` §6「User Context」與 §7
+    - ★ **禁止把成員管理面當成 app 的身分來源**：`GET /api/v1/members`、`/members/roles`、
+      `/invitations` 都是管理面。`GET /api/v1/members` 掛 `hr.member_manage`——**開發者帳號
+      多半有、一般員工沒有**，拿它做 ACL 會做出「自己測全綠、使用者全 403」的 app。
+      要 email／部門這類員工主檔欄位走預設表 `hr_employees`；要角色／權限走上面的快照
+    - ★ **「我打過回 200」不是能力證明**：app-scoped token 今天打得到平台管理面，是因為
+      `APP_SCOPED_TOKEN_MODE=audit`（未登記路由記 log 後放行），切 `enforce` 就整批 403。
+      判端點能不能用看兩件事：**在不在 app 的 route catalog**、**一般使用者有沒有那個 permission**
+    - 詳見 `references/custom-app-dev-guide.md` §6「User Context」與 §7、
+      `references/member-admin.md` §3.6（身分與 ACL 的來源對照表）
 24. **預設表寫入可能被簽核攔截**（★ 強制，只限 Data Reference 那一軌）
     - 租戶對該表設了簽核流程時：**insert 照樣寫入但回傳帶 `approval_status: "pending"`**；
       **update / remove 與 `ctx.erp.*` 完全不執行**，payload 暫存、Server Action 收到例外

@@ -401,10 +401,16 @@ runner 沒有使用者身分，那些端點吃 `get_current_user`，一律 **401
 
 ## 9. 租戶使用者目錄：自建表要「關聯使用者」怎麼做（2026-09 起）
 
-> ⚠️ **2026-09-01 實測 prod 回 404——已 merge 尚未部署**。用之前先打一次確認；
-> 404 時退回「text 欄存 UUID、顯示名暫用其他管道」的做法。
+> **2026-09-16 測試租戶實打 200**（`{items,total,page,page_size}`，每筆三欄）——已上線，
+> 原本「2026-09-01 prod 回 404、已 merge 尚未部署」的註記已拆。
 
-新端點 **`GET /api/v1/users`**（已登入即可，無需額外權限）回傳租戶使用者目錄：
+★ **這一節解決的是「自建表的 UUID 欄要顯示成名字」，不是「app 的權限模型」。**
+要角色／權限做條件顯示或授權強制，**不要來這裡、也不要打 `GET /api/v1/members`**——
+看 `member-admin.md` §3.6 的來源對照表（前端 `__USER_PERMISSIONS__`／
+action `ctx.user_permissions`／可見度 `access_role_ids`）。要員工的 email、部門、
+到職日這類主檔欄位，走預設表 `hr_employees`。
+
+`GET /api/v1/users` **（已登入即可，無需額外權限）** 回傳租戶使用者目錄：
 
 - 參數只有 `page`（預設 1）與 `page_size`（1–500，預設 200）；回傳分頁信封
   `{items, total, page, page_size}`
@@ -435,7 +441,9 @@ runner 沒有使用者身分，那些端點吃 `get_current_user`，一律 **401
 > 422 `invalid_field`——寫入端點已上線且做欄位定義驗證。
 > **2026-09-10 完整寫值流程實測通**（建欄 → PATCH 寫值 → `:batch-get` 取回，`system.admin`）；
 > 同日實測釘死兩件事：**app 執行期完全取不到 EAV 值**（下方通道表）、
-> **PATCH body 少包一層 `values` 會靜默 no-op 回 200**（端點速查）。刪欄仍未實測。
+> **PATCH body 少包一層 `values` 會靜默 no-op 回 200**（端點速查）。
+> **2026-09-16 測試租戶走完整生命週期**（建欄 → impact → DELETE `?confirm=` → 表回 `[]`）：
+> 刪欄已實測，且釘死**建欄 body 形狀與實體名不可指定**（下方「建欄」段）。
 
 ### 定位：Data Reference 軌的第三種擴充機制
 
@@ -488,6 +496,33 @@ runner 沒有使用者身分，那些端點吃 `get_current_user`，一律 **401
 | 刪欄（兩段式：impact → confirm） | GET `.../{fieldKey}/impact` → DELETE | **`system.admin`**（帶走該欄所有值，刻意不下放） |
 | 批取值 | POST `/ext-values/{erpKey}:batch-get`（body `row_ids` ≤ **200**） | `builder.access` |
 | 寫值 | PATCH `/ext-values/{erpKey}/{rowId}` | `builder.access` |
+
+★ **建欄的 body：必填只有 `display_name` 與 `field_type`，`field_key` 會被忽略**
+（2026-09-16 測試租戶實打）。送 `{}` → 422 `missing: body.display_name, body.field_type`。
+
+🚨 **實體名不可指定，由平台從 `display_name` 生成，且建後永不可改**——而
+`PATCH /ext-values/{表}/{列}` 的 body 用的正是**實體名**，所以取什麼顯示名決定了之後的寫值程式碼長相：
+
+| 送出的 body | 回應的 `physical_name` |
+|---|---|
+| `{"display_name":"測試探測欄","field_type":"text","field_key":"probe_tmp_key"}` | **`ext`**（`field_key` 整個被忽略） |
+| 同一張表再送 `{"display_name":"第二探測欄","field_type":"text"}` | **`ext_2`** |
+| `{"display_name":"probe_en_col","field_type":"text"}` | `probe_en_col` |
+
+中文顯示名音譯失敗 → 退回 fallback 前綴 `ext`，第二個起加唯一化尾綴 `_2`／`_3`
+（`services/data_center/identifiers.py` 的 `generate_physical_name`，與自建表的
+`tbl_2`／`col_7` 是**同一支函式**，只差 prefix）。**不會互相覆蓋**，但你會得到一排
+`ext`、`ext_2`、`ext_3`，事後完全看不出誰是誰。
+
+★ **硬規定：延伸欄位的 `display_name` 一律用英文 snake_case**，實體名才等於你寫的名字。
+中文顯示名是使用者在資料中心 UI 看的事——但延伸欄位的顯示名同時是實體名的唯一來源，
+兩者在這裡合一了。要中文標題又要可用實體名，**現在做不到**，先用英文建好再考慮改顯示名
+（改 `display_name` 不動 `physical_name`）。
+
+★ **刪欄是兩段式，`?confirm={physical_name}` 是必要的**（2026-09-16 實打）：
+不帶 confirm → 400 `confirm_required`，訊息把該帶的值與該先打的 impact 路徑都寫給你；
+帶對 → **204**。路徑參數吃的是 **`physical_name`，不是欄位 `id`**。
+`GET .../{physical_name}/impact` 回 `{record_count, non_null_count}` 兩個數字。
 
 ★ **寫值的 body 一定要包一層 `values`**：`{"values": {"<欄位實體名>": <值>}}`。
 少包那層是**靜默失敗**——`values` 有預設空 dict 且未知鍵被忽略，扁平 body 解析成「零欄要寫」，

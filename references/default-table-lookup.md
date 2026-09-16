@@ -32,6 +32,29 @@
    沒命中 → 自建表，但資料承載表那一列要寫「已對照 <候選表>，不採用因為 <欄位語意／必填欄／唯讀>」。
    「沒想到有」不是理由，「查過沒有」才是。
 
+⚠️ **`GET /api/v1/refs/available-tables` 的結果不是預設表清單——它混著本租戶的自建表。**
+這是**刻意設計**：該端點回的是「ERP 實體表 ∪ 呼叫者租戶的資料中心自建表」，
+沒有後半段的話引用管理 UI 列不出自建表、租戶就沒有把自建表授權給 app 的路
+（`api/app_references.py` 的 docstring）。回應的每一筆只有 `name`／`comment`，
+**沒有任何欄位標示它是哪一種**，所以直接拿整份去做語意盤點，會把別的 app 的自建表
+收成「平台語意」。
+
+🚨 **不要用命名特徵去猜**（例如 6 碼 hex 尾碼、底線數量）。自建表的實體名由
+`generate_physical_name` 生成，乾淨的顯示名就得到乾淨的名字，唯一化尾綴是 `_2`／`_3`
+不是 hex——**它們和預設表長得一模一樣**。2026-09-16 測試租戶實測：`available-tables`
+回 375 張，其中 **139 張是自建表**（`purchase_orders`、`messages`、`conversations`、
+`email_logs`、`interviews`、`sources`、`faq`…），而「尾碼像 hex」這條規則命中 **0 張**。
+
+★ **正確做法是兩份相減，不是正規表達式**：
+
+```
+GET /api/v1/data-center/tables      → 本租戶自建表全集（physical_name）
+GET /api/v1/refs/available-tables   → ERP ∪ 自建表
+預設表 = 後者 − 前者
+```
+
+盤點遷入案時先做這一步再進 §2 的語意判斷，否則整份候選清單是髒的。
+
 ⚠️ **Meta 面的 `fields` 是策展白名單，不是欄位全集——絕對不能拿來判定「平台有沒有這個欄位」。**
 平台在後端維護一份「哪些欄位要出現在 Workspace 的 grid 與表單」的標注清單，
 `GET /meta/tables/{key}` 的 `fields` **就等於那份清單**；實體表有、但清單未列的欄位一律不輸出
@@ -152,7 +175,7 @@ AI GO 預設表的命名慣例是 **`<功能區前綴>_<實體複數>`**。看�
 | 請假、出勤、加班 | `hr_leaves`、`hr_leave_allocations`、`hr_attendances`、`hr_overtime_requests` | `leave_requests`、`attendance_logs` | `hr_leaves.state` 值域見 §4 |
 | 工時、填報 | `hr_timesheets`（工時紀錄）、`hr_work_entries` | `time_logs` | `date` 必填 |
 | 技能、證照 | `hr_skills`（技能管理）、`hr_employee_skills` | `certifications` | |
-| 薪資 | `hr_payroll_*` | `payroll_settings`（demo 租戶實例） | 平台已有 `hr_payroll_settings`；薪資明細與合約表**不可引用**（黑名單） |
+| 薪資 | `hr_payroll_settings`（投保設定／基本工資／勞健保科目，15 欄）、`hr_payroll_runs`（期別彙總，17 欄）、`hr_payroll_bonus_rules`（獎金規則，14 欄） | `payroll_settings`（測試租戶實例） | ★ 這三張**可引用**，別因為「黑名單」三個字把整族關掉。缺的是**個人薪資單明細那一層**（見 §3 黑名單段）——平台只到 `hr_payroll_runs` 的期別彙總 |
 
 ### 庫存、製造
 
@@ -167,7 +190,7 @@ AI GO 預設表的命名慣例是 **`<功能區前綴>_<實體複數>`**。看�
 
 | 使用者會怎麼說 | 預設表 | 常被誤建成 | 備註 |
 |---------------|-------|-----------|------|
-| 對話、訊息、客服紀錄、LINE／Email 往來 | `msg_threads`、`msg_messages`、`msg_contacts`（不在 Meta） | `conversations`、`messages`、`email_logs`（demo 租戶實例） | `msg_messages` 必填 `thread_id`、`direction`、`sender_type`、`content`；綁通訊渠道的 app 才會自然落在這裡 |
+| 對話、訊息、客服紀錄、LINE／Email 往來 | `msg_threads`、`msg_messages`、`msg_contacts`（不在 Meta） | `conversations`、`messages`、`email_logs`（測試租戶實例） | `msg_messages` 必填 `thread_id`、`direction`、`sender_type`、`content`；綁通訊渠道的 app 才會自然落在這裡 |
 | 系統通知 | `notifications`、`announcements` | `alerts` | 引用前查 columns 確認欄位夠用 |
 
 ---
@@ -203,6 +226,26 @@ AI GO 預設表的命名慣例是 **`<功能區前綴>_<實體複數>`**。看�
 
 **Meta 可讀但不可引用**（黑名單）：`users`、`hr_payroll_contracts`／`hr_payroll_slips`／`hr_salary_items`、
 `utm_stages`／`utm_tags`、`roles`、`members`。
+
+★ **403 與 404 是同一個授權決策的兩種表現，不是兩種原因**（2026-09-16 測試租戶實打）。
+`GET /api/v1/refs/tables/{t}/columns` 對黑名單成員會回**兩種**狀態碼：
+
+| 表 | 回應 | 讀法 |
+|---|---|---|
+| `users`／`roles`／`members` | **403**「此表不可引用」 | 黑名單，講得很清楚 |
+| `hr_payroll_contracts`／`hr_payroll_slips`／`hr_salary_items` | **404**「表不存在」 | ⚠️ **仍然是黑名單**——不是「這個租戶沒建」 |
+| `hr_payroll_settings`／`hr_payroll_runs`／`hr_payroll_bonus_rules` | 200 | 不在黑名單，可引用 |
+
+🚨 **那三張薪資明細表的 404 最容易被誤讀成「版本差異、將來會出現」。** 它是薪資明細閘
+的表現：`references.columns` 無條件濾掉黑名單成員，濾掉之後的查表結果就是「找不到」
+（`core/app_scope_routes.py` 對這個行為有逐字說明）。判準寫在
+`utils/table_inspector.py`——**薪資族之內、有可指向個別員工的欄、且有金額欄**，三個條件
+同時成立才進這批。所以 `hr_payroll_settings`（租戶級參數）、`hr_payroll_bonus_rules`
+（規則參數）、`hr_payroll_runs`（整批彙總）刻意**不在**批內，而 `hr_expenses`／
+`hr_expense_sheets`（有 `employee_id` ＋金額）也刻意不在——費用核銷不是薪資數字。
+
+⇒ **不要把這三張排進「等平台補上就能用」的待辦。** 要個人薪資單那一層，
+只能在 app 內自建，或走平台的薪資模組介面。
 
 ---
 
@@ -259,7 +302,7 @@ CHECK 值域（`state`、`type`、`priority` 等）見 `custom-app-dev-guide.md`
 | 同實體重複表（`tenders`／`tender_records`、`documents`／`tender_documents`、`proposal_*`／`report_*`） | 各一張 | 合併 | 原系統的歷史包袱不要原樣搬 |
 
 另兩個常見型：**外部系統的 `users` 表**建成自建表（規則 23 禁止；走 `project_deconstruction_template.md` 認證映射）；
-**與預設表同名的自建表**（demo 租戶有 `purchase_orders`、`messages`、`conversations`、`payroll_settings`）——建表當下就該被 §0 第三步擋下。
+**與預設表同名的自建表**（測試租戶就有 `purchase_orders`、`messages`、`conversations`、`payroll_settings`）——建表當下就該被 §0 第三步擋下。
 
 ---
 
