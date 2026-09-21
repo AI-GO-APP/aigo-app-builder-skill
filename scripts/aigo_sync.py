@@ -7,8 +7,10 @@ PROTECTED_FILES = {"src/api.ts", "src/db.ts", "src/action.ts", "src/data.json", 
 # `_template.json` 宣告 required_egress: openai，示範 action 也字面呼叫 openai。與需求無關就兩個一起刪
 # （只刪 action 仍擋；README／manifest 殘留不影響閘門）。2026-09-09 prod 實打。
 STARTER_EGRESS_LEFTOVERS = ("_template.json", "actions/summarize_leads.py")
-MAX_FILE_SIZE = 1_000_000  # 1MB
-MAX_FILE_COUNT = 200
+# 與平台 infra/builder/compile.go 的 MaxFileSize／MaxFileCount 一致。單檔超限平台不報錯、
+# 靜默跳過（SKILL.md 規則 14），所以這裡先擋；平台比的是 bytes，不是字元數。
+MAX_FILE_SIZE = 1_000_000  # bytes
+MAX_FILE_COUNT = 500
 
 
 def read_local_files(project_path: str) -> dict[str, str]:
@@ -26,8 +28,9 @@ def read_local_files(project_path: str) -> dict[str, str]:
                     continue
                 with open(full, "r", encoding="utf-8") as f:
                     content = f.read()
-                if len(content) > MAX_FILE_SIZE:
-                    raise ValueError(f"檔案 {rel} 超過 1MB 限制 ({len(content)} bytes)")
+                size = len(content.encode("utf-8"))
+                if size > MAX_FILE_SIZE:
+                    raise ValueError(f"檔案 {rel} 超過 1MB 限制 ({size} bytes)")
                 files[rel] = content
     # package.json
     pkg = os.path.join(project_path, "package.json")
