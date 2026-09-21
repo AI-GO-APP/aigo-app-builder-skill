@@ -176,7 +176,7 @@
   | Router | 只能 `HashRouter`；`BrowserRouter` / Next.js 檔案路由不可用 |
   | 依賴 | Runtime 只提供 react、react-dom、react-router-dom、lucide-react、react-hot-toast 五個；**其他 npm 套件裝不了** |
   | 瀏覽器 API | Shadow DOM 內 `confirm()` / `alert()` / `prompt()` 不可用 |
-  | 規模 | VFS 上限 200 檔、單檔 ≤1MB、編譯 30 秒 |
+  | 規模 | VFS 上限 500 檔、單檔 ≤1MB（1,000,000 bytes）、編譯 30 秒 |
   | 動態載入 | `import()` 動態 import 不支援 |
 
   實務結論：**即使原前端是 React + TS，CSS 與依賴幾乎必然要重寫**；

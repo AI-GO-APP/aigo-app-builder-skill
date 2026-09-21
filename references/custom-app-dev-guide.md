@@ -112,7 +112,15 @@ POST /api/v1/compile/compile/{slug}?dev=true
 → {"success": false, "error": "..."}
 ```
 
-限制：200 檔案、1MB 單檔、30 秒超時。
+限制：500 檔案、單檔 1,000,000 bytes、30 秒超時。
+
+> **單檔超限的行為與檔數不同**：檔數超過 500 會編譯失敗並回傳錯誤；單檔超過上限則**不報錯**，
+> 該檔被靜默排除在 bundle 外，編譯仍回報成功——症狀會延後到執行期（模組 undefined）。
+> 交付前自行檢查檔案大小，不要依賴編譯結果。
+
+> **這些數值以平台為準，本文件只是抄本。** 平台尚未提供限制查詢 API，
+> 已於 urfit-tech/AI-GO#1673 提案增設 `GET /api/v1/builder/apps/{app_id}/limits`；
+> 端點上線後，本 skill 改為呼叫 API 取得限制，以 API 回傳值為準，不再於文件記載數字。
 External 模組（不需安裝）：react, react-dom, lucide-react, react-router-dom, react-hot-toast
 
 ## 6. 內建 SDK
