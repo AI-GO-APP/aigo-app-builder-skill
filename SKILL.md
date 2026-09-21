@@ -452,7 +452,7 @@ timeout／連不出去＝raw `httpx` 直連（改 `ctx.http.call`）或 slug 沒
 | 檔案 | 內容 |
 |------|------|
 | `CONTEXT.md` | ★ 術語表——預設表／自建表兩大類＋四個機制詞（含稱謂對照與禁用詞：舊稱 SaaS 表與外部產品名都不出現） |
-| `references/dev-rules.md` | **Phase 3 規則 18–33 的完整版**（資料雙軌分流、自建表命名、app_domain、冪等、排程限制、角色沿用、簽核攔截、分頁排序、時間、租戶網址、skeleton、builder.access 破口、Hosted 不承載 DB、UAT 結論）——主檔只有速查表，動手前讀原文 |
+| `references/dev-rules.md` | **Phase 3 規則 18–33 的完整版**（資料雙軌分流、自建表命名、app_domain、冪等、排程限制、角色沿用、簽核攔截、分頁排序、時間、租戶網址、skeleton、builder.access 破口、Hosted 不承載 DB 與外接庫的唯一例外、UAT 結論）——主檔只有速查表，動手前讀原文 |
 | `references/planning.md` | **Phase 1.5 的完整版**：§1.0 四問的理由與選項、計畫九項逐項展開、閘門每一條的踩坑紀錄 |
 | `references/environment.md` | **Phase 1 的完整版**：租戶網址規則的推導與 401 同形成因、三層模型、`config.json` schema 2 與 `base_url` 三層來源、設定六步、憑證規則 |
 | `references/review-workflow.md` | **Phase 0 的完整版**：九步各自打哪個端點、Review 報告要列什麼、哪些情況標「必改」 |

@@ -57,6 +57,8 @@
 > ⚠️ **DB 與 storage 不得自立成 Hosted App**（含 PostgREST 類 REST 包裝，
 > `dev-rules.md` 規則 32）——原專案若有 docker-compose 帶 db／redis service，
 > 那些 service **不在**「整套搬」的範圍內，資料一律遷入平台的表與 Storage。
+> 唯一例外見 dev-rules.md 規則 32（平台工程師核准；核准紀錄存在才生效）：這份清單裡若有
+> 交易、FK、唯一約束、列鎖、RLS 逐項確認平台做不到又改不掉，才提例外申請；builder 不自己開庫。
 
 ## 使用者／認證表（★ 不要當一般資料表遷）
 

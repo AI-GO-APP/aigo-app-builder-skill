@@ -247,15 +247,29 @@
     - 前端 SDK 只有一種常態情境可直呼：受眾全員持有 `builder.access` 的開發工具型 app
       （判進 external 的例外 app 自動分流 `/ext/data-center`，不在此閘）
     - 機制、存量修復流程、假修法排除清單見 `references/data-center.md` §7.5
-32. **禁止以 Hosted App 承載資料庫或 storage**（★ 強制，遷入情景最容易踩）
-    - **不得**把 DB 本身（Postgres／MySQL／Redis…）或「包了 REST 的 DB 服務」
-      （PostgREST、Hasura、自架 API-over-DB）部署成 Hosted App 供其他 App 存取——
-      同租戶 app 間網路互通讓這在技術上做得出來，但它是明文禁止的反模式：
-      資料進不了平台功能、繞過簽核與權限閘（規則 23／24）、平台不備援它
-    - table schema 一律落平台**預設表／自建表**（規則 18 雙軌分流、§19 SSOT）；
-      檔案一律 **Storage API**；Hosted App 自身的資料層一律改寫 **Open Proxy**
-      （`hosted-apps.md` §7.1——執行期出站只放 443，直連 DB 在網路層本就不存在）
-    - 僅有的兩個過渡例外（短期暫連原 DB 的 HTTPS 介面、`/data` 放非業務資料）
+32. **禁止自助直連或自帶資料庫；不得以 Hosted App 承載 DB 或 storage**（★ 強制，遷入情景最容易踩）
+    - 預設資料層仍是平台**預設表／自建表**（規則 18 雙軌分流、§19 SSOT）＋ Open Proxy，檔案一律 **Storage API**。
+      builder 不得自行建立、選用或注入外部 PostgreSQL／Supabase／MySQL／Redis，
+      也**不得**把 DB 本身或「包了 REST 的 DB 服務」（PostgREST、Hasura、自架 API-over-DB）
+      部署成 Hosted App 供其他 App 存取——同租戶 app 間網路互通讓這在技術上做得出來，但它是
+      明文禁止的反模式：資料進不了平台功能、繞過簽核與權限閘（規則 23／24）、平台不備援它
+    - ⚠️ 2026-09-17 起（平台 v1.15.2）Hosted App 出站已**不再只放 443**，公網 **IPv4** 任何 TCP 埠都通（IPv6 目的地仍不通）
+      （`hosted-apps.md` §7.1）。**這只是網路可達，不是架構授權**——「連得到」不改變本條
+    - **唯一例外：由具名 AI GO 平台工程師核准並在平台側建立的「租戶級外接 PostgreSQL」暫時例外**。
+      例外**只存在於**該案 issue 上具名工程師的核准紀錄；沒有那筆紀錄，本條例外對這個案子不存在。
+      （平台側的依據文件是 ADR 0032，2026-09-21 起草、**待核准**；builder 不需要讀它就能執行本條，
+      它被改號、否決或未公開都不改變上一句。）
+      當且僅當遷入案有**逐項**經部署版本實測確認、平台現行能力無法等價實作的資料庫需求
+      （交易、FK、唯一約束、列鎖、RLS 之一或多項）時，builder 才能在取得租戶 owner 同意後
+      提出「平台例外申請」issue。**不得**以「Open API 補齊規格（T01–T35）尚未全部完成」代替逐項查證。
+      builder 只整理需求與證據：不得自行核准、開 Supabase 專案、產生管理員憑證、或在核准前切換資料落點。
+      核准紀錄（issue 編號、日期、工程師）、租戶、服務 schema、最小權限角色、正式與 UAT 隔離
+      （規則 33）、憑證輪替、備份／事件責任、成本 owner、**可驗證的回程條件**（每項對應已部署版本＋
+      通過的相容性測試，不是「規格已合併」）都要寫進計畫文件
+    - 例外的粒度與範圍：**一租戶一顆**（該租戶所有服務共用，服務以 PostgreSQL schema 分開，
+      第一個服務佔 `public`）、UAT 另一顆 `<tenant>-uat`；**只限關聯式 PostgreSQL**——
+      不得順帶採用 Supabase Auth、Storage、Realtime、Edge Functions、pg_cron，檔案仍走 Storage API
+    - 另兩個既有過渡例外（短期暫連原 DB 的 HTTPS 介面、`/data` 放非業務資料）
       見 `hosted-apps.md` §7.1，用了必須在計畫中明寫遷移終點
 33. **每支要上正式的 app 都要有一個「UAT 結論」**（★ 強制，2026-09-21 立；做法見 `uat-environment.md`）
     - 計畫階段寫一句：`UAT＝有；拓撲 X` 或 `UAT＝無；理由 Y；風險 Z`——判準是**有沒有正式資料會被測試污染、
