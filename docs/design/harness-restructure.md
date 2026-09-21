@@ -270,7 +270,7 @@ MCP 原本只有 tools、resources、prompts 三種機制，沒有「skill」這
 
 - [ ] 合併後的 repo 怎麼生：在 `AI-GO-APP` 新開一個 `aigo-harness` repo 並把三邊搬進去，或直接在 `aigo-app-builder-skill` 內重組後改名（後者保得住 137 個 commit 的歷史與既有 issue）
 - [ ] transfer 與 checker 的 repo 合併後如何處置：封存，或保留並在 README 指向新 repo
-- [ ] §7 的限制查詢端點要不要做、由誰做——這是對 AI GO 平台本體的修改，需與開發團隊確認
+- [ ] §7 的限制查詢端點要不要做、由誰做——已開 urfit-tech/AI-GO#1673，等平台團隊回覆
 - [ ] 過渡期要不要同時維持「一個 repo 等於一個 skill 目錄」的舊安裝方式，若要，維持多久
 - [ ] Claude Code 與 Codex 目前對「用 MCP 發送 skill」的支援程度（尚未查證）
 - [ ] transfer 的 `template-contract.md` 與 builder 的 `platform-behaviors.md`、`data-center.md` 內容重疊多少（尚未逐段比對）
@@ -290,6 +290,8 @@ skill 文件把平台限制值抄成文字（SKILL.md 規則 14、`references/cu
 錯誤方向是**低估**：agent 會把 app 切成 200 檔以內，白白放棄一半的額度。
 
 另外一個文件沒寫、但 agent 必須知道的行為：**單檔超過 1MB 不會報錯，而是被靜默跳過**（`compile.go:263` 只寫 log 然後 `continue`）。檔數超限才會回傳 error（`:252`）。也就是說超大檔案會編出一個「少一個檔」的 bundle，症狀出現在執行期，而不是編譯期。
+
+**跳過本身是刻意設計，不是 bug**：`infra/builder/compile_test.go:88` 的 `TestWriteVFSSkipsOversizeFile` 明確鎖住這個行為（註解指向 spec §7/§11 硬化），與同段落的路徑穿越攔截、租戶 tsconfig 剝除同屬一套「可疑輸入就排除，不中斷整個編譯」的防禦模式，`backend/app/services/typecheck.py:99` 亦對齊。問題不在跳過，而在**跳過的事實只留在伺服器 log**——呼叫端與 agent 完全不知情。
 
 這還不是第一次漂移：`references/event-triggers.md:174` 自己記著 runner ceiling 在 prod v1.13.0（#1518）之前恆為 30 秒、之後才變 120 秒。**文件靠人追著改，而且已經追丟了一次。**
 
@@ -312,7 +314,15 @@ skill 文件把平台限制值抄成文字（SKILL.md 規則 14、`references/cu
 
 **(c) 若短期內不做 API，至少先修正數字**——這是獨立於本重構、可立即進行的修正，並建議在 AI GO repo 加一個測試，確保文件值與 `compile.go` 常數一致。
 
-**(d) 回報給 AI GO 開發團隊的問題**：單檔超限靜默跳過（`compile.go:263`）是否為刻意設計？從 custom app 開發者的角度，這會變成難以診斷的執行期錯誤，建議改為回傳 error，與檔數超限一致。
+**(d) 讓被跳過的檔案可被呼叫端看見**：不動跳過行為（理由見 §7.1），但把被跳過的檔案列入編譯回應，例如 `skipped_files: [{path, size, reason}]`，`reason` 涵蓋現有三種排除（`exceeds_max_file_size`、`path_traversal`、`tsconfig_stripped`）。如此安全防禦不變、既有 app 不受影響，呼叫端可在發布前就告知使用者「這個檔案沒有進 bundle」。
+
+### 7.5 進度
+
+| 項目 | 狀態 |
+|---|---|
+| 向平台提案（(a) 限制查詢端點、(d) `skipped_files`） | 已開 issue：**urfit-tech/AI-GO#1673**，待平台團隊回覆 |
+| skill 文件數字修正 200 → 500，並補上靜默跳過的警告（即 (c)） | 已開 PR：**AI-GO-APP/aigo-app-builder-skill#85**（1.44.1），待審 |
+| (b) skill 改為呼叫 API 取得限制 | 等 #1673 的端點上線後才能做；該約定已寫進 `references/custom-app-dev-guide.md` §4，避免日後又有人抄一份新數字 |
 
 ### 7.4 順帶發現：custom app 的開發限制不在租戶分層機制內
 
