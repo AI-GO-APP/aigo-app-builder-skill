@@ -13,11 +13,13 @@ AI GO 的 agent harness 目前以 **GitHub repo** 為發布單位：`AI-GO-APP` 
 |---|---|---|---|
 | **builder** | `AI-GO-APP/aigo-app-builder-skill`（本文件所在的 repo） | 開發 AI GO Custom App：前端、Server-Side Action、部署與驗證 | FDE、租戶 |
 | **transfer** | `AI-GO-APP/aigo-template-transfer-skill` | 把上線中的 Custom App 轉成可上架的市集模板 | FDE |
-| **checker** | `AI-GO-APP/skill-safely-vibecoding-checker` | 對 AI 協作開發的專案做安全稽核 | FDE、外部使用者 |
+| **checker** | `AI-GO-APP/skill-safely-vibecoding-checker` | 對 AI 協作開發的專案做安全稽核 | AI GO 的 vibe coder、FDE |
 
-**本文件的範圍**：builder 與 transfer 兩個 repo 合併重構；checker 僅對齊切法，維持獨立 repo。
+**本文件的範圍**：builder、transfer、checker 三個 repo 全部合併重構。checker 的服務對象本來就是 AI GO 的 vibe coder，與另外兩者同一群人，因此收進同一個發布單位。
 
 **不在範圍**：`AI-GO-APP/agentoss-module-builder-skill`（服務 Agent OSS 平台，不是 AI GO），以及 FDE 專案 repo 內附帶的 skill。
+
+本文件也會提出**對 AI GO 平台本體的一項修改建議**（§7）：目前寫死在 skill 文件裡的平台限制值，應改由平台提供 API 查詢。
 
 ---
 
@@ -35,6 +37,17 @@ Claude Code 官方文件、Martin Fowler 與 HumanLayer 三方對 harness 的切
 | Guards（hooks） | 生命週期事件發生時，必定執行 | 可由程式判定對錯的護欄 |
 | Agents（subagents） | 主 agent 派工時，在獨立 context 執行 | 需要大量讀檔的盤點、獨立的驗證者 |
 | Tools | 模型呼叫時 | 對外部系統的實際操作 |
+
+**「檢查」會落在兩個不同的分類，不要混為一談：**
+
+| | Guards | 推理型檢查（歸 Skills＋Agents） |
+|---|---|---|
+| 怎麼判定 | 程式直接判定 | 要讀 code、理解商業邏輯才能判斷 |
+| 結果 | 固定，同樣輸入永遠同樣答案 | 會變，同一份 code 不同次可能判出不同嚴重度 |
+| 何時執行 | 事件觸發，每次必定執行 | 使用者要求時才跑 |
+| 本專案的例子 | 「VFS 檔案數有沒有超過上限」 | checker 的「這個 API 有沒有租戶隔離漏洞」 |
+
+判準看 Fowler 的確定性／推理二分（§1.2 a）：guard 是確定性的，checker 是推理的。**需要控制誤判率的，就是推理型檢查**——checker 每份 reference 結尾都要求寫「常見誤判，不要報」，正是這個性質的證明。
 
 ### 1.2 三條業界證據
 
@@ -101,7 +114,30 @@ transfer 的 SKILL.md：
 - 鐵律 6（對外呼叫走 egress 閘道，約 20 行）是平台知識而非鐵律，且與 builder 的規則 29 講同一件事，兩邊各存一份
 - Phase S9 送審會把模板送進審核流程，應歸 Workflows
 
-checker 的分類本身乾淨，只需把 `templates/` 目錄改名為 `assets/`，與其他兩者一致。
+checker：
+
+- 它整體是**推理型檢查**，歸 Skills＋Agents，不是 Guards（見 §1.1 的對照表）
+- 8 個稽核維度目前是循序讀取，應改為各派一個唯讀 subagent 平行稽核
+- 硬規則 3「不修改程式碼」可由工具權限直接限制成唯讀，不必只靠文字
+- `templates/report.md` 改名為 `assets/report.md`，與其他兩者一致
+- **抽象層級不一致**（新發現，見 §2.5）
+
+### 2.5 checker 的 stack 檔破壞了它自己的抽象層級
+
+checker 的 `references/` 底下同時放了兩種層級的檔案：
+
+| 檔案 | 層級 | 內容 |
+|---|---|---|
+| `01-tenant-isolation.md` 等 8 個維度檔 | 抽象，對所有技術棧成立 | 「租戶識別的唯一可接受來源是伺服器端 session／JWT claim」「查詢過濾要有全域機制，不能靠每支查詢自己記得加 where」 |
+| `stacks/supabase.md`、`nextjs.md`、`postgres-prisma.md` | 具體實作 | `service_role` key 的誤用、查 `pg_policies` 的 SQL |
+
+三個問題：
+
+1. **層級混放**：維度檔講「要檢查什麼」，stack 檔講「在這個技術棧怎麼檢查」，但兩者平行放在同一層目錄，沒有主從關係
+2. **覆蓋不完整且沒有邊界宣告**：只有三個 stack。遇到 Django、Rails、Firebase 的專案，文件沒說怎麼辦。抽象維度理應涵蓋得了，但 stack 檔的存在會讓 agent 誤以為「不在清單裡就不用查」
+3. **重複**：`01-tenant-isolation.md` 講租戶識別，`stacks/supabase.md` 又用 RLS 把租戶隔離講一次，同一條原則兩處維護
+
+**建議**：把主從關係倒過來。8 個維度檔是唯一的檢查清單（SSOT）；stack 檔降級為「查核提示」，只放該技術棧特有的陷阱與查法（例如「Supabase 用這兩段 SQL 查 RLS 狀態」），並明確寫出「未列出的技術棧一樣要做完 8 個維度，只是要自己找對應的查法」。
 
 ### 2.3 builder 與 transfer 共用的基礎設施已經分歧
 
@@ -121,10 +157,10 @@ checker 的分類本身乾淨，只需把 `templates/` 目錄改名為 `assets/`
 
 ### 3.1 目錄結構
 
-builder 與 transfer 兩個 repo 合併成一個 repo（下稱 `aigo-harness`，正式名稱待定，見 §6），內部依 §1.1 的六類切開：
+三個 repo 合併成一個 repo（下稱 `aigo-harness`，正式名稱待定，見 §6），內部依 §1.1 的六類切開：
 
 ```
-aigo-harness/              ← 合併 builder 與 transfer 後的單一 repo
+aigo-harness/              ← 合併 builder、transfer、checker 後的單一 repo
 ├── rules/                  ← 寫 code 時永遠成立的限制（frontmatter 以 paths 限定適用範圍）
 │   ├── frontend.md         ← builder 規則 1–13、16、17、30、31
 │   ├── actions.md          ← builder 規則 10、20–22、26–28 與 Server-Side Action 撰寫
@@ -134,7 +170,8 @@ aigo-harness/              ← 合併 builder 與 transfer 後的單一 repo
 ├── skills/                 ← 按需載入（維持 Agent Skills 標準格式）
 │   ├── builder/            ← SKILL.md 只做分流（500 行以內）；平台知識放 references/
 │   ├── migrate/            ← 遷入流程，自 builder 的 Phase 1.25／2.0 拆出
-│   └── template-transfer/  ← transfer 的 S0～S8
+│   ├── template-transfer/  ← transfer 的 S0～S8
+│   └── security-audit/     ← checker：8 個維度檔為 SSOT，stacks/ 降為查核提示
 ├── workflows/              ← 使用者主動觸發、有外部副作用
 │   ├── publish.md          ← builder Phase 4.4
 │   ├── report-issue.md     ← builder Phase 5 問題回報
@@ -146,7 +183,8 @@ aigo-harness/              ← 合併 builder 與 transfer 後的單一 repo
 │   └── template_gates.py   ← transfer 的狀態機與內容雜湊閘
 ├── agents/                 ← subagent 定義（只給唯讀工具）
 │   ├── app-inventory.md    ← builder Phase 0 的現況盤點
-│   └── report-verifier.md  ← 問題回報前的六輪自審
+│   ├── report-verifier.md  ← 問題回報前的六輪自審
+│   └── dimension-auditor.md ← checker 的 8 個維度，各派一個平行稽核
 ├── tools/                  ← 原 scripts/；未來即 MCP tool 的實作
 │   ├── core/               ← auth、client、config，builder 與 transfer 合用一份
 │   ├── builder/
@@ -156,7 +194,7 @@ aigo-harness/              ← 合併 builder 與 transfer 後的單一 repo
 └── CONTEXT.md              ← 術語表（沿用現有內容）
 ```
 
-checker 不併進來，維持成獨立的 `AI-GO-APP/skill-safely-vibecoding-checker` repo，只在內部照同樣的切法整理。它在 `AGENTS.md` 明訂「產品資訊只能出現在 `references/aigo-platform.md` 定義的範圍內」，這條產品中立的界線是它作為稽核工具的可信度基礎，因此不併入上述結構。
+**checker 併進來，但它的產品中立規則要原封不動帶過來。** 它在 `AGENTS.md` 明訂「產品資訊只能出現在 `references/aigo-platform.md` 定義的範圍內，不得把 AI GO 寫進任何檢查清單、嚴重度定義或報告的發現段落」——這條界線是它作為稽核工具的可信度基礎，與 repo 放哪裡無關，合併後必須繼續守住，並由 §3.3 的檢查強制。
 
 ### 3.2 關鍵決策與取捨
 
@@ -166,6 +204,11 @@ checker 不併進來，維持成獨立的 `AI-GO-APP/skill-safely-vibecoding-che
 | `workflows/` 自 `skills/` 拆出 | 這些流程有外部副作用，只能由使用者觸發 | 目錄多一類 |
 | `rules/` 依 paths 拆成多檔 | 模型只在讀到對應路徑的檔案時才載入該檔，省 context（理由見 §1.2 b） | 規則散在多檔，需要一份索引 |
 | 不做 Claude Code plugin | 既然預定以 MCP 發布，plugin 這條路會綁定單一客戶端；而且官方文件明載 plugin 根目錄的 CLAUDE.md 不會被載入，plugin 無法夾帶 rules | 過渡期仍得用 git clone 安裝 |
+| checker 併入同一個 repo | 它服務的就是 AI GO 的 vibe coder，與 builder、transfer 同一群使用者，沒有理由讓他們裝兩套 | 產品中立規則需靠 §3.3 的檢查維持，不再有「repo 分開」這層天然隔離 |
+
+### 3.3 併入 checker 之後要補的一道檢查
+
+checker 的可信度來自它的報告不替 AI GO 推銷。合併後這條規則失去「repo 分開」的天然保護，必須改由程式守住——在 `guards/` 增加一支檢查：`skills/security-audit/` 底下除了 `references/aigo-platform.md` 以外的檔案，不得出現產品名稱。這正是 §1.2 (a) 的作法：把靠自律維持的規則換成確定性檢查。
 
 ---
 
