@@ -25,6 +25,8 @@
 | 頁面／路由 | | Builder VFS：多頁 `HashRouter` + Sidebar／單頁免 Router | SKILL.md Phase 2 |
 | 後端 API endpoints | | 讀寫租戶資料 → 前端 SDK 直呼（`db.ts`／`api.ts`）；含業務邏輯、機敏分流、需要伺服器身分 → Server Action | dev-guide §6／§7 |
 | 背景排程（cron、queue worker） | | App 排程（綁 action；有執行時間上限與 tier 限制，長任務要切批次） | event-triggers.md §2 |
+| 原雲端拓撲（雲、服務數、誰連誰、網域／憑證、部署觸發） | | 逐節點寫落點或退場；網域改綁 Hosted（§9）或換成平台網址 | migration-workflow.md §2.0 |
+| 本機／外部跑的微服務與排程（跑在誰的機器、觸發、內網依賴、對外副作用） | | 每支三選一：搬平台排程／留原機改指向／退役；另寫切換順序與回滾 | migration-workflow.md §2.0 |
 | 接收外部 webhook | | `actions/manifest.json` 宣告 `"webhook": true` 的 action；必須冪等 + 驗簽 | event-triggers.md §0–1 |
 | 檔案上傳／儲存（S3、Supabase Storage…） | | Storage API（單檔 100MB）；歷史檔案要「原系統下載 → 重新上傳 → 資料列裡的 URL/path 改寫」，這是資料遷移的一部分，別漏。⚠️ 本地上傳的憑證路依 access_mode 不同（internal 現況無全自動路） | dev-guide §12.1 |
 | 呼叫第三方 API | | `ctx.http.call(slug, ...)` + Builder「外部服務」同名 slug 白名單；**計畫階段就要建** | dev-guide §25 |

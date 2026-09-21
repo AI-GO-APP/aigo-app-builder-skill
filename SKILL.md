@@ -405,6 +405,7 @@ if (file) downloadFile(file);
     （Builder 線沒有 `GET /runtime-settings`），必須等於計畫那列的結論；寫「開」才在 publish 後
     `PATCH .../runtime-settings {"always_on": true}` 並確認回 `effective_mode: "always_on"`
   + 交付連結實開（照 `platform-behaviors.md` §6.2 組**正式版**網址，用非開發者帳號／external 使用者開一次；`verification-details.md` 第 8 項）
+  + UAT 結論對帳（`dev-rules.md` 規則 33）：計畫寫「有」的，`uat-environment.md` §4 驗證表要全過；寫「無」的，理由與風險要在交付說明裡
 
 Hosted App 線（不走 Phase 2–4）：
   deploy/redeploy → ✅ hosted-apps.md §3.4 部署後驗證閘門（含讀回 `always_on`＝§3.0 決策；未通過不得對外交付）
@@ -451,7 +452,7 @@ timeout／連不出去＝raw `httpx` 直連（改 `ctx.http.call`）或 slug 沒
 | 檔案 | 內容 |
 |------|------|
 | `CONTEXT.md` | ★ 術語表——預設表／自建表兩大類＋四個機制詞（含稱謂對照與禁用詞：舊稱 SaaS 表與外部產品名都不出現） |
-| `references/dev-rules.md` | **Phase 3 規則 18–32 的完整版**（資料雙軌分流、自建表命名、app_domain、冪等、排程限制、角色沿用、簽核攔截、分頁排序、時間、租戶網址、skeleton、builder.access 破口、Hosted 不承載 DB）——主檔只有速查表，動手前讀原文 |
+| `references/dev-rules.md` | **Phase 3 規則 18–33 的完整版**（資料雙軌分流、自建表命名、app_domain、冪等、排程限制、角色沿用、簽核攔截、分頁排序、時間、租戶網址、skeleton、builder.access 破口、Hosted 不承載 DB、UAT 結論）——主檔只有速查表，動手前讀原文 |
 | `references/planning.md` | **Phase 1.5 的完整版**：§1.0 四問的理由與選項、計畫九項逐項展開、閘門每一條的踩坑紀錄 |
 | `references/environment.md` | **Phase 1 的完整版**：租戶網址規則的推導與 401 同形成因、三層模型、`config.json` schema 2 與 `base_url` 三層來源、設定六步、憑證規則 |
 | `references/review-workflow.md` | **Phase 0 的完整版**：九步各自打哪個端點、Review 報告要列什麼、哪些情況標「必改」 |
@@ -461,7 +462,8 @@ timeout／連不出去＝raw `httpx` 直連（改 `ctx.http.call`）或 slug 沒
 | `references/event-triggers.md` | Webhook 與 App 排程（冪等要求、宣告、限制） |
 | `references/product-line-decision.md` | **Phase 1.5 判產品線與模式時（兩條路共用 SSOT）**：預設 Custom App 與偏離訊號、Custom App 能力邊界核對表、兩問四象限（登入者一律 internal）、混合方案分工（含 Hosted 當 Custom 後端）、不可逆前提、app 分配表 |
 | `references/member-admin.md` | **Phase 1.5 第 1.7 項授權架構選型的 SSOT ＋ 成員／角色管理 playbook**：內外人員共用帳號體系的立場、三問與授權架構表、邀請／角色端點與權限、`access_role_ids`（兩條線）、批次邀請流程與四個邊界、Hosted internal 拿不到任何身分、既有系統使用者搬遷、403 解讀 |
-| `references/migration-workflow.md` | **有現存系統要遷入時**：stack 盤點（§2.0，最先做）、產品線判斷的遷入輸入（§2.1）、專案解構、Schema 映射、資料遷移 |
+| `references/migration-workflow.md` | **有現存系統要遷入時**：stack 盤點（§2.0，最先做；含原雲端拓撲與本機／外部微服務、排程的落點）、產品線判斷的遷入輸入（§2.1）、專案解構、Schema 映射、使用者與登入的落點（§2.4.5）、資料遷移 |
+| `references/uat-environment.md` | **規則 33 的做法**：UAT 結論怎麼下、`version-test` 為何不算、鏡像拓撲、`-uat` 命名、獨立資料庫與憑證、clone Hosted 的正式設定窗口與可見度重設、egress／secrets／Open Proxy 引用、只補測試者、驗證表、維運與退場 |
 | `references/verification-details.md` | **要執行驗證時**：四項驗證的完整定義、Phase 5 里程碑 |
 | `references/troubleshooting.md` | **出錯時**：錯誤速查表 |
 | `references/pre-report-self-grill.md` | **回報平台問題前（必走）**：預設平台正確、六輪自審排除樹、送出條件、已排除清單 |

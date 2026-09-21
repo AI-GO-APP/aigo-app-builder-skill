@@ -1,3 +1,35 @@
+## 1.45.0
+
+### 規則 33：每支要上正式的 app 都要有「UAT 結論」（新 reference `uat-environment.md`）
+
+既有 AI GO 專案普遍沒有 UAT：Custom App 部署腳本一律寫死正式站，Hosted App 沒有第二顆，
+「測試」不是在正式 app 灌 demo 資料就是換個租戶。本版把第一個遷入案搭 UAT 的做法抽成通則。
+
+- 規則 33 是**決策閘**不是無條件蓋一套（比照 `always_on` §3.0）：計畫寫 `UAT＝有；拓撲 X` 或 `UAT＝無；理由；風險`，
+  判準是正式資料會不會被污染、有沒有對外副作用。落點：需求盤點表新增 §四.2、Phase 5 里程碑、`hosted-apps.md` §3.4 決策表。
+- `version-test` 草稿版**不是** UAT（同一個資料落點）。
+- `references/uat-environment.md`：鏡像**實際拓撲**（不是一律 clone 一顆 Hosted）、`-uat` 命名（`url_name` 發布後凍結、
+  中文名為 `null` 要自己指定）、資料庫一定分開、建置九步——含 **clone Hosted 會整包複製正式 env／`visibility`／
+  `access_role_ids` 且立刻起 pod** 的窗口與可見度重設、runtime-settings 全量替換所以要白名單重建、egress 授權的
+  正確 body 形狀、secrets 成對注入、clone 不帶預設表引用——驗證表、維運與退場。
+- **租戶只有一個**：UAT 入口掛 UAT 專用角色只發給測試者，不沿用正式白名單、不為 UAT 邀整批人。
+
+### 使用者與登入綁在 AI GO：兩道門的正本（`member-admin.md` §7.1）
+
+搬進 AI GO 的 app（含外接庫的）登入一律由 AI GO 負責：先過「租戶成員＋app 角色」這道平台的門，app 自己的名單才是
+第二道；第二道門的身分怎麼來依產品線不同——Custom internal 有 `ctx.user_id`，**Hosted 平台不注入任何身分**（§6），
+要靠入口換票。app 名單上的 `can_login`／`is_admin` 是業務屬性，不是授權來源（與 §3.6 一致）。
+遷入計畫要有名單對照；邀請是客戶（租戶管理員）的事，遷入者只交清單。`migration-workflow.md` §2.4.5、
+`uat-environment.md` §3.5 都改成指回這裡。順手把 `custom-app-dev-guide.md` §25.2 的「唯一入口」改成
+「主要入口」並列出外部服務與 secrets 的 API 路徑（端點核自平台原始碼）。
+
+### 遷入盤點補兩列：原雲端拓撲、本機／外部微服務與排程（`migration-workflow.md` §2.0、解構模板）
+
+既有「附屬」列只點名排程與整合，沒問「跑在誰的機器、依賴什麼內網資源、遷入後去哪」。遷入案常見
+web repo 之外另有幾支只在同事本機跑的東西（讀內網 ERP 的人員同步、通知重試、靠本機工具的分析、部署腳本），
+沒盤到的話遷入後第一個排程日名單就不更新，而且沒有錯誤訊息。新列要求每支三選一落點
+（搬平台排程／留原機改指向／退役）＋切換順序與回滾；解構模板同步加兩列。
+
 ## 1.44.0
 
 ### SKILL.md 瘦身：1092 → 471 行，主檔只留路由與硬閘門
