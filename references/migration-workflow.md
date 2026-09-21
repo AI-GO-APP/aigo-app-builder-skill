@@ -134,6 +134,9 @@
   預設表／自建表、檔案一律 Storage API；Hosted App 的資料層一律改寫
   Open Proxy（`hosted-apps.md` §7.1）。「把 Postgres／包了 REST 的 DB
   搬成一個 Hosted App 給其他 App 打」不是選項。
+  唯一例外見 **dev-rules.md 規則 32**（平台工程師核准並建立的租戶級外接 PostgreSQL；核准紀錄存在才生效）：
+  §2.4 映射做完、逐項確認交易／FK／唯一約束／列鎖／RLS 在平台**做不到也改不掉設計**時才提申請，
+  申請前不得先開庫、不得先切。
 
 **判斷結果**：填入 **app 分配表**（`product-line-decision.md` §7；每個 app 一列：alias、產品線、
 模式、負責的功能群、拆分理由），多系統時同步記入 §1 的全景表。四象限落點與不可逆警示

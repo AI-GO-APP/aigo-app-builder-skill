@@ -33,7 +33,7 @@
   §4）——`PUT` 的全量語意從四欄變**五欄**；租戶 app 數配額（舊 429「預設 5 支」）已整條移除（§10）
 - **靠旗標不靠版本的兩條**：租戶專屬節點 `TENANT_DEDICATED_NODES` 在 **UAT 與 prod 都是 `ops-only`**
   （租戶自助開機未開放，要平台替租戶開）⇒ §4.1 的 `resources` 在多數租戶會 403；
-  租戶資料存取規則 `POLICY_GATE_MODE` **prod＝off**（§5 末條）
+  租戶資料存取規則 `POLICY_GATE_MODE` **prod＝off，但 main 上已改 on、等下一個 tag**（§5 末條）
 - **判讀原則**：對著本檔宣稱的端點拿到 404 或回應缺欄位，**先懷疑部署落差**，
   不是文件錯也不是你打錯——隔幾天再試或問平台
 
@@ -368,11 +368,13 @@ Hosted App 容器**只帶平台注入的 `AIGO_*`**，原系統的 env 一顆都
 - 憑證三動詞（session-only，**互不替代**）：`POST /{id}/credential/provision`（補建，冪等）
   ／`rotate`（輪替，新舊重疊 30 分鐘）／`revoke`（立即失效）
 - ★ **Open Proxy 也在租戶「資料存取規則」（Auth gate v1）的執法範圍**（T66；端點與執法碼 v1.13.0
-  已在 prod，但 `POLICY_GATE_MODE` **UAT on／prod off**，2026-09-07 核自 k8s manifest）：`/open/*` 的呼叫身分是 **app**（沒有 user）——`deny` 規則照擋（403 body 帶
+  已在 prod；`POLICY_GATE_MODE` 現況見下一行）：`/open/*` 的呼叫身分是 **app**（沒有 user）——`deny` 規則照擋（403 body 帶
   `reason`／`rule_id`）；`restrict` 規則只要 `where_dsl` 用到 `$user.*` 就**解不出→整列判 deny**
   （D28），所以租戶一開「依員工過濾」類規則，hosted app 的 Open Proxy 讀取會直接 403 而不是少列。
   遷入案的資料層改寫前把這條告訴租戶：對 app 身分要另設不帶 `$user.*` 的規則、或用 app 級規則放行；
   app 端改 code 無解 → `custom-app-dev-guide.md` §27
+- ⚠️ **`POLICY_GATE_MODE` 現況（2026-09-21）**：UAT 已 on；**prod manifest 於 2026-09-17 改 on（commit `00d4c86c`）
+  但尚未隨 `v*` tag 發版**——下一個 tag 上線即生效。走 Open Proxy 的 Hosted App 要在那之前把上一條處理掉。
 
 ### 5.1 Hosted App 當 Custom App 的後端（混合方案的一種）
 
@@ -472,13 +474,45 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
 - **歷史資料匯入在本地做**：走 data-center API 或匯入 action
   （`custom-app-dev-guide.md` §23.6）
 
-**為什麼「繼續連原 DB」不是選項**——★ 執行期出站只放 TCP 443
-（核對自平台 operator 的 NetworkPolicy 原始碼
-`infra/operator/internal/controller/resources.go`，2026-09-01 main；未實機驗證，
-部署落差判讀原則同本檔開頭）：hosted app 容器對外只能連**公網的 443 埠**
-（排除叢集私網段）＋ DNS，另可達平台 backend 與同租戶命名空間內的其他 app。
-Postgres 5432、MySQL 3306、Redis 6379 一律不通——連線字串直連原 DB 這條路
-**在網路層就不存在**，不是 driver 或防火牆設定問題。
+**為什麼「繼續連原 DB」不是選項**——是規則，不再是網路限制。
+★ 2026-09-17 起（平台 v1.15.2，PR #1641）operator 的
+`allow-hosted-app-egress` 已改成**公網 IPv4 任何 TCP 埠都通**，只排除 `10/8`、`172.16/12`、
+`192.168/16`、`169.254/16`，且不含 UDP（核對自 `infra/operator/internal/controller/resources.go`
+與平台 monorepo 的 architecture/hosted-apps 文件「Runtime 對外連線」一節；2026-09-19 從租戶容器實測 5432／6543 connected）。
+所以 Postgres 5432、MySQL 3306、Redis 6379 **在網路層是通的**——但這只是可達性，不是架構授權：
+DNS、NAT、對端防火牆、憑證、資料存取規則照樣管，而規則 32 仍然禁止 builder 自帶或直連 DB。
+唯一例外走 dev-rules.md 規則 32 的平台核准流程（核准紀錄存在才生效）。
+（v1.15.2 之前本段寫「只放 443、直連 DB 在網路層不存在」，那是當時事實，已作廢。）
+
+### 7.2 拿到規則 32 例外之後：外接 Supabase 的營運注意
+
+> 以下是 **2026-09-21 對 Supabase 的實測與面板讀值**（外接庫灌正式資料那一輪，每一條都有人踩過），
+> 不是平台契約：埠數、上限、價格會變，用前自行複查。機制比數字重要。
+
+
+- **連 6543（交易模式 pooler），不要連 5432**：session pooler 每顆 Micro 只收 **15 條**，app 的連線池宣告
+  20＋5＋5＝30 條，冷啟或滾動部署兩個實例並存那幾十秒會**全站 500**（實測 20 個請求全滅）。
+  6543 收 200 條，同一測試零失敗；而且 pooler 到 DB 那段被砍時 app 端無感。代價：資料庫端看不到
+  `application_name`，只看得到 `Supavisor`，砍連線只能整池砍。
+- **連線字串不要寫 `sslmode=require`**：node-postgres 8.x 會拿去驗憑證，而 Supabase 用自家 CA，
+  一律 `SELF_SIGNED_CERT_IN_CHAIN`。可行寫法：`uselibpqcompat=true&sslmode=require`，或程式端對
+  Supabase 主機給 `ssl: { rejectUnauthorized: false }`。**也不要整個拿掉**——不帶參數會變明文（PLAINTEXT），
+  pooler 照收不報錯。
+- **`statement_timeout` 預設 2 分鐘**（`postgres` 角色沒有覆蓋），自架或其他 PaaS 通常沒有。整表撈取、
+  `VACUUM FULL`、大批次歸檔那一族會被砍（`canceling statement due to statement timeout`）。
+  `SET statement_timeout` 在 6543 上留得住——維運端點自己放寬，不要整站放寬。
+- **磁碟：spend cap 與自動擴容的坑**。專案磁碟 8 GB 起跳，用到 90% 自動擴 50%，但 **24 小時最多擴 4 次**，
+  且**組織 spend cap 開著時磁碟上限鎖在 8 GB**（dashboard 明寫「Disable spend cap 才能超過 8 GB」）。
+  一次灌幾百 MB 暫存就能把 4 次額度燒完然後 `No space left on device`，Supabase 約 5 分鐘自己重開、
+  資料不壞，但正式站不能靠這個。做法：**正式切換前關掉組織 spend cap**（帳單決定，要 owner 點頭；
+  超過 8 GB 每 GB 約 $0.125/月）、大量匯入前先手動把磁碟調到需要的大小（一次調到位，也算一次修改）、
+  磁碟只長不縮。Supabase 沒有花費告警，Billing 頁要定期看。
+- **WAL 會佔 1 GB 起跳**（`min_wal_size=1024MB`），上限 `max_wal_size=4GB`；資料 400 MB 的庫在 dashboard
+  顯示用 1.6 GB 是正常的，不是漏。
+- **RLS 開著但零 policy 時**：以擁有者（`postgres`）連沒事；換成非擁有者角色連，**每張表讀回空、不報錯**，
+  畫面上跟「真的沒資料」一模一樣。要嘛補 policy，要嘛明文只准擁有者連。
+- **`seq`／serial 會跳號**：被唯一約束擋掉的寫入會吃掉號碼，並行寫入時明顯；用 `seq` 當增量書籤的程式
+  要知道「比書籤小的號碼可能晚到」。
 
 **★ 也不可把 DB 立成一個 Hosted App**（`dev-rules.md` 規則 32）：同租戶命名空間內
 app 互通，技術上可以把 PostgREST／Hasura 這類「REST 包裝的 DB」部署成

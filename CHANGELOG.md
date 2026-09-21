@@ -1,3 +1,38 @@
+## 1.46.0
+
+### 規則 32 改寫：自帶 DB 仍預設禁止，唯一例外是平台工程師核准的「租戶級外接 PostgreSQL」（ADR 0032）
+
+背景：已有遷入案在平台團隊知情下外接 Supabase，而 skill 與平台 spec（2026-09-15「租戶自帶 DB」已否決）
+都寫禁止——「規則說不行、執行上放行」，下一個撞到交易／FK／RLS 缺口的案子會問為什麼那個可以。
+平台 ADR 0032（2026-09-21 起草，**待核准**）把它收斂成有條件的例外；本版讓 skill 引用它，但規則本身不依賴它：
+例外只存在於該案 issue 上具名工程師的核准紀錄，ADR 被改號、否決或未公開都不改變這句。
+
+- 規則 32：預設不變；例外**只能**由具名 AI GO 工程師核准並在平台側建立，builder 只整理證據提申請，
+  不得自己開庫、發憑證、切落點。觸發條件是**逐項**能力（交易／FK／唯一約束／列鎖／RLS）經部署版本實測缺，
+  「T01–T35 還沒做完」不算。粒度一租戶一顆＋UAT 另一顆、服務以 schema 分；只限關聯式 PostgreSQL，
+  Storage／Auth／Realtime／pg_cron 不在內；回程條件必填。核准前例外不生效。
+- 同語意四處（`product-line-decision.md` 能力邊界表、`migration-workflow.md` §2.1、兩個 resources 模板）只留一句＋
+  「見 dev-rules.md 規則 32」，全文只在 dev-rules.md 規則 32 一處（一正本多指標，避免五份漂移）。
+
+### 外接 Supabase 的營運注意（`hosted-apps.md` 新 §7.2）
+
+外接 Supabase 灌正式資料實測（2026-09-21）踩到的七條：只連 6543（session pooler 15 條，冷啟全站 500）、
+`sslmode=require` 會被 node-postgres 拿去驗 Supabase 自家 CA、`statement_timeout` 預設 2 分鐘、
+**磁碟自動擴 24 小時只准 4 次＋組織 spend cap 把上限鎖在 8 GB**（一次灌幾百 MB 暫存就 `No space left`）、
+WAL 起跳 1 GB、RLS 零 policy 換角色會讀空、serial 跳號。切換前要關 spend cap（帳單決定）。
+數字是 2026-09-21 的實測與面板讀值，不是平台契約，段首有標示。
+
+### 事實更正：Hosted App 出站自 v1.15.2 起不再只放 443（`hosted-apps.md` §7.1）
+
+平台 v1.15.2（PR #1641）把 `allow-hosted-app-egress` 改成公網 IPv4 任何 TCP 埠
+（排除 RFC1918 與 169.254/16，不含 UDP）；2026-09-19 從租戶容器實測 5432／6543 connected。
+舊文「直連 DB 在網路層就不存在」作廢，改成「網路層通（IPv4），但那不是授權」。
+
+### `POLICY_GATE_MODE` 現況更正（`hosted-apps.md` 開頭與 §5，獨立一行）
+
+prod manifest 已於 2026-09-17 改 on（`00d4c86c`），截至 2026-09-21 未隨 tag 發版；下一個 tag 生效後，
+Open Proxy 以 app 身分讀到帶 `$user.*` 規則的表會整列 403。
+
 ## 1.45.0
 
 ### 規則 33：每支要上正式的 app 都要有「UAT 結論」（新 reference `uat-environment.md`）
