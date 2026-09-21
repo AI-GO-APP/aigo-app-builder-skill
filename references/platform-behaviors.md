@@ -10,6 +10,24 @@
 
 ---
 
+## 目錄
+
+- 1. DB Proxy 查詢（★ 影響每一支 App）
+- 2. 寫入 TIMESTAMP 欄位：不可帶時區（★ 帶 `Z` 一律 500）
+- 3. 平台 seed 表：只能宣告 read
+- 4. `ctx` 的完整命名空間與 `ctx.erp`
+- 5. Builder API 的兩個必填／衝突
+- 6. 租戶空間網址與 Internal App 執行期網址
+- 7. Server Action 必須發布後才可呼叫
+- 8. 原生 TIMESTAMP／DATE 是 offset-naive 的 UTC（★ 前端解析會差 8 小時）
+- 9. NOT NULL 欄位只有在真的送出時才會浮現
+- 10. 取得登入者：身分與權限是兩條管道，`user.ts` 不一定在 VFS 裡
+- 11. 空渲染偵測：掛載後 8 秒內必須渲染出東西（2026-08 起）
+- 12. App API 權限閘（通用權限 gate）：現況 audit，enforce 前要做的準備
+- 13. Egress 閘道的四道上限（2026-09-09 prod 實打＋平台原始碼核對）
+
+---
+
 ## 1. DB Proxy 查詢（★ 影響每一支 App）
 
 ### 1.1 單次查詢硬上限 500 筆，回傳是裸陣列

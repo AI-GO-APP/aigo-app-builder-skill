@@ -37,6 +37,22 @@
 - **判讀原則**：對著本檔宣稱的端點拿到 404 或回應缺欄位，**先懷疑部署落差**，
   不是文件錯也不是你打錯——隔幾天再試或問平台
 
+## 目錄
+
+- 1. 是什麼：與 Custom App 的邊界
+- 2. 應用形狀硬規則（★ 失敗率最高的來源，動手前逐條核）
+- 3. 部署
+- 4. 環境變數（詳情頁「環境變數」tab；`PUT /{id}/runtime-settings`）
+- 5. 取平台資料（隨附整合 + Open Proxy）
+- 6. 可見度與 internal app 的 401 處置
+- 7. 持久化語意（★ 資料放哪裡才不會消失）
+- 8. 日誌與除錯
+- 9. 自訂網域（session-only）
+- 10. 錯誤碼對照（★ 分清「重試會好」與「不會好」）
+- 11. API 端點速查（前綴 `/api/v1/hosted-apps`）
+
+---
+
 ## 1. 是什麼：與 Custom App 的邊界
 
 | | Custom App（本 skill 主流程） | Hosted App |
@@ -146,7 +162,7 @@ OOM 只在整台用盡時發生，上面「4 GiB 的 60–65%」是舊引擎的�
 - **建立 app 是 session-only**（ADR 0019）：per-app token 綁的是既有 app，
   建立當下 app 還不存在——讓它能建，這把鑰匙就同時是「開新門」的鑰匙。
   Deploy Token 與 App 憑證打 `POST /` 回固定 403 訊息；
-  帳號需 `hosted_apps.deploy` 權限，登入走租戶子網域（SKILL.md 規則 29）
+  帳號需 `hosted_apps.deploy` 權限，登入走租戶子網域（`dev-rules.md` 規則 29）
 
 ### 3.2 部署流程（API）
 
@@ -443,7 +459,7 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
 
 **預期路徑（唯一的常態）：資料遷入平台 + Open Proxy**
 
-- **落點依雙軌分流**（與 Custom App 同一套規則，SKILL.md 規則 18）：
+- **落點依雙軌分流**（與 Custom App 同一套規則，`dev-rules.md` 規則 18）：
   平台有同語意實體的資料（先用業務語言查 `default-table-lookup.md` §2）→ 在「資料存取」tab 加**預設表引用**
   （預設表零授權起步，要先加引用並發布，§5）；查過仍沒有的 → **自建表**
   （資料中心自建表預設整租戶可用，§5）
@@ -464,7 +480,7 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
 Postgres 5432、MySQL 3306、Redis 6379 一律不通——連線字串直連原 DB 這條路
 **在網路層就不存在**，不是 driver 或防火牆設定問題。
 
-**★ 也不可把 DB 立成一個 Hosted App**（SKILL.md 規則 32）：同租戶命名空間內
+**★ 也不可把 DB 立成一個 Hosted App**（`dev-rules.md` 規則 32）：同租戶命名空間內
 app 互通，技術上可以把 PostgREST／Hasura 這類「REST 包裝的 DB」部署成
 Hosted App 讓其他 App 打 HTTP 過去——這是明文禁止的反模式，不是巧妙的過渡方案。
 它讓業務資料脫離平台的表：進不了平台功能、繞過簽核與權限閘、平台不備援。

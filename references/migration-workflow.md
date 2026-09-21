@@ -10,6 +10,14 @@
 
 ---
 
+## 目錄
+
+- 1. 多系統遷入盤點（2 個以上外部系統時）
+- 2. 單一系統的遷移評估
+- 3. 詳細參考
+
+---
+
 ## 1. 多系統遷入盤點（2 個以上外部系統時）
 
 > **觸發條件**：用戶明確表示有 **2 個以上外部系統**（各自帶 Supabase / Google Sheet / MySQL 等 DB）要遷入 AI GO。
@@ -115,7 +123,7 @@
   系統 → Custom App；兩邊共用的資料落平台側（自建表；Hosted 走 Open Proxy，
   `hosted-apps.md` §7.1），不因共用而硬併成一個 app。
 - ⚠️ **資料層不參與這個判斷**：不論分到哪條線，DB 與 storage 都**不允許**
-  自立 Hosted App 承載（SKILL.md 規則 32）——table schema 一律落平台
+  自立 Hosted App 承載（`dev-rules.md` 規則 32）——table schema 一律落平台
   預設表／自建表、檔案一律 Storage API；Hosted App 的資料層一律改寫
   Open Proxy（`hosted-apps.md` §7.1）。「把 Postgres／包了 REST 的 DB
   搬成一個 Hosted App 給其他 App 打」不是選項。

@@ -53,13 +53,13 @@
 > （櫃檯、掃碼、來電查詢、客戶在線上等回覆）才問一次冷啟動容忍秒數。
 > 盤點時把原專案所有「開 DB 連線／下 SQL」的位置列成清單，這份清單就是改寫工作量的依據。
 > ⚠️ **DB 與 storage 不得自立成 Hosted App**（含 PostgREST 類 REST 包裝，
-> SKILL.md 規則 32）——原專案若有 docker-compose 帶 db／redis service，
+> `dev-rules.md` 規則 32）——原專案若有 docker-compose 帶 db／redis service，
 > 那些 service **不在**「整套搬」的範圍內，資料一律遷入平台的表與 Storage。
 
 ## 使用者／認證表（★ 不要當一般資料表遷）
 
 原專案的 `users`／`accounts` 表**不進** `migration_mapping_template.md` 的映射流程。
-把它建成自建表 = 在 app 內另建一套帳號體系，正是 SKILL.md 規則 23 禁止的反模式。
+把它建成自建表 = 在 app 內另建一套帳號體系，正是 `dev-rules.md` 規則 23 禁止的反模式。
 
 **人一律成為租戶成員**——員工、外部經銷商、客戶都一樣，差別只在角色（`member-admin.md` §0／§7）：
 
@@ -81,7 +81,7 @@ AI GO 的資料層**不提供**這些機制——邏輯必須上移到程式層�
 |---|---|
 | trigger（寫入時自動算欄位、連動更新） | 改寫進負責該寫入的 Server Action；**所有寫入路徑都要經過這個 action**，前端不得繞過直寫 |
 | view（彙總查詢） | Server Action 內查詢後組裝；或前端拉原始資料自算（量小時） |
-| RLS policy（列級權限） | internal：action 內用 `ctx.user_permissions`／`ctx.user_id` 分流（SKILL.md 規則 23）；平台租戶隔離已由 DB Proxy 處理，**不要**自己補 tenant 過濾（規則 25） |
+| RLS policy（列級權限） | internal：action 內用 `ctx.user_permissions`／`ctx.user_id` 分流（`dev-rules.md` 規則 23）；平台租戶隔離已由 DB Proxy 處理，**不要**自己補 tenant 過濾（規則 25） |
 | stored procedure | 改寫成 Server Action |
 | Supabase edge functions | 改寫成 Server Action；對外呼叫改 `ctx.http.call` |
 | Supabase realtime 訂閱 | 無對應——輪詢替代，或改判 Hosted App |
