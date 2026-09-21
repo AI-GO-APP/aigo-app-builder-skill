@@ -1,3 +1,27 @@
+## 1.46.1
+
+### 修正：VFS 檔案數上限 200 → 500（文件與平台不符）
+
+查對平台原始碼 `infra/builder/compile.go:16` `MaxFileCount = 500`（Python 端鏡像
+`backend/app/services/typecheck.py:30` 同值），本 skill 長期記載的「200 檔」是錯的。
+方向是**低估**——agent 會把 app 切在 200 檔以內，白白放棄一半額度。
+
+一併修正與補充：
+
+- 單檔上限寫明為 **1,000,000 bytes**（不是 1048576）——`compile.go:17`
+- 補上文件從未記載的行為：**單檔超限不報錯，而是靜默跳過**（`compile.go:263` 只寫 log
+  然後 continue），該檔不進 bundle 但編譯仍回報成功，症狀延後到執行期才浮現。
+  檔數超限才會回傳 error（`:252`）
+
+修正處：`SKILL.md` 規則 14、`references/custom-app-dev-guide.md` §4、
+`references/migration-workflow.md`。
+
+### 治本：數值改由平台 API 提供
+
+平台目前沒有任何端點揭露這些限制，外部工具只能抄，抄錯也無從發現。已向平台提案
+增設 `GET /api/v1/builder/apps/{app_id}/limits`（urfit-tech/AI-GO#1673），比照現有的
+`crons/quota` 端點。**端點上線後本 skill 改為呼叫 API，以 API 回傳值為準，文件不再記載數字。**
+
 ## 1.46.0
 
 ### 規則 32 改寫：自帶 DB 仍預設禁止，唯一例外是平台工程師核准的「租戶級外接 PostgreSQL」（ADR 0032）

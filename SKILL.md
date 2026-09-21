@@ -229,7 +229,9 @@ Custom 過 `custom-app-dev-guide.md` §28.1（答案幾乎一律是「關」，�
 13. **前端 `db.ts` 的 db.insert() Bug**：同上，需用 `{"data": {...}}` 包裝
     - ⚠️ **只適用前端**。Server Action 的 `ctx.db.insert(table, data)` 收**扁平 dict**，
       包裝反而會被濾光並回 400。自建表的 `insert_row` / `update_row` 同樣收扁平 dict
-14. **VFS 限制**：最多 200 檔案、單檔 ≤ 1MB、編譯超時 30 秒
+14. **VFS 限制**：最多 500 檔案、單檔 ≤ 1MB（1,000,000 bytes）、編譯超時 30 秒
+    ——**單檔超限不報錯，是靜默跳過**（該檔不進 bundle，症狀延後到執行期）。
+    數值以平台為準，見 `references/custom-app-dev-guide.md` §4
 15. **完整程式碼原則**：每次更新 VFS 檔案必須提供 100% 完整內容，禁止 `// ...省略` 佔位符
 16. **不支援動態 import**：`import()` 語法不支援（lazy loading 除外，esbuild 支援 code splitting）
 17. **不支援 Node.js 原生模組**：fs, path, crypto 等無法使用
