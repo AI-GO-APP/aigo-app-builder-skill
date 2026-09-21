@@ -194,7 +194,7 @@ aigo-harness/              ← 合併 builder、transfer、checker 後的單一 
 └── CONTEXT.md              ← 術語表（沿用現有內容）
 ```
 
-**checker 併進來，但它的產品中立規則要原封不動帶過來。** 它在 `AGENTS.md` 明訂「產品資訊只能出現在 `references/aigo-platform.md` 定義的範圍內，不得把 AI GO 寫進任何檢查清單、嚴重度定義或報告的發現段落」——這條界線是它作為稽核工具的可信度基礎，與 repo 放哪裡無關，合併後必須繼續守住，並由 §3.3 的檢查強制。
+**checker 併進來，但它的產品中立規則要原封不動帶過來。** 它在 `AGENTS.md` 明訂「產品資訊只能出現在 `references/aigo-platform.md` 定義的範圍內，不得把 AI GO 寫進任何檢查清單、嚴重度定義或報告的發現段落」——這條界線是它作為稽核工具的可信度基礎，與 repo 放哪裡無關，合併後必須繼續守住，並由 §3.4 的檢查強制。
 
 ### 3.2 關鍵決策與取捨
 
@@ -204,9 +204,33 @@ aigo-harness/              ← 合併 builder、transfer、checker 後的單一 
 | `workflows/` 自 `skills/` 拆出 | 這些流程有外部副作用，只能由使用者觸發 | 目錄多一類 |
 | `rules/` 依 paths 拆成多檔 | 模型只在讀到對應路徑的檔案時才載入該檔，省 context（理由見 §1.2 b） | 規則散在多檔，需要一份索引 |
 | 不做 Claude Code plugin | 既然預定以 MCP 發布，plugin 這條路會綁定單一客戶端；而且官方文件明載 plugin 根目錄的 CLAUDE.md 不會被載入，plugin 無法夾帶 rules | 過渡期仍得用 git clone 安裝 |
-| checker 併入同一個 repo | 它服務的就是 AI GO 的 vibe coder，與 builder、transfer 同一群使用者，沒有理由讓他們裝兩套 | 產品中立規則需靠 §3.3 的檢查維持，不再有「repo 分開」這層天然隔離 |
+| checker 併入同一個 repo | 它服務的就是 AI GO 的 vibe coder，與 builder、transfer 同一群使用者，沒有理由讓他們裝兩套 | 產品中立規則需靠 §3.4 的檢查維持，不再有「repo 分開」這層天然隔離 |
 
-### 3.3 併入 checker 之後要補的一道檢查
+### 3.3 檔案格式：YAML frontmatter + Markdown
+
+**是業界標準，但只對「給模型讀的文字」成立。** Agent Skills 規格定義 skill 的形狀就是一份 `SKILL.md`——`---` 之間的 YAML frontmatter 加下方的 Markdown 正文；frontmatter 必須從檔案第一行開始，否則整份檔案會被當成內文。Cursor 也支援同一個格式，只是多了 `icon`、`color` 兩個外觀欄位。Claude Code 的 rules 與 subagent 定義同樣是 frontmatter + Markdown。
+
+本設計各分類的格式：
+
+| 分類 | 格式 | frontmatter 欄位 |
+|---|---|---|
+| `skills/*/SKILL.md` | YAML frontmatter + Markdown | `name`（小寫連字號、≤64 字元、與目錄同名）、`description`；正文 500 行以內 |
+| `skills/*/references/*.md` | 純 Markdown，**不需要** frontmatter | — |
+| `rules/*.md` | YAML frontmatter + Markdown | `paths`（glob 清單，限定何時載入） |
+| `workflows/*.md` | 同 skill 格式 | 另加 `disable-model-invocation: true`（見下方警告） |
+| `agents/*.md` | YAML frontmatter + Markdown | `name`、`description`、工具限制（唯讀） |
+| `guards/*.py`、`tools/**` | 程式碼，不是 Markdown | — |
+| `assets/**` | 範本與設定檔（`.md`、`.json`），不進 frontmatter | — |
+
+**一個要留意的可攜性落差**：Agent Skills 規格只允許 `name`、`description`、`license`、`compatibility`、`metadata`、`allowed-tools` 六個欄位，上傳或打包時出現其他欄位會**硬性報錯**。Claude Code 自己支援的 `disable-model-invocation`、`context: fork`、`hooks`、`paths` 等都**不在**規格內。
+
+這代表：
+
+- `skills/` 維持規格內的六個欄位，才能保有「換客戶端也能用」的退路（§2 的結論）
+- `workflows/` 依賴 `disable-model-invocation` 來確保只能由人觸發，這是 **Claude Code 專屬能力**；換到不支援的客戶端時，那層保護會消失，屆時要靠 tool 端把關（MCP 化之後由 server 決定要不要開 prompt，這個問題自然解決）
+- `rules/` 的 `paths` 同樣是客戶端專屬的。scaffold 寫進使用者專案時，除了 `.claude/rules/`，另外產一份 `AGENTS.md` 給其他客戶端讀——`AGENTS.md` 是純 Markdown、沒有條件載入機制，所以只放最精簡的硬規則
+
+### 3.4 併入 checker 之後要補的一道檢查
 
 checker 的可信度來自它的報告不替 AI GO 推銷。合併後這條規則失去「repo 分開」的天然保護，必須改由程式守住——在 `guards/` 增加一支檢查：`skills/security-audit/` 底下除了 `references/aigo-platform.md` 以外的檔案，不得出現產品名稱。這正是 §1.2 (a) 的作法：把靠自律維持的規則換成確定性檢查。
 
