@@ -99,7 +99,7 @@ builder（以下位置為 1.44.0 瘦身後的現況）：
 | 現況位置 | 應屬 | 為什麼 |
 |---|---|---|
 | `references/dev-rules.md`（259 行，原 Phase 3 規則 18–32）、`references/environment.md` 的租戶空間網址與憑證規則、SKILL.md Phase 3 留下的規則 1–17 速查表 | Rules | 這些是開發者寫 app code 時永遠要成立的限制，不是某個流程的步驟。它們現在雖然搬出主檔，但仍只在 skill 被觸發時才載入，模型直接改 code 時看不到 |
-| 規則 9（SDK 檔不可修改）、規則 14（VFS 上限 200 檔、單檔 1MB）、禁用詞交付前 grep、憑證不得出現在指令列 | Guards | 這四條都能由程式直接判定對錯，寫成文字只是請求 |
+| 規則 9（SDK 檔不可修改）、規則 14（VFS 上限，**現載 200 檔實為錯誤，見 §7**）、禁用詞交付前 grep、憑證不得出現在指令列 | Guards | 這四條都能由程式直接判定對錯，寫成文字只是請求 |
 | SKILL.md Phase -1 的 skill 自我更新、Phase 4「每次改完 code 都必須部署並驗證」 | Guards／自動化 | 「每次都要做」正是生命週期事件觸發的定義 |
 | `references/review-workflow.md` 的現況盤點九步（既有 code、租戶自建表、既有排程、對外呼叫）、`references/pre-report-self-grill.md` 的六輪自審 | Agents | 盤點要讀大量檔案但只需回傳結論；自審交給獨立的驗證者比自己檢查自己更可信 |
 | SKILL.md Phase 4.4 發布、Phase 5 的問題回報 submit | Workflows | 這兩者會影響外部系統，不該由模型自行決定何時執行 |
@@ -122,6 +122,18 @@ checker：
 - `templates/report.md` 改名為 `assets/report.md`，與其他兩者一致
 - **抽象層級不一致**（新發現，見 §2.5）
 
+### 2.3 builder 與 transfer 共用的基礎設施已經分歧
+
+| 檔案 | 分歧狀況 |
+|---|---|
+| `check_update.py` | builder 與 transfer 各有一份，互相 diff 有 735 行差異：builder 會強制同步到遠端最新版，transfer 只印出提示 |
+| `resources/hooks/*` | 兩份內容近乎相同，但 hook timeout 一個設 120 秒、一個設 10 秒 |
+| `aigo_client.py` | transfer 的這支腳本在註解中自稱「憑證與租戶空間紀律對齊 builder 1.8.0+ 的 `aigo_auth.py`」，而 builder 現已是 1.44.0 |
+
+### 2.4 為什麼會變成這樣
+
+混類不是因為寫的人隨便，而是發布方式造成的：這三個 repo 要 clone 到 FDE 或租戶的機器上，而客戶端（Claude Code、Codex）只會把「一個 skill 目錄」當成一個可安裝的單位——rules 要放進使用者的專案才會載入、hooks 要寫進使用者的 settings 才會執行，兩者都不會跟著 skill 目錄走。所以規則與護欄只能退而求其次，全部塞進 `SKILL.md`。**要解決混類，得先換掉發布方式。**
+
 ### 2.5 checker 的 stack 檔破壞了它自己的抽象層級
 
 checker 的 `references/` 底下同時放了兩種層級的檔案：
@@ -138,18 +150,6 @@ checker 的 `references/` 底下同時放了兩種層級的檔案：
 3. **重複**：`01-tenant-isolation.md` 講租戶識別，`stacks/supabase.md` 又用 RLS 把租戶隔離講一次，同一條原則兩處維護
 
 **建議**：把主從關係倒過來。8 個維度檔是唯一的檢查清單（SSOT）；stack 檔降級為「查核提示」，只放該技術棧特有的陷阱與查法（例如「Supabase 用這兩段 SQL 查 RLS 狀態」），並明確寫出「未列出的技術棧一樣要做完 8 個維度，只是要自己找對應的查法」。
-
-### 2.3 builder 與 transfer 共用的基礎設施已經分歧
-
-| 檔案 | 分歧狀況 |
-|---|---|
-| `check_update.py` | builder 與 transfer 各有一份，互相 diff 有 735 行差異：builder 會強制同步到遠端最新版，transfer 只印出提示 |
-| `resources/hooks/*` | 兩份內容近乎相同，但 hook timeout 一個設 120 秒、一個設 10 秒 |
-| `aigo_client.py` | transfer 的這支腳本在註解中自稱「憑證與租戶空間紀律對齊 builder 1.8.0+ 的 `aigo_auth.py`」，而 builder 現已是 1.43.0 |
-
-### 2.4 為什麼會變成這樣
-
-混類不是因為寫的人隨便，而是發布方式造成的：這三個 repo 要 clone 到 FDE 或租戶的機器上，而客戶端（Claude Code、Codex）只會把「一個 skill 目錄」當成一個可安裝的單位——rules 要放進使用者的專案才會載入、hooks 要寫進使用者的 settings 才會執行，兩者都不會跟著 skill 目錄走。所以規則與護欄只能退而求其次，全部塞進 `SKILL.md`。**要解決混類，得先換掉發布方式。**
 
 ---
 
@@ -268,11 +268,55 @@ MCP 原本只有 tools、resources、prompts 三種機制，沒有「skill」這
 
 ## 6. 待決事項
 
-- [ ] 合併後的 repo 怎麼生：在 `AI-GO-APP` 新開一個 `aigo-harness` repo 並把兩邊搬進去，或直接在 `aigo-app-builder-skill` 內重組後改名（後者保得住 137 個 commit 的歷史與既有 issue）
-- [ ] transfer repo 合併後如何處置：封存，或保留並在 README 指向新 repo
+- [ ] 合併後的 repo 怎麼生：在 `AI-GO-APP` 新開一個 `aigo-harness` repo 並把三邊搬進去，或直接在 `aigo-app-builder-skill` 內重組後改名（後者保得住 137 個 commit 的歷史與既有 issue）
+- [ ] transfer 與 checker 的 repo 合併後如何處置：封存，或保留並在 README 指向新 repo
+- [ ] §7 的限制查詢端點要不要做、由誰做——這是對 AI GO 平台本體的修改，需與開發團隊確認
 - [ ] 過渡期要不要同時維持「一個 repo 等於一個 skill 目錄」的舊安裝方式，若要，維持多久
 - [ ] Claude Code 與 Codex 目前對「用 MCP 發送 skill」的支援程度（尚未查證）
 - [ ] transfer 的 `template-contract.md` 與 builder 的 `platform-behaviors.md`、`data-center.md` 內容重疊多少（尚未逐段比對）
+
+## 7. 對 AI GO 平台本體的建議：限制值改由 API 提供
+
+### 7.1 問題：文件抄的值已經錯了
+
+skill 文件把平台限制值抄成文字（SKILL.md 規則 14、`references/custom-app-dev-guide.md` §4、`migration-workflow.md` 等處）。查對 codebase 後發現**抄錯**：
+
+| 項目 | skill 文件寫的 | 平台實際 | 定義位置 |
+|---|---|---|---|
+| VFS 檔案數上限 | **200 檔** | **500 檔** | `infra/builder/compile.go:16` `MaxFileCount = 500`；Python 端鏡像 `backend/app/services/typecheck.py:30` |
+| 單檔大小 | 1MB | 1,000,000 bytes（**不是** 1048576） | `infra/builder/compile.go:17` |
+| 編譯逾時 | 30 秒 | 30 秒（相符） | `infra/builder/compile.go:21` |
+
+錯誤方向是**低估**：agent 會把 app 切成 200 檔以內，白白放棄一半的額度。
+
+另外一個文件沒寫、但 agent 必須知道的行為：**單檔超過 1MB 不會報錯，而是被靜默跳過**（`compile.go:263` 只寫 log 然後 `continue`）。檔數超限才會回傳 error（`:252`）。也就是說超大檔案會編出一個「少一個檔」的 bundle，症狀出現在執行期，而不是編譯期。
+
+這還不是第一次漂移：`references/event-triggers.md:174` 自己記著 runner ceiling 在 prod v1.13.0（#1518）之前恆為 30 秒、之後才變 120 秒。**文件靠人追著改，而且已經追丟了一次。**
+
+### 7.2 這些值目前的型態
+
+| 限制 | 型態 | per-tenant 可調？ |
+|---|---|---|
+| VFS 檔數／單檔大小／編譯逾時 | Go `const`、Python 模組常數 | ❌ 改了要重新部署 builder |
+| Action `timeout_ms` 範圍 1000–120000 | 寫死三處：`schemas/action.py:24`、`builder_tool_executor.py:1061` 與 `:1137`、`builder_tools.py:242` | ❌ |
+| Egress request 8 MiB、rate limit 120/min | Pydantic Settings（env 可覆蓋，全域一份）`core/config.py:419,420` | ❌ |
+| Egress 單一 service 的 `timeout_ms`、`max_response_bytes` | **DB 欄位**，tenant-scoped `models/egress.py:47-48` | ✅ 但只能調低於全域硬上限 |
+
+**目前沒有任何 API 會回傳這些限制值**——前端要用就自己再寫死一份（`frontend/src/lib/egressRequirements.ts:54` 註解直接寫「比照 backend」）。租戶只有在 PATCH 超限被 422 時，才從錯誤訊息知道上限是多少。
+
+### 7.3 建議
+
+**(a) 新增一個限制查詢端點。** 平台已經有現成的模式可以照抄：`GET /api/v1/builder/apps/{app_id}/crons/quota` 會回 `app_limit`、`tenant_limit`、`min_interval_minutes`，並依租戶付費檔位給不同的值（`api/builder_app_crons.py:68`、`services/app_cron_service.py:201`）。建議比照增設 `GET /api/v1/builder/apps/{app_id}/limits`，回傳 VFS 檔數、單檔大小、編譯逾時、action timeout 範圍、egress 各項上限。
+
+**(b) skill 端改成查而非抄。** `tools/` 呼叫該端點取得限制，`guards/vfs_limits.py` 用回傳值判定，文件只寫「限制由 API 取得」，不再抄數字。這樣租戶若真的分檔位，skill 自動跟著對。
+
+**(c) 若短期內不做 API，至少先修正數字**——這是獨立於本重構、可立即進行的修正，並建議在 AI GO repo 加一個測試，確保文件值與 `compile.go` 常數一致。
+
+**(d) 回報給 AI GO 開發團隊的問題**：單檔超限靜默跳過（`compile.go:263`）是否為刻意設計？從 custom app 開發者的角度，這會變成難以診斷的執行期錯誤，建議改為回傳 error，與檔數超限一致。
+
+### 7.4 順帶發現：custom app 的開發限制不在租戶分層機制內
+
+AI GO 已有成熟的 per-tenant／per-plan 配額機制（`services/quota_service.py` 為 SSOT，四層優先序見 `core/tenant_sync.py:24`），涵蓋 k8s 運算資源、Data Center 表數與欄數、App Cron 排程、用量配額。但**custom app 的開發限制完全不在這套機制裡**——全是跨租戶共用的常數。若未來要按方案差異化（例如付費租戶給更大的 VFS 額度），現成的四條路徑可以照抄。
 
 ## 參考
 
