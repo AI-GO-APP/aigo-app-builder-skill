@@ -72,7 +72,7 @@ Claude Code 官方文件建議：會產生副作用的 skill 應設定 `disable-
 - 每類內容只有一個歸屬，不重複、不混放
 - 可由程式判定的規則要寫成程式，不能只寫成文字
 - 主入口檔只負責分流，細節按需載入
-- builder 與 transfer 共用的基礎設施只維護一份（SSOT）
+- 三個 repo 共用的基礎設施只維護一份（SSOT）：憑證與 API client 由 builder 與 transfer 共用，更新檢查、hooks 範例、報告格式則三者共用
 
 ---
 
@@ -204,7 +204,7 @@ aigo-harness/              ← 合併 builder、transfer、checker 後的單一 
 | `workflows/` 自 `skills/` 拆出 | 這些流程有外部副作用，只能由使用者觸發 | 目錄多一類 |
 | `rules/` 依 paths 拆成多檔 | 模型只在讀到對應路徑的檔案時才載入該檔，省 context（理由見 §1.2 b） | 規則散在多檔，需要一份索引 |
 | 不做 Claude Code plugin | 既然預定以 MCP 發布，plugin 這條路會綁定單一客戶端；而且官方文件明載 plugin 根目錄的 CLAUDE.md 不會被載入，plugin 無法夾帶 rules | 過渡期仍得用 git clone 安裝 |
-| checker 併入同一個 repo | 它服務的就是 AI GO 的 vibe coder，與 builder、transfer 同一群使用者，沒有理由讓他們裝兩套 | 產品中立規則需靠 §3.4 的檢查維持，不再有「repo 分開」這層天然隔離 |
+| checker 併入同一個 repo | 它服務的就是 AI GO 的 vibe coder，與 builder、transfer 同一群使用者，沒有理由讓他們裝兩套 | 周圍全是 AI GO 的內容，產品中立更容易被無意破壞，需補 §3.4 的檢查 |
 
 ### 3.3 檔案格式：YAML frontmatter + Markdown
 
@@ -230,9 +230,15 @@ aigo-harness/              ← 合併 builder、transfer、checker 後的單一 
 - `workflows/` 依賴 `disable-model-invocation` 來確保只能由人觸發，這是 **Claude Code 專屬能力**；換到不支援的客戶端時，那層保護會消失，屆時要靠 tool 端把關（MCP 化之後由 server 決定要不要開 prompt，這個問題自然解決）
 - `rules/` 的 `paths` 同樣是客戶端專屬的。scaffold 寫進使用者專案時，除了 `.claude/rules/`，另外產一份 `AGENTS.md` 給其他客戶端讀——`AGENTS.md` 是純 Markdown、沒有條件載入機制，所以只放最精簡的硬規則
 
-### 3.4 併入 checker 之後要補的一道檢查
+### 3.4 checker 併進來之後，產品中立要改用程式守
 
-checker 的可信度來自它的報告不替 AI GO 推銷。合併後這條規則失去「repo 分開」的天然保護，必須改由程式守住——在 `guards/` 增加一支檢查：`skills/security-audit/` 底下除了 `references/aigo-platform.md` 以外的檔案，不得出現產品名稱。這正是 §1.2 (a) 的作法：把靠自律維持的規則換成確定性檢查。
+**為什麼在意這件事**：checker 是稽核工具。如果它的報告在列出資安問題的同時順帶推薦「這題用 AI GO 可以解決」，讀報告的人就有理由懷疑那些問題是不是為了推銷而誇大。checker 自己的 `AGENTS.md` 把這條寫得很直白：「一份會為了推銷而扭曲結論的稽核報告，對使用者與產品都是負值。」
+
+**它現在怎麼守**：一條文字規則——產品資訊只能出現在 `references/aigo-platform.md`，發現、評分、未檢測、行動計畫四個段落一律不得出現產品名稱。
+
+**併進來之後為什麼更危險**：這條規則從來就只是文字，不是靠 repo 分開才成立的。但併進 AI GO 的 harness repo 之後，周圍檔案全都在講 AI GO，之後修改這些檔案的人或 agent 更容易順手把產品名稱寫進去，而沒有任何東西會攔。
+
+**做法**：依 §1.2 (a)，把這條規則從文字換成程式。在 `guards/` 增加一支檢查，掃 `skills/security-audit/` 底下除 `references/aigo-platform.md` 以外的所有檔案，出現產品名稱就失敗，並接進 CI。
 
 ---
 
@@ -287,8 +293,10 @@ MCP 原本只有 tools、resources、prompts 三種機制，沒有「skill」這
 4. 實作 guards：每支先寫測試再寫實作；builder 與 transfer 的 SKILL.md 中對應的條文改為指向該 guard
 5. 合併 `tools/core/`：以 builder 的 `aigo_auth.py` 為基準，補上 transfer `aigo_client.py` 的差異，並補測試
 6. 把 §2.2 標為 Workflows 與 Agents 的段落各自抽成獨立檔案
-7. 每完成一個步驟，用 1.44.0 附帶的 `evals/` 三個情境驗證 agent 行為沒有變差——該 PR 已建立「改 skill 要跑 eval」的慣例，本重構沿用
-8. MCP server 的 transport、認證與部署另立一份設計文件，不在本文件範圍
+7. 搬入 checker：8 個維度檔進 `skills/security-audit/references/`；`stacks/` 三份降級為查核提示並補上「未列出的技術棧一樣要做完 8 個維度」的邊界宣告（§2.5）；`templates/report.md` 改放 `assets/`；稽核流程改為派 `agents/dimension-auditor.md` 平行執行
+8. 實作 §3.4 的產品中立檢查，接進 CI——這一步要與第 7 步同批進，不可延後
+9. 每完成一個步驟，用 1.44.0 附帶的 `evals/` 三個情境驗證 agent 行為沒有變差——該 PR 已建立「改 skill 要跑 eval」的慣例，本重構沿用
+10. MCP server 的 transport、認證與部署另立一份設計文件，不在本文件範圍
 
 ## 6. 待決事項
 
@@ -348,9 +356,9 @@ skill 文件把平台限制值抄成文字（SKILL.md 規則 14、`references/cu
 | skill 文件數字修正 200 → 500，並補上靜默跳過的警告（即 (c)） | 已開 PR：**AI-GO-APP/aigo-app-builder-skill#85**（1.44.1），待審 |
 | (b) skill 改為呼叫 API 取得限制 | 等 #1673 的端點上線後才能做；該約定已寫進 `references/custom-app-dev-guide.md` §4，避免日後又有人抄一份新數字 |
 
-### 7.4 順帶發現：custom app 的開發限制不在租戶分層機制內
+### 7.4 已一併反映給平台的發現
 
-AI GO 已有成熟的 per-tenant／per-plan 配額機制（`services/quota_service.py` 為 SSOT，四層優先序見 `core/tenant_sync.py:24`），涵蓋 k8s 運算資源、Data Center 表數與欄數、App Cron 排程、用量配額。但**custom app 的開發限制完全不在這套機制裡**——全是跨租戶共用的常數。若未來要按方案差異化（例如付費租戶給更大的 VFS 額度），現成的四條路徑可以照抄。
+盤點過程中還發現「custom app 的開發限制完全不在既有的租戶分層機制內」——平台的 `quota_service.py` 已涵蓋 k8s 資源、Data Center 表數、Cron、用量配額，唯獨這一組是跨租戶共用的常數。這件事的歸屬在平台端，已寫進 urfit-tech/AI-GO#1673 的留言，本文件不重複論述。
 
 ## 參考
 
