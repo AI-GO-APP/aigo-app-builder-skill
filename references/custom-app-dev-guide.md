@@ -1402,7 +1402,7 @@ def execute(ctx):
 > 發布卻回 409 `service_inactive`。外部服務是租戶共用池，別人停用它你不會收到通知。
 > 遇到就去 Builder 重新啟用，**不要再建一個同名的**（slug 唯一）。→ `platform-behaviors.md` §13.5
 
-設定位置：**Builder（`/builder/{app_id}`）的「外部服務」tab**——唯一入口，
+設定位置：**Builder（`/builder/{app_id}`）的「外部服務」tab**——主要入口（API：`POST /builder/apps/{id}/egress-services`、`PUT …/authorized-egress-services` body `{services:[{service_id}]}`，見 `uat-environment.md` §3 步驟 5），
 同一處做租戶級建立／編輯與本 App 授權，新建預設順便授權本 App。
 （舊入口 `/dashboard/settings/integrations` 已移除，ADR 0011。）
 
@@ -1535,7 +1535,7 @@ POST /api/v1/builder/apps          （權限：builder.access）
   `DELETE /builder/apps/{id}/source/files` 帶 `paths` 與 `expected_version`（缺就 400）——`aigo_sync.py` 的
   `sync_to_cloud()` 只 PATCH 不會刪，本機清掉遠端還在，要用 `delete_remote_files()`。閘門規則與參數見 §8
 - 模板會一併 seed 模板定義的自訂表與 Data Reference 引用（起手式兩款不帶）
-- 金鑰**刻意不在建立時收**——建立後在 Builder「服務」tab 設定
+- 金鑰**刻意不在建立時收**——建立後在 Builder「服務」tab 設定（API：`POST /api/v1/actions/apps/{app_id}/secrets` `{key_name, value}`、`PUT /api/v1/actions/secrets/{secret_id}`）
 - 複製既有 app：`POST /apps/{app_id}/duplicate` → 201
 
 ### 26.3 刪除
