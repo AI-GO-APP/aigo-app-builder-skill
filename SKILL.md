@@ -464,7 +464,7 @@ timeout／連不出去＝raw `httpx` 直連（改 `ctx.http.call`）或 slug 沒
 | `references/event-triggers.md` | Webhook 與 App 排程（冪等要求、宣告、限制） |
 | `references/product-line-decision.md` | **Phase 1.5 判產品線與模式時（兩條路共用 SSOT）**：預設 Custom App 與偏離訊號、Custom App 能力邊界核對表、兩問四象限（登入者一律 internal）、混合方案分工（含 Hosted 當 Custom 後端）、不可逆前提、app 分配表 |
 | `references/member-admin.md` | **Phase 1.5 第 1.7 項授權架構選型的 SSOT ＋ 成員／角色管理 playbook**：內外人員共用帳號體系的立場、三問與授權架構表、邀請／角色端點與權限、`access_role_ids`（兩條線）、批次邀請流程與四個邊界、Hosted internal 拿不到任何身分、既有系統使用者搬遷、403 解讀 |
-| `references/migration-workflow.md` | **有現存系統要遷入時**：stack 盤點（§2.0，最先做；含原雲端拓撲與本機／外部微服務、排程的落點）、產品線判斷的遷入輸入（§2.1）、專案解構、Schema 映射、使用者與登入的落點（§2.4.5）、資料遷移 |
+| `references/migration-workflow.md` | **有現存系統要遷入時**：stack 盤點（§2.0，最先做；**四種 stack 形狀**，含「BaaS 為後端、瀏覽器直連」；原雲端拓撲與本機／外部微服務、排程的落點）、產品線判斷的遷入輸入（§2.1）、專案解構、Schema 映射、使用者與登入的落點（§2.4.5）、資料遷移 |
 | `references/uat-environment.md` | **規則 33 的做法**：UAT 結論怎麼下、`version-test` 為何不算、鏡像拓撲、`-uat` 命名、獨立資料庫與憑證、clone Hosted 的正式設定窗口與可見度重設、egress／secrets／Open Proxy 引用、只補測試者、驗證表、維運與退場 |
 | `references/verification-details.md` | **要執行驗證時**：四項驗證的完整定義、Phase 5 里程碑 |
 | `references/troubleshooting.md` | **出錯時**：錯誤速查表 |

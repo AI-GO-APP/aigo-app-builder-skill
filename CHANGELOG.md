@@ -1,3 +1,34 @@
+## 1.47.0
+
+### 遷入案實踩：Hosted 打包兩坑、Next 15 綁定症狀、BaaS 為後端的第四種 stack 形狀
+
+某遷入案（2026-09-22 實踩；Next 15.5 standalone ＋ BaaS 當後端）踩出來的，分四個檔補：
+
+- `hosted-apps.md` §2：**fallback 成 static 站最常見的觸發是「tarball 裡沒有 Dockerfile」**——
+  部署會 `active`、全站 404，所以沒人翻日誌。三個判讀訊號：`Build Plan │ provider │ static`、
+  `load build definition from Dockerfile: 1.04kB`（zbpack 自產的 caddy Dockerfile）、
+  runtime-logs 全是 caddy 的行。另補「app 在子目錄（`app/`）不算 monorepo」。
+- `hosted-apps.md` §2 綁定介面陷阱：**Next 15.5 拿到 pod 名 `HOSTNAME` 是必現的啟動失敗**
+  （`getaddrinfo ENOTFOUND <pod 名>`），不是原本記的 Next 16 競態；綁對時字樣是
+  `Local: http://localhost:8080` ＋ `Network: http://0.0.0.0:8080`，判讀改看「有沒有 pod 名」；
+  Dockerfile 的 `ENV HOSTNAME=0.0.0.0` 蓋得過平台注入值（實測）。
+- `hosted-apps.md` §3.2 新增「★ 打包原始碼 tarball 的兩個坑」：`.dockerignore` 排掉 Dockerfile
+  自己；bsdtar 的 `--exclude` 比對**任一路徑片段**，一行根目錄的 `supabase` 連
+  `app/src/lib/supabase/` 一起排掉（`Module not found`）。**不要 `tar --exclude-from=.dockerignore`**。
+- `hosted-apps.md` §3.4 項目 ④：**生產模式不逐筆印請求的框架**（Next standalone）拿不到
+  「runtime-logs 看得到請求」這個證據，改由**回應**舉證（version marker ＋ 非打到資料層
+  生不出來的動態內容）。§4 補 `NEXT_PUBLIC_*` 標 `both` 已實證到得了 CodeBuild 的 `next build`
+  （不需 `--build-arg`；Dockerfile 仍寫 `ARG`＋`ENV` 兩條路都吃）。§8 補三行無害的建置噪音。
+- `migration-workflow.md` §2.0／§2.1：stack 形狀結論三選一改**四選一**，新增
+  **「BaaS 為後端、瀏覽器直連」**（辨識訊號：前端大量 BaaS client 直查、數十到數百條 RLS、
+  數十支 SQL function、Auth 發的 JWT）。預設 **Hosted App 整搬**；**資料層待平台決議**——
+  規則 32 的例外只限關聯式 PostgreSQL，不含 Auth／Storage／Realtime／Edge Functions／pg_cron，
+  這一型不被涵蓋（本版**不動規則 32**，只把落差寫成要提出的決議事項）。
+  另立前置步驟「**先取正式庫 schema-only dump**」：211 支手動貼上去的 migration 裡 7 支綁正式資料列、
+  1 個被 5 支引用的欄位 repo 裡沒建過——repo 不是 schema 的正本。
+- `uat-environment.md` §0：只換運算層、DB／schema 不動時可以不另建第二顆庫，但結論要寫
+  `UAT＝無；理由…；風險：驗證期間寫入即正式資料`，且因為確實有正式資料與對外副作用，要經 owner 簽核。
+
 ## 1.46.2
 
 ### 修正：同步腳本的 VFS 檔數上限仍是 200，與 1.46.1 改過的文件矛盾

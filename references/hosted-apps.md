@@ -96,6 +96,18 @@
   專屬節點目前 **UAT／prod 都是 `ops-only`**——由平台替租戶開，租戶自助尚未開放。
   容器內可 root，但沒有任何 capability（上表）
 - 建置時可連的公網來源是**白名單**（npm/PyPI/Docker Hub 等）——私有 registry 會被擋
+- **app 不在 repo 根（例如在 `app/`）不算 monorepo**：Dockerfile 放 repo 根、
+  `COPY app/package.json app/package-lock.json ./` 再 `COPY app/ ./`，standalone 產物不會巢狀，
+  precheck 也不判 monorepo（某遷入案 2026-09-22 實踩）。有 Dockerfile 就不經 zbpack 偵測，
+  目錄形狀不再是問題
+
+**★ fallback 成 static 站，最常見的觸發是「tarball 裡沒有 Dockerfile」**（某遷入案 2026-09-22 實踩）：
+zbpack 看不到 Dockerfile 就自己偵測語言，認不出來就給一個 caddy 靜態站——**部署會成功**
+（`active`），所以沒人去翻日誌，只看到所有路由 404。三個判讀訊號（湊齊就是這件事）：
+建置日誌 `Build Plan │ provider │ static`、`load build definition from Dockerfile: 1.04kB`
+（那是 zbpack 自己產的 caddy Dockerfile，不是你的）、`queued`→`active` 只花 ~46 秒
+（框架專案不可能這麼快）；runtime-logs 全是 caddy 的行（`admin endpoint started`、
+`HTTP/2 skipped because it requires TLS`）。成因與修法在打包那一步，見 §3.2。
 
 **★ 綁定介面陷阱（2026-09-02 實測，Next.js 16 standalone）**：k8s 會把容器的
 `HOSTNAME` 設成 pod 名稱，而**以 `process.env.HOSTNAME` 決定 bind 位址的框架**
@@ -106,9 +118,19 @@ PORT 其實有聽。判讀與處置：
 
 - runtime-logs 印出 `Local: http://<pod 名稱>:8080` 而不是 `0.0.0.0` → 就是這個問題；
   pod `Running`、框架顯示 Ready、但整段生命週期**沒有任何請求進來** = 探針連不上，不是 app 掛
+- ★ **版本不同症狀不同：Next 15.5 standalone 是「必現的啟動失敗」**（某遷入案 2026-09-22 實踩）——
+  同樣拿到 pod 名 `HOSTNAME`，行程直接死在
+  `⨯ Failed to start server [Error: getaddrinfo ENOTFOUND <pod 名>]`，不是上面那種
+  「1 次成功 3 次失敗」的競態。看到這行不要往 PORT／探針查，直接補 `ENV HOSTNAME=0.0.0.0`
+- **Next 15 綁對時的日誌字樣**是 `- Local: http://localhost:8080` ＋
+  `- Network: http://0.0.0.0:8080`（**不是** `Local: http://0.0.0.0:8080`）。
+  ⇒ 判讀法是「這兩行裡有沒有出現 pod 名」，不是「`Local:` 後面是不是 `0.0.0.0`」
 - 處置：Dockerfile runner 階段加 `ENV HOSTNAME=0.0.0.0`（加上後連續 7 次部署穩定）；
-  手寫服務一律 `listen(port, "0.0.0.0")`
-- **後遺症**：綁 `0.0.0.0` 後 Next 從 request 推算的 origin 會變成 `https://0.0.0.0:8080`，
+  手寫服務一律 `listen(port, "0.0.0.0")`。Dockerfile 的 `ENV` **蓋得過平台注入的 `HOSTNAME`**
+  （2026-09-22 容器內實測：`$HOSTNAME` 是 `0.0.0.0`，`hostname` 指令仍回容器 id——不衝突，
+  框架讀的是前者）
+- **後遺症**：綁 `0.0.0.0` 後 Next 從 request 推算的 origin 會變成 `https://0.0.0.0:8080`
+  （Next 的 `req.nextUrl.origin` 就是其一），
   凡是用「本次請求 origin」組絕對網址的地方（OAuth `redirect_uri`、`redirect(origin + …)`、
   金流 success/cancel URL、通知信連結）都會導錯。**對外網址一律由 env（如 `APP_URL`）指定，
   不從 request 推算**——放進 §4 的遷入 env 清單
@@ -178,6 +200,19 @@ POST {deployd_upload_url}  ← multipart/form-data，第一個欄位必須叫 ta
 建置日誌：GET .../deployments/{deployment_id}/logs?after={cursor}（增量 cursor）
 ```
 
+- **★ 打包原始碼 tarball 的兩個坑**（某遷入案 2026-09-22 實踩，兩次部署各踩一個；兩次都**不是**
+  建置失敗的形狀，所以很難往打包那一步想）：
+  - **tarball 必須含 Dockerfile**。`.dockerignore` 把 `Dockerfile`／`.dockerignore` 自己列進去
+    對 `docker build` 無害（daemon 另外拿），但拿它當 `tar --exclude-from` 就真的排掉了 →
+    zbpack 看不到 Dockerfile、整包 fallback 成 static 站（部署成功、全站 404，判讀訊號見 §2）
+  - **`tar --exclude` 的比對語意 ≠ `.dockerignore` 的比對語意**。bsdtar（macOS 內建 `tar`）的
+    pattern 比對**任一路徑片段**，於是 `.dockerignore` 裡一行根目錄的 `supabase`
+    （原意只排 repo 根的那個目錄）會把 `app/src/lib/supabase/` 一起排掉，
+    要到建置 `Module not found: Can't resolve '@/lib/supabase/client'` 才炸；
+    寫成 `./supabase` 一樣中
+  - 修法：打包用**真正實作 `.dockerignore` 規則的工具**（pattern 錨在根，只有 `**/x` 才代表
+    任意深度），或直接餵明確的檔案清單——**不要 `tar --exclude-from=.dockerignore`**。
+    打完先 `tar -tzf` 核一遍：Dockerfile 在裡面，且每個被排掉的目錄都是你想排的那一個
 - **redeploy**（`POST /{id}/redeploy`）＝重跑**最後一次成功上傳**的原始碼，不需重傳；
   沒有可重跑的來源回 409
 - **restart**（`POST /{id}/restart`）不重建映像（⚠️ prod 2026-09-02 仍 404，見檔頭）
@@ -246,7 +281,7 @@ Custom App 線每次變更都要過 SKILL.md Phase 4.2 的驗證閘門；Hosted 
 |---|---|---|
 | **只改 env／持久碟** | **1–6 分鐘**傳播（§4）；延遲窗內驗證會誤判成沒生效 | ① `GET /{id}/runtime-settings` 讀回確認值 ② 實測**依賴那顆 env 的路徑**（登入、OAuth 導向、第三方呼叫），不是只看設定頁 |
 | **常駐設定**（首次部署、改 runtime-settings、接手既有 app 的第一次驗證都要做） | — | ① `GET /{id}/runtime-settings` 讀回 `always_on`，**必須等於 §3.0 的決策**（沒過閘＝`false`）② 讀到 `true` 就要拿得出計畫裡那句「常駐＝開，理由 X；退場條件 Y」，拿不出來視同未通過 |
-| **程式碼變更**（deploy／redeploy） | 建置完成 | ① `deployments/{id}` 狀態 `active`（不是 `queued`／`building`／`failed`／`superseded`）② **version marker**：回應帶得到本次版本識別 ③ 主要路由各打一次拿 200 ④ `runtime-logs` **看得到請求進來**——pod `Running`、框架顯示 Ready 卻整段沒有請求 = 探針連不上（§2 綁定介面陷阱） |
+| **程式碼變更**（deploy／redeploy） | 建置完成 | ① `deployments/{id}` 狀態 `active`（不是 `queued`／`building`／`failed`／`superseded`）② **version marker**：回應帶得到本次版本識別 ③ 主要路由各打一次拿 200 ④ `runtime-logs` **看得到請求進來**——pod `Running`、框架顯示 Ready 卻整段沒有請求 = 探針連不上（§2 綁定介面陷阱）。⚠️ **生產模式不逐筆印請求的框架**（Next standalone 即是，某遷入案 2026-09-22 實踩）拿不到這個證據：④ 改由**回應**舉證——version marker ＋ 一個「非打到資料層生不出來」的動態內容，兩者都要，不可用「日誌沒錯誤」交差 |
 | **首次部署／遷入既有系統** | 同上 | 上列全部（**含常駐設定列**）＋ §4「遷入 env 清單」逐顆核 ＋ 持久化落點（§7：容器檔案不持久，資料要落平台）＋ 取平台資料的路徑（§5：容器內要 `/open` 前綴、隨附整合要加引用） |
 | **自訂網域** | DNS／憑證 | `POST /{id}/domains/{domain_id}/verify` 走到 `active`（§9；**session-only，Deploy Token 打不了**），再用**該網域**重跑一次主要路由，不是只驗 `*.ai-go.app` |
 
@@ -276,6 +311,10 @@ Custom App 線每次變更都要過 SKILL.md Phase 4.2 的驗證閘門；Hosted 
 | 保留 | `PORT`（平台注入）、`K_*` 前綴、**`AIGO_*` 整族** |
 
 - 每顆可標 `runtime`／`build`／`both`（缺漏視為 `runtime`）
+- **要在建置期內嵌進前端 bundle 的（`NEXT_PUBLIC_*` 這一族），標 `both` 就夠**——
+  某遷入案 2026-09-22 實踩：標 `both` 後 CodeBuild 上的 `next build` 讀得到，部署後瀏覽器端
+  打的是正確的後端網址，**不需要**另外傳 `--build-arg`。Dockerfile 仍建議每顆寫
+  `ARG X` ＋ `ENV X=$X`：build-arg 與 env 注入哪條生效不由 app 決定，兩條都吃最省事
 - 🚨 **「build」不是 compile-only**：標 build 的值會寫進映像的 `ENV`，
   **出現在租戶可見的建置日誌**、也留在執行中行程——只該留在伺服器的機密**不要**標 build
 - 🚨 **`PUT /runtime-settings` 是全量替換不是 merge**：省略 `env_vars`＝清空、
@@ -543,6 +582,12 @@ Hosted App 讓其他 App 打 HTTP 過去——這是明文禁止的反模式，�
   限制 worker 數、heap 設包絡的 60–65%）；③ 還是不明 → 三段對照各部署一次定位失敗點：
   最小 Node 服務（無建置）→ 真實 `package.json` 只跑 `npm ci` 不 build → 完整專案。
   日誌為空時檔頭的「先懷疑部署落差」原則不適用——這是使用者側建置失敗，只是沒訊息
+- **建置日誌的無害噪音**（某遷入案 2026-09-22 實踩；三行都**不是**失敗原因，看到不要追）：
+  `tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'`
+  （macOS 打包帶的 xattr）、`failed to configure registry cache importer:
+  localhost:5000/cache:buildcache: not found`（第一次建置還沒有快取層）、
+  `failed to read oom_kill event ... memory.events: no such file`
+  （CodeBuild 上沒有那個 cgroup 檔，**不代表**發生 OOM——真 OOM 的判讀走上一條）
 - **執行期日誌**：`GET /{id}/runtime-logs?tail=&since=&until=&severity=`
   （tail 1–1000 預設 200；`reason: scaled_to_zero` 也是 HTTP 200，不是錯誤）
 - **AI 解讀**：`POST /{id}/logs/interpret`——`source=build` 必帶 `deployment_id`
