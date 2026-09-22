@@ -180,6 +180,7 @@ installed tree:
 
 - **可攜核心**（`skills/`）：Agent Skills 標準格式、每個 skill 目錄自給自足。任何客戶端、任何安裝方式（`npx skills add`、git clone、plugin、MCP Skills extension）拿到的都是同一份
 - **發布轉接層**（repo 根目錄的 plugin 元件、scaffold 產出的 `AGENTS.md`、日後的 MCP server）：把「核心做不到的載入時機」補上——常駐規則、生命週期 hook、subagent。轉接層只引用核心的正本，不另存一份內容
+- **使用者的起點永遠是裝 skill**。skill 是唯一在每個客戶端都裝得起來的單位；plugin、hook、MCP 這些轉接層**由 skill 引導或代裝**（`scripts/setup`，見下），使用者不必知道它們是什麼。這也是現況已經在做的事（Phase -1 自我更新、README 的 hook 範本、`aigo_auth` 的憑證引導），只是現在是「引導但沒代做」
 
 builder 與 transfer 合併成一個新 repo（下稱 `aigo-harness`，正式名稱待定，見 §6）：
 
@@ -193,6 +194,7 @@ aigo-harness/                       ← 新 repo；repo 根目錄同時是一個
 │   │   ├── references/             ← 平台知識
 │   │   │   └── rules/              ← Rules 的正本：frontend／actions／data／platform-api／credentials
 │   │   ├── scripts/                ← Tools ＋ Guards（builder 專用；`_core/` 為共用程式的同步副本）
+│   │   │   └── setup.py            ← 入口：偵測客戶端 → 憑證引導 → 代裝該客戶端拿得到的轉接層（hook／plugin／MCP）
 │   │   └── assets/                 ← 範本、掃描規則、保留表名（原 resources/ 與 config/）
 │   ├── aigo-migrate/               ← 遷入流程，自 builder 的 Phase 1.25／2.0 拆出（自帶用到的 references 副本）
 │   └── aigo-template-transfer/     ← transfer 的 S0～S9；用到的平台規則（原鐵律 6）以**生成副本**放在自己的 references/
@@ -225,6 +227,7 @@ aigo-harness/                       ← 新 repo；repo 根目錄同時是一個
 | 可攜核心＋轉接層，而不是六個頂層目錄 | §2.6 (a)：skill 目錄之外的東西到不了使用者手上。核心自給自足，才能同時支援 `skills` CLI、git clone、plugin、MCP 四種搬運方式 | 共用程式要同步進各 skill 目錄（見下一列） |
 | 共用程式以 `core/` 為正本、同步副本進各 skill 的 `scripts/_core/`，CI 守一致 | 不依賴安裝時的網路與套件來源；每個 skill 目錄拿到的就是完整、可執行的一份（「離線」要說清楚：第一次 `uv run` 仍要抓 `pyproject.toml` 宣告的第三方套件如 `httpx`，只是不必再抓我們自己的程式）。CI 除了逐位元組比對，還要**在副本位置實際 import 並跑一次**——只比對存在的檔抓不到「正本多了一個檔、副本沒同步到」 | repo 內有重複檔案。替代方案（`scripts/pyproject.toml` 以 git 依賴釘 revision 安裝 `core`，或打成版本化 wheel 隨 skill 附上）列入 §6；起步先用副本 |
 | **plugin 與 MCP 都做，兩者都是轉接層，不是二選一** | plugin 今天就能送 skills、agents、hooks、MCP server 定義；plugin 根目錄的 `CLAUDE.md` 確實不會載入，但 SessionStart hook 的 stdout／`additionalContext` 會進 context（官方 hooks 文件明載，plugin hook 與 settings hook 行為相同），規則因此送得進去。反過來 MCP 同樣送不了常駐規則與 subagent（§4）。repo 根目錄本來就幾乎是 plugin 的形狀，多一個 manifest 的成本很低 | plugin 只服務 Claude Code；其他客戶端靠可攜核心＋`AGENTS.md`，拿不到 hook 與 subagent |
+| **skill 是唯一入口，轉接層由 `scripts/setup` 引導或代裝** | 使用者只要記得一件事：裝 skill、說「幫我設定」。`setup` 偵測客戶端（`.claude/`、`.codex/`、`.cursor/`…），Claude Code 就寫 hook 進 `settings.json`、寫 MCP 進 `.mcp.json` 或建議裝 plugin；Codex 寫 `config.toml`；不認得的客戶端印手動步驟。順手檢查憑證與平台連線，缺什麼一步步問。所有寫入使用者設定檔的動作**先印出要改什麼、使用者說好才寫**（同 §3.2 兩階段），不默默改。`setup` 可重跑、冪等——MCP 上線後重跑一次就接上，不必重裝 | skill 是按需載入的，第一次一定要有人開口觸發；之後 hook 裝好了才會自動。各客戶端的設定檔格式各寫一份、各要測試 |
 | Guards 的第一落點是 **tool 內呼叫**，hook 其次 | tool 內呼叫對所有客戶端成立，也是日後 MCP 伺服器端把關的同一段程式；hook 只有部分客戶端有 | 多一層呼叫 |
 | Workflows 不獨立成一類；有外部副作用的操作走**「準備／執行」兩階段**，不靠互動式確認 | `disable-model-invocation` 是 Claude Code 專屬欄位（§3.3），換客戶端保護就消失。而**腳本裡的互動式確認也不成立**：agent 透過非互動 shell 跑腳本時 stdin 是關的，`input()` 直接 `EOFError`（2026-09-22 實測）；就算 agent 餵得進去，那也是 agent 自己按的，證明不了真人同意。可攜的做法是：`prepare` 階段（非互動）印出**確切的目標與變更**（哪個 app、哪個版本、會動到哪些檔／哪些欄）並產生一個綁定這次操作內容的核准 token；`execute` 階段必須帶這個 token，且 token 只由**可信的核准管道**核發——Claude Code 上是 slash command 內由使用者確認、其他客戶端是使用者自己在終端機跑一句、MCP 上是 server 端的核准流程。拿不到管道就拒絕執行，**不接受 agent 自己傳的 `--yes` 旗標**。transfer 現有的互動確認閘要改成這個形狀 | 每支有副作用的腳本（publish、問題回報 submit、模板送審、scaffold 的 upgrade-project 覆寫）都要實作兩階段並測試；使用者多一個動作 |
 | Rules 的正本留在 skill 目錄內，常駐載入交給轉接層 | 正本只有一份、跟著 skill 走、由更新機制同步；落地到使用者專案的副本只是快取，帶版本戳與內容雜湊 | 落地副本會過期，而且**只在 scaffold 與 SessionStart 比對是不夠的**——沒有 hook 的客戶端上的既有專案永遠不會被提醒。所以 §3.1 表的 ④ `upgrade-project` 是必要的，而且 builder 的每個可攜入口（`aigo_sync`／`aigo_publish` 起跑時）都要順手比對一次雜湊、過期就印警告 |
@@ -334,7 +337,7 @@ MCP server 一旦持有 OAuth、代使用者部署與發布，它就是**平台�
 3. **定發布契約、開新 repo**：**先定案**版本策略（§6：單一 `VERSION` 或各 skill 各自）與更新權責（§3.2 三種來源）——這兩件事沒定，步驟 4 搬進去的 updater 就是錯的；然後依 §3.1 建骨架（`skills/`、`core/`、`shared-refs/`、`.claude-plugin/`、`tests/`）；把步驟 2 的安裝 smoke test 搬過去，改成**逐一 skill 單獨安裝**、三條路（CLI、git、plugin）各驗，再加三種來源的共存測試。此步同時查清 §6 的客戶端支援矩陣。**發布閘門**：smoke test 全綠才進步驟 4
 4. **搬 builder**：`references/`、`resources/`、`scripts/`、`CONTEXT.md` 搬進 `skills/aigo-builder/`，先原樣搬、不改內容——**除了 `check_update.py`**：它寫死了 repo URL 與「skill 根＝repo 根」的路徑計算（`:64`、`:71`），原樣搬進子目錄就是壞的，這支在此步依步驟 3 定案的權責重寫；再抽 rules——`references/dev-rules.md` 全份、`references/environment.md` 的租戶網址與憑證規則、SKILL.md Phase 3 的規則 1–17 速查表，拆成 `references/rules/` 下五個檔；`check_docs.py` 的引用檢查同步改指新位置。遷入流程拆成 `skills/aigo-migrate/`
 5. **併入 transfer、抽 `core/`**：以 builder 的 `aigo_auth.py` 為基準，補上 transfer `aigo_client.py` 的差異並補測試；兩份 `check_update.py` 與 hooks 範例收斂成一份；建立「`core/` → 各 skill `scripts/_core/`」的同步腳本與 CI 一致性檢查。transfer 的鐵律 1、7 改寫成 guards，鐵律 6 併入 `references/rules/platform-api.md`
-6. **轉接層**：`agents/`（app-inventory、report-verifier）、`hooks/hooks.json`（SessionStart 更新檢查＋精簡硬規則索引、PreToolUse guards）、`.claude-plugin/plugin.json`；scaffold 增加「把 rules 落地到 app 專案的 `.claude/rules/` 與 `AGENTS.md`，附版本戳與內容雜湊」＋ `upgrade-project` 操作（§3.1 表 ④）；publish、問題回報 submit、模板送審、upgrade-project 覆寫四支改成兩階段核准（§3.2）。**發布閘門**：規則落地的兩個 eval 情境（不經 skill 直接改 code、續接舊 session）通過
+6. **轉接層**：`agents/`（app-inventory、report-verifier）、`hooks/hooks.json`（SessionStart 更新檢查＋精簡硬規則索引、PreToolUse guards）、`.claude-plugin/plugin.json`；scaffold 增加「把 rules 落地到 app 專案的 `.claude/rules/` 與 `AGENTS.md`，附版本戳與內容雜湊」＋ `upgrade-project` 操作（§3.1 表 ④）；publish、問題回報 submit、模板送審、upgrade-project 覆寫四支改成兩階段核准（§3.2）；`scripts/setup` 實作（偵測客戶端、憑證引導、代裝 hook／plugin／MCP 設定，寫設定檔前先確認），三種客戶端各一組測試。**發布閘門**：規則落地的兩個 eval 情境（不經 skill 直接改 code、續接舊 session）通過
 7. **舊 repo 的過渡**：本 repo 維持現有結構、照常收修正，直到新 repo 穩定。之後在本 repo 發最後一版——保留完整的舊目錄樹、`VERSION` 再升一版、`check_update.py` 改為「告知新位置與遷移指令」，**不**把既有安裝 reset 成新結構。遷移指令要做四件事並有測試：裝新的、移除舊安裝的 hook 登記與狀態檔、刪掉舊目錄（避免新舊兩份 skill 同時被客戶端載入）、印出回滾方式（回到舊 repo 最後一版的方法）。transfer repo 同樣處理
 8. 每完成一個步驟，跑步驟 2 的回歸網與 `evals/`，確認 agent 行為沒有變差
 9. MCP server 的 transport、認證與部署另立一份設計文件（先回答 §4.4 的歸屬問題），不在本文件範圍
@@ -349,6 +352,7 @@ checker 不在遷移步驟內；§2.5 與 §3.4 的建議在它自己的 repo �
 - [x] 過渡期要不要維持舊安裝方式 → **要，而且是硬前提**（§5 步驟 7）
 - [x] checker 要不要併 → **不併**（§3.4）
 - [x] 做不做 Claude Code plugin → **做，當轉接層**；與 MCP 不互斥（§3.2）
+- [x] 使用者從哪裡開始 → **裝 skill**；plugin／hook／MCP 由 skill 的 `setup` 引導或代裝（§3.1、§3.2）
 
 仍待決定：
 
