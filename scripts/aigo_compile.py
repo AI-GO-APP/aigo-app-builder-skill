@@ -12,7 +12,11 @@ def compile_app(base_url: str, token: str, slug: str, dev: bool = True) -> dict:
         url += "?dev=true"
     resp = httpx.post(url, headers=headers, timeout=60)
     resp.raise_for_status()
-    return resp.json()
+    result = resp.json()
+    warning = format_skipped_files(result.get("skipped_files"))
+    if warning:
+        print(warning)
+    return result
 
 
 def parse_compile_error(error_text: str) -> list[dict]:
@@ -50,3 +54,13 @@ def auto_fix_css(css_content: str) -> str:
     # 避免重複修復
     css_content = css_content.replace(':host, :host, :root', ':host, :root')
     return css_content
+
+
+def format_skipped_files(files: list[dict] | None) -> str:
+    if files is None:
+        return "⚠️ 編譯服務未提供 skipped_files，無法確認是否完整納入。"
+    if not files:
+        return ""
+    return "⚠️ 前端編譯略過檔案：\n" + "\n".join(
+        f"- {item['path']} ({item['size']} UTF-8 bytes): {item['reason']}" for item in files
+    )

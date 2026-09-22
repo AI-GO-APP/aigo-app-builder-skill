@@ -7,10 +7,6 @@ PROTECTED_FILES = {"src/api.ts", "src/db.ts", "src/action.ts", "src/data.json", 
 # `_template.json` 宣告 required_egress: openai，示範 action 也字面呼叫 openai。與需求無關就兩個一起刪
 # （只刪 action 仍擋；README／manifest 殘留不影響閘門）。2026-09-09 prod 實打。
 STARTER_EGRESS_LEFTOVERS = ("_template.json", "actions/summarize_leads.py")
-# 與平台 infra/builder/compile.go 的 MaxFileSize／MaxFileCount 一致。單檔超限平台不報錯、
-# 靜默跳過（SKILL.md 規則 14），所以這裡先擋；平台比的是 bytes，不是字元數。
-MAX_FILE_SIZE = 1_000_000  # bytes
-MAX_FILE_COUNT = 500
 
 
 def read_local_files(project_path: str) -> dict[str, str]:
@@ -28,17 +24,12 @@ def read_local_files(project_path: str) -> dict[str, str]:
                     continue
                 with open(full, "r", encoding="utf-8") as f:
                     content = f.read()
-                size = len(content.encode("utf-8"))
-                if size > MAX_FILE_SIZE:
-                    raise ValueError(f"檔案 {rel} 超過 1MB 限制 ({size} bytes)")
                 files[rel] = content
     # package.json
     pkg = os.path.join(project_path, "package.json")
     if os.path.exists(pkg):
         with open(pkg, "r", encoding="utf-8") as f:
             files["package.json"] = f.read()
-    if len(files) > MAX_FILE_COUNT:
-        raise ValueError(f"檔案數 {len(files)} 超過 {MAX_FILE_COUNT} 上限")
     return files
 
 
@@ -70,8 +61,18 @@ def diff_vfs(local: dict[str, str], remote: dict[str, str]) -> dict:
 
 def sync_to_cloud(base_url: str, token: str, app_id: str, files: dict[str, str],
                   expected_version: int) -> dict:
-    """PATCH VFS 到雲端"""
+    """PATCH VFS 到雲端；以目標平台限制預檢合併後的完整 VFS。"""
     import httpx
+    from aigo_limits import get_limits, check_vfs
+    from aigo_compile import format_skipped_files
+    limits = get_limits(base_url, token, app_id)
+    if limits is not None:
+        remote, version = get_remote_vfs(base_url, token, app_id)
+        if version != expected_version:
+            raise ValueError("VFS 版本衝突：預檢前版本已改變，請重新讀取。")
+        skipped = check_vfs({**remote, **files}, limits)
+        if skipped:
+            print("同步預檢（實際結果以編譯回應為準）：\n" + format_skipped_files(skipped))
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     payload = {"files": files, "expected_version": expected_version}
     resp = httpx.patch(f"{base_url}/api/v1/builder/apps/{app_id}/source/files",

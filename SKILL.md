@@ -229,8 +229,8 @@ Custom 過 `custom-app-dev-guide.md` §28.1（答案幾乎一律是「關」，�
 13. **前端 `db.ts` 的 db.insert() Bug**：同上，需用 `{"data": {...}}` 包裝
     - ⚠️ **只適用前端**。Server Action 的 `ctx.db.insert(table, data)` 收**扁平 dict**，
       包裝反而會被濾光並回 400。自建表的 `insert_row` / `update_row` 同樣收扁平 dict
-14. **VFS 限制**：最多 500 檔案、單檔 ≤ 1MB（1,000,000 bytes）、編譯超時 30 秒
-    ——**單檔超限不報錯，是靜默跳過**（該檔不進 bundle，症狀延後到執行期）。
+14. **開發限制**：取得 App ID 後先用 `scripts/aigo_limits.py` 的 `get_limits(base_url, token, app_id)` 查詢目標平台的 VFS、Action 與 egress 限制，以回應為準。404／503 或連線失敗代表未知，不使用文件中的歷史數值推定當前額度。
+    ——單檔超限仍會略過；必須查看 `skipped_files`，不可把 `success: true` 當成完整納入。
     數值以平台為準，見 `references/custom-app-dev-guide.md` §4
 15. **完整程式碼原則**：每次更新 VFS 檔案必須提供 100% 完整內容，禁止 `// ...省略` 佔位符
 16. **不支援動態 import**：`import()` 語法不支援（lazy loading 除外，esbuild 支援 code splitting）
@@ -313,6 +313,7 @@ if (file) downloadFile(file);
      這道閘沒跑，或請用戶在 Builder AI 用 `check_types` 補跑（平台有此工具但無 REST 端點）
 2. **編譯**：POST `/api/v1/compile/compile/{slug}?dev=true`
    - 腳本：`scripts/aigo_compile.py` 的 `compile_app()`
+   - 成功或失敗都讀 `skipped_files` 並告知用戶每個 path／UTF-8 bytes／reason；`[]` 才代表未略過，缺欄位或 null 代表舊服務或本次未編譯，不能當成完整納入。發布回應同樣檢查此欄位。
    - ⚠️ `success: true` 且 `compile_errors: []` 只代表**轉譯成功**，不代表程式語意正確（見 1.5）
    - 要讓用戶**在瀏覽器看草稿**：internal 開 `{tenant}.ai-go.app/runtime/version-test/{識別碼}`
      （需 `builder.access`）；external 的測試網址還要 `?preview_token=`（Builder 工具列「預覽」會自動帶），

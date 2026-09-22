@@ -168,6 +168,7 @@ aigo-builder/
     ├── aigo_review.py                # Review（VFS 分析、CSS 檢查、租戶級資源盤點）
     ├── aigo_scaffold.py              # 腳手架（VFS 下載到本地）
     ├── aigo_sync.py                  # 同步（差異比對、上傳）
+    ├── aigo_limits.py                # 查詢目標平台開發限制、預檢合併後 VFS
     ├── aigo_compile.py               # 編譯（呼叫雲端編譯 API）
     ├── aigo_typecheck.py             # 發布前語意檢查（tsc --noEmit）：esbuild compile 不驗型別，TDZ 等錯誤只在這裡抓得到
     ├── aigo_publish.py               # 發布（發布 App、狀態檢查）
