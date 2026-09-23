@@ -269,8 +269,17 @@ def publish_app(base_url: str, token: str, app_id: str, *,
             detail = resp.text[:500]
         raise RuntimeError(format_publish_409(detail))
     if resp.status_code == 422 and auto_rollback:
+        from aigo_compile import format_skipped_files
+        try:
+            print(format_skipped_files(resp.json().get("detail", {}).get("skipped_files")))
+        except (ValueError, AttributeError):
+            pass
         raise RuntimeError(f"auto_rollback：發布後編譯驗證失敗，平台已退回上一版（422）。{resp.text[:500]}")
     resp.raise_for_status()
+    from aigo_compile import format_skipped_files
+    warning = format_skipped_files(resp.json().get("skipped_files"))
+    if warning:
+        print(warning)
     # ★ 二次 GET 驗證
     verify = get_app_info(base_url, token, app_id)
     if verify.get('status') != 'published':
@@ -308,7 +317,8 @@ def full_deploy(base_url: str, token: str, app_id: str, slug: str, project_path:
 
     # 2. 編譯
     compile_result = compile_app(base_url, token, slug)
-    result["compile"] = {"success": compile_result.get("success", False)}
+    result["compile"] = {"success": compile_result.get("success", False),
+                         "skipped_files": compile_result.get("skipped_files")}
     if not compile_result.get("success"):
         result["compile"]["error"] = compile_result.get("error", "未知錯誤")
         return result
