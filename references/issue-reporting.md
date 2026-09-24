@@ -46,6 +46,11 @@
 - Meta 面 `fields` 比實體表少欄（Workspace 用的策展白名單）→ 欄位判定用引用面 columns（issue #70）
 - Server Action 打使用者面 REST 回 401（runner 無使用者身分）→ 能力限制，不是權限（issue #71）
 - `ctx.erp` 白名單 403、seed 表唯讀、`__IS_AUTHENTICATED__` 恆 false（Q4.5 那批）
+- **等待人工完成 egress／secrets 設定**：外部服務未建立／停用／未授權、金鑰缺少（發布 409 `EGRESS_NOT_READY`
+  的四種 `gaps[].kind`，或呼叫期的 `egress_service_not_found`／`egress_service_inactive`／`egress_not_authorized`）→ 刻意的人工安全關卡，請使用者到 Builder「外部服務」／「服務」tab
+  手動設定，**不報平台、也不為了重現去打設定寫入 API**（dev-guide §25.2 人工設定政策；chat-widget#54）。
+  只有人工操作 Builder 本身失敗、或設定完成後回讀／發布與設定矛盾，才照常自審——不得僅因錯誤含
+  egress／secrets 就排除真正異常
 
 **回報前先窮盡使用者側的可能**（★ 平台事故單發錯的代價很高）：
 

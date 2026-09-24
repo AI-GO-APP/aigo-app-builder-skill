@@ -12,6 +12,7 @@
 - 3. 建置步驟（含 3.5 使用者：只補測試者）
 - 4. 驗證
 - 5. 維運
+- 附錄 A：人工 provision／維運用的寫入 API（AI 開發流程中不呼叫）
 
 ---
 
@@ -86,13 +87,13 @@ Custom App 的草稿版（`{租戶}.ai-go.app/runtime/version-test/{識別碼}`�
    然後 `PATCH /builder/apps/{id}/settings` `{"access_role_ids": [<UAT 專用角色>]}`——**不要沿用正式的
    `access_role_ids`**：同一個租戶，沿用等於把 UAT 磁貼發給全體正式使用者。UAT 角色先用 `member-admin.md` §5 建
    （例名 `<app>-UAT測試`），只發給測試者。
-5. **外部服務**：`GET /builder/apps/{id}/available-egress-services` 看正式入口用哪些 slug；指向正式後端的 slug 另建
-   `POST /builder/apps/{id}/egress-services` `{"name": …, "slug": "<slug>-uat", "base_url": "<UAT Hosted>", "auth_type": "none"}`；
-   再 `PUT /builder/apps/{id}/authorized-egress-services` **body `{"services": [{"service_id": "<uuid>"}]}`**
-   （送 id 字串陣列會 422，CHANGELOG 1.39.1）。**不做這步，發布會 409 `EGRESS_NOT_READY`**。
-   Builder UI 的「外部服務」tab 是同一件事的介面（`custom-app-dev-guide.md` §25.2）。
-6. **Secrets**：`POST /actions/apps/{uat入口id}/secrets` `{"key_name": …, "value": …}` 注入與 UAT Hosted **同值**的換票金鑰
-   與 cron key（已存在就 `PUT /actions/secrets/{secret_id}`）。兩邊不同值＝換票一律 401。
+5. **外部服務（★ 人工，AI 不代設）**：AI 先 `GET /builder/apps/{id}/available-egress-services`（唯讀）看正式入口用哪些 slug，
+   列出 UAT 需要的 `<slug>-uat`、base_url（UAT Hosted）、用途與資料流向，**交給使用者在 UAT 入口 App 的 Builder
+   「外部服務」tab 建立並授權本 App**（`custom-app-dev-guide.md` §25.2 人工設定政策）。完成後 AI 再用唯讀預檢
+   （`egress_preflight()`）確認。**不做這步，發布會 409 `EGRESS_NOT_READY`**——那是等待人工設定，不是 bug。
+6. **Secrets（★ 人工，AI 不代設）**：AI 列出必要的 `key_name` 與配對需求（與 UAT Hosted **同值**的換票金鑰與 cron key），
+   由使用者在 **UAT 入口 App** 的 Builder「服務」tab 設定。兩邊不同值＝換票一律 401。
+   （人員自行執行的 provision 腳本要用的寫入 API 見附錄 A。）
 7. **Open Proxy 引用**：clone 建的是**新的**隨附整合，預設表引用**不會**帶過去；UAT Hosted 若走 Open Proxy 讀預設表，
    要對 UAT 的整合重做 `POST /refs/apps/{整合id}`（`hosted-apps.md` §5），否則 403。走外接庫、不讀平台表的可暫時略過。
 8. **前端 VFS**：打包時把寫死的正式 Hosted 網址與 egress slug 換成 UAT 的（用環境變數注入打包腳本，
@@ -126,4 +127,17 @@ Custom App 的草稿版（`{租戶}.ai-go.app/runtime/version-test/{識別碼}`�
 - **owner 與到期日**：UAT 一開就寫誰負責、預計用到何時、月費多少（Hosted 走租戶方案；外接庫另計）。
 - **金鑰輪替**：Hosted 與入口 App 的換票金鑰、cron key 是**成對**的，輪替要兩邊一起，驗證舊值失效。
 - **資料重灌**：UAT 庫可以整顆清掉重灌；清之前確認沒人在用。
-- **退場**：專案結束時刪 UAT Hosted（會連 PVC 一起刪）、UAT 入口、`<slug>-uat` 外部服務、UAT 角色、UAT 庫。
+- **退場**：專案結束時刪 UAT Hosted（會連 PVC 一起刪）、UAT 入口、`<slug>-uat` 外部服務（外部服務由人在 Builder 刪，§25.2 人工設定政策）、UAT 角色、UAT 庫。
+
+## 附錄 A：人工 provision／維運用的寫入 API（AI 開發流程中不呼叫）
+
+> 以下端點**僅供人員審閱並自行執行**的 provision／維運腳本參考，是 §3 步驟 5–6 人工操作的 API 對應。
+> 依 `custom-app-dev-guide.md` §25.2 的人工設定政策，AI 在開發流程中**不呼叫**這些寫入端點；
+> 唯讀查詢（`GET …/available-egress-services`）與發布預檢（`egress_preflight()`）不受此限。
+
+- **外部服務**：`POST /builder/apps/{id}/egress-services` `{"name": …, "slug": "<slug>-uat", "base_url": "<UAT Hosted>", "auth_type": "none"}`；
+  授權 `PUT /builder/apps/{id}/authorized-egress-services` **body `{"services": [{"service_id": "<uuid>"}]}`**
+  （送 id 字串陣列會 422，CHANGELOG 1.39.1）。權限：`builder.access` 且本 App 擁有者或 admin。
+- **Secrets**：`POST /actions/apps/{uat入口id}/secrets` `{"key_name": …, "value": …}`；已存在就 `PUT /actions/secrets/{secret_id}`。
+  權限：`builder.access`。
+- 租戶級 `/egress-services`（非 Builder 範圍）掛 `system.admin`，是平台 provision 腳本與緊急維運用，不在本 skill 的路徑上。

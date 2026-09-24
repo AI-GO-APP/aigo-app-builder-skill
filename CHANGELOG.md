@@ -1,3 +1,27 @@
+## 1.48.0
+
+### 人工設定政策：外部服務／金鑰由人在 Builder 手動設，AI 不代設、不當 bug 回報
+
+某租戶開發 cs-inbox 時（2026-09-22），AI 依 skill 走流程、試著用 API 設外部服務與金鑰失敗、遍查文件
+找不到做法，就自動回報成 Urgent 單「無法以 API 設定外部服務與金鑰，需改用手動」。RD 定案：**這是刻意
+的人工關卡**（安全考量——不讓 AI 寫下使用者看不懂的設定、或把資料送出站外），平台不調整，skill 要改
+（FDE-URfit-CRM-chat-widget#54）。平台原始碼核對：Builder 範圍的 egress／secrets 寫入 API **技術上開發者叫得到**
+（`builder.access`，建立／授權另需 App 擁有者或 admin），所以這是**工作流程政策**，不是 API 不可用——
+1.47.0 把 Builder 頁寫成「主要入口」又附 API 路徑，等於暗示 AI 可以走 API，這版改掉。
+
+- `SKILL.md` Action 硬規則新增第 5 條**人工設定政策**；「錯誤處理」改成先按 `gaps[].kind` 判定
+  「等待人工設定」、把缺項交給用戶、不回報、不為了證明去打設定寫入 API；「問題回報」加**優先排除**。
+- `custom-app-dev-guide.md` §25.2 拿掉 API 路徑、加人工設定政策方框；§25.3 表列與準則補「人工完成，AI 不代設」
+  與第 6 點「這是等待人工設定，不是 bug」；§26.2 金鑰那行改「由使用者手動設定，AI 不代為寫入」。
+- `uat-environment.md` §3 步驟 5–6 改成**人工交接**（AI 列出 slug／base_url／key_name，用戶在 Builder 設），
+  寫入 API 全部移到新增的**附錄 A**，標明「僅供人員自行執行的 provision 腳本，AI 開發流程中不呼叫」；
+  唯讀查詢與 `egress_preflight()` 不受限。
+- `issue-reporting.md`「刻意的能力邊界」清單、`pre-report-self-grill.md` 新增 Q4.5b 與 Q6.1 的排除：
+  排除範圍**精準到四種 `gaps[].kind`**，人工操作 Builder 本身失敗或設定後結果矛盾仍照常自審。
+- `scripts/aigo_publish.py` 的 409 `EGRESS_NOT_READY` 提示與 `egress_preflight()` 訊息改成人工交接措辭
+  （邏輯不變、仍不自動帶 confirm）；`troubleshooting.md`、`platform-behaviors.md` 與 §25.4 的 `timeout_ms`
+  幾處「去 Builder 建立／啟用／設上去」祈使句改成「請用戶到 Builder…」——AI 有瀏覽器工具，代操作 UI 也在禁止之列。
+
 ## 1.47.0
 
 ### 遷入案實踩：Hosted 打包兩坑、Next 15 綁定症狀、BaaS 為後端的第四種 stack 形狀
