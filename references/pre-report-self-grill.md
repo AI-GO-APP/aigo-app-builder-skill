@@ -129,6 +129,11 @@
 - **Q4.5 平台刻意設計**：`__CURRENT_USER__` 任何模式都不存在、`__IS_AUTHENTICATED__` 恆 false、
   seed 表唯讀、`ctx.erp` 白名單 403、runner default-deny egress、空渲染偵測 8 秒——
   這些是行為不是缺陷。
+- **Q4.5b 等待人工設定**：外部服務未建立／停用／未授權、金鑰缺少（發布 409 `EGRESS_NOT_READY` 的
+  `service_missing`／`service_inactive`／`unauthorized`／`secret_missing`，或呼叫期的 `egress_service_not_found`／`egress_service_inactive`／`egress_not_authorized`）
+  → 由人在 Builder 手動設定是**刻意的安全設計**（dev-guide §25.2），不是缺陷：**在這裡停，把缺項交給用戶**。
+  不得為了重現去打設定寫入 API（第 6 輪對這類不適用）。只有人工操作 Builder 本身失敗、或設定完成後
+  回讀／發布結果與設定矛盾，才繼續往下自審。
 - **Q4.6 自己的產物**：白畫面先開 console。`ReferenceError` 帶 minified 名稱＝自家 bundle 的
   use-before-declaration；compile 走 esbuild **只轉譯不驗型別**，`compile_errors: []` 不是「程式正確」的證據。
   先跑 `uv run --project scripts python scripts/aigo_typecheck.py <專案目錄>`（SKILL.md Phase 4 步驟 1.5）。
@@ -144,6 +149,7 @@
 
 - **Q6.1 去除 app 程式碼**：不經前端、不經 action，用登入 session 直接打同一端點、同一 payload
   （`aigo_data.py call` 或 curl），是否重現？不能重現 → app 側問題，停。
+  ★ **egress／secrets 設定缺口不適用本輪**：不得為了重現去呼叫外部服務／secrets 的寫入 API（Q4.5b）。
 - **Q6.1b 資料操作線的替代判準**（★ 本線 Q6.1 恆真，不可拿它當證據）：這條線本來就是純 API，
   「去掉 app 程式碼仍重現」不排除任何東西——全樹最強的那道「app 側 vs 平台側」濾網在此自動通過。
   改用兩個對照：① **平台 UI 對照**——同一顆帳號在平台介面做同一件事（同一張表、同一筆、同一個值），

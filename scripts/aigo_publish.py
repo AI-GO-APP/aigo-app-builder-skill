@@ -184,11 +184,12 @@ def format_egress_preflight(report: dict) -> str:
             if s in ms:
                 return f"{s}（租戶沒有這個外部服務）"
             if s in inact:
-                return f"{s}（服務存在但已停用——去 Builder 重新啟用，不要再建一個同名的）"
+                return f"{s}（服務存在但已停用——請用戶到 Builder 重新啟用，不要再建一個同名的）"
             return f"{s}（有服務、未授權給本 App）"
 
         lines.append(f"❌ 發布會 409 EGRESS_NOT_READY：{'；'.join(_why(s) for s in report['gaps'])}。"
-                     "真的要用 → 建立／啟用／授權外部服務（dev-guide §25.2）；用不到 → 清掉宣告與呼叫，"
+                     "真的要用 → 等待人工設定（刻意的安全設計，不是 bug）：把缺項交給用戶在 Builder「外部服務」tab "
+                     "手動建立／啟用／授權（dev-guide §25.2 人工設定政策），AI 不代設；用不到 → 清掉宣告與呼叫，"
                      "或帶 confirm_egress_gaps=True（發布後呼叫該 slug 必失敗）")
     elif report["authorized"] is not None and report["needed"]:
         lines.append(f"✅ egress 預檢：{', '.join(report['needed'])} 都已啟用且授權給本 App"
@@ -227,8 +228,10 @@ def format_publish_409(detail: Any) -> str:
     if code == "EGRESS_NOT_READY":
         gaps = detail.get("gaps") or []
         rows = "\n".join(f"   - {g.get('kind')} {g.get('slug') or g.get('key')}：{g.get('fix')}" for g in gaps if isinstance(g, dict))
-        return ("409 EGRESS_NOT_READY：外部服務／金鑰未到位——\n" + rows +
-                "\n   真的要用 → 照上面的 fix 建立／授權（dev-guide §25.2）；用不到 → 清掉 _template.json 的宣告與呼叫它的 action"
+        return ("409 EGRESS_NOT_READY：外部服務／金鑰未到位（等待人工設定，不是 bug）——\n" + rows +
+                "\n   真的要用 → 這是刻意的安全設計：把上面的缺項交給用戶，到 Builder「外部服務」tab 建立／授權、"
+                "「服務」tab 設金鑰（dev-guide §25.2 人工設定政策），AI 不代設、不回報；"
+                "用不到 → 清掉 _template.json 的宣告與呼叫它的 action"
                 "（起手式殘留見 dev-guide §26.2），或 publish_app(..., confirm_egress_gaps=True)（發布後呼叫該 slug 必失敗）")
     return f"409：{detail}"
 

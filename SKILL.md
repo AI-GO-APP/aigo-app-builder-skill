@@ -276,6 +276,12 @@ def execute(ctx):
 3. **金鑰由 app 自帶**：閘道只驗域名、不注入憑證（ADR 0010）——存 `ctx.secrets`，
    action 自組 `Authorization` header
 4. **`ctx.db` 沒有結構操作**：執行期不能建表改欄，這是刻意的能力邊界
+5. **★ 人工設定政策**：在 AI 開發流程中，外部服務的建立／修改／啟停／刪除與 App 授權，以及
+   secrets 的新增／更新／刪除，**由使用者或具權限的管理員在 Builder 手動完成**——外部服務到
+   `/builder/{app_id}` 的「外部服務」tab，金鑰到「服務」tab。這是刻意的安全設計：讓人理解並決定
+   連線目的地、用途與可能送出的資料。AI 可整理設定需求、做唯讀檢查（`available-egress-services`、
+   發布預檢），但**不得透過 API、腳本或代操作 UI 完成上述設定**；持有可用 token 不代表允許代設。
+   設定缺口＝「等待人工設定」，**不是 bug**（→ 錯誤處理、`issue-reporting.md`；dev-guide §25.2）
 
 > 逾時有兩道且原文同形：manifest `timeout_ms`（1000～120000，舊 app 要 republish 才換上新值）
 > 與 egress 閘道的服務 `timeout_ms`（預設 10000、硬上限 30000）。走 `ctx.http.call` 的 action
@@ -430,14 +436,20 @@ Hosted App 線（不走 Phase 2–4）：
 **★ Action 對外呼叫失敗時別急著改 code**：先完整讀出 status 與 error message。
 timeout／連不出去＝raw `httpx` 直連（改 `ctx.http.call`）或 slug 沒有同名外部服務／未授權；
 401＝action 自己的 header 或 `ctx.secrets` 金鑰不對（閘道不注入也不剝除憑證）。
-**指向 Egress 或權限就立刻停止改程式**——那是設定問題，改幾次結果都一樣：把原文轉給用戶、
-引導到 Builder「外部服務」tab 建同名 slug 並授權，生效後才重試（`custom-app-dev-guide.md` §25.3）。
+**指向 Egress 或權限就立刻停止改程式**——那是設定問題，改幾次結果都一樣。確認是外部服務未建立／
+停用／未授權或金鑰缺少（發布 409 `gaps[].kind` ∈ `service_missing`／`service_inactive`／`unauthorized`／
+`secret_missing`，或呼叫期的 `egress_service_not_found`／`egress_service_inactive`／`egress_not_authorized`）→ 判定為**「等待人工設定」**：告訴用戶這一步是刻意的安全設計，
+請到 Builder「外部服務」／「服務」tab 手動完成；列出具體缺項、停止相關重試，設定生效後再驗證。
+**不要把這個設定缺口當成平台 bug 回報**，也不要為了「證明」它去打設定寫入 API
+（`custom-app-dev-guide.md` §25.2 人工設定政策、§25.3）。
 ## 問題回報（平台問題 → 開發團隊）
 
 > ★ **預設平台必定正確；開發或使用失敗，預設是自己的操作有誤。不確定就不報。**
 
 **何時自動進入**（任一成立，不必等用戶要求、不反覆重試、不繞道硬改）：
 `troubleshooting.md` 查無此症、照表處理仍卡死、實測與 `references/` 明文不符、端點 5xx／流程被硬阻斷。
+**優先排除**：等待人工完成 egress／secrets 設定（上段「錯誤處理」）不屬於「照表仍卡死」或「流程被
+硬阻斷」，不進回報流程；只有人工操作 Builder 本身失敗、或設定完成後回讀／發布結果與設定矛盾才算。
 
 **五步固定**：自動觸發 → 走完 `references/pre-report-self-grill.md` 六輪自審（每個分支都要有
 指令＋輸出當證據）→ 判定（不是平台問題就直接修、前沿還有待查就不報）→ **主動問用戶要不要送**
