@@ -732,7 +732,8 @@ runtime 說「它失敗了」，是同一件事的兩個時間點），但**不�
 publish 卻回 409。要判這格一定要一起看 `services[].is_active`
 （`scripts/aigo_publish.py` 的 `egress_preflight()` 即照此三分）。
 
-2026-09-09 在測試租戶把整條路徑走完（建服務 → 授權 → 停用 → 發布 → 全部刪掉）：
+2026-09-09 在測試租戶把整條路徑走完（建服務 → 授權 → 停用 → 發布 → 全部刪掉）
+（平台行為驗證紀錄，**非開發流程步驟**；開發流程中外部服務由人在 Builder 設定，AI 不照做——dev-guide §25.2）：
 
 - 建外部服務**不給 `timeout_ms`** → 落庫 `timeout_ms: 10000`、`max_response_bytes: 5242880`、
   `is_active: true`（證實 30000 是上限、10000 才是拿到的值）
