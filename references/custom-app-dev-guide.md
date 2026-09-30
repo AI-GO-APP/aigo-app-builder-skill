@@ -335,6 +335,8 @@ action 路徑約定不變：`actions/**.py` 是可呼叫 action（`action_name` 
 自建表是**租戶級**的真實 Postgres 表，端點前綴 `/api/v1/data-center/`。
 建表／改結構需 `datacenter.schema_write`（2026-08 起，`system.admin` 直通）；
 **刪表／刪欄仍限 `system.admin`**；記錄 CRUD 需 `builder.access`。
+app（含 Server Action 的 `ctx.db`）要讀寫某張自建表，**先替 app 登記資料引用**（`POST /api/v1/refs/apps/{app_id}`），
+否則回「自建表不存在」（`data-center.md` §7）。
 
 **完整規格見 `data-center.md`**——型別、配額、兩段式刪除、SDK 用法都在那裡。
 
@@ -679,7 +681,10 @@ const myRecords = allRecords.filter(
    **不要看 `db.json`**，見 `platform-behaviors.md` §6）。
    可用 API `POST /api/v1/refs/apps/{app_id}`（`builder.access`，
    body `{table_name, columns[], permissions[]}`），或引導用戶到 Builder 後台操作
-   走自建表 → 產出建表規格交用戶確認，再 `POST /api/v1/data-center/tables`
+   走自建表 → 產出建表規格交用戶確認，再 `POST /api/v1/data-center/tables`；
+   **建好（或決定重用既有自建表）後，同樣要替 app 登記引用**——用同一支 `POST /api/v1/refs/apps/{app_id}`
+   （Builder「待允許的資料表」只在被擋下之後才有那一列，是事後補救，不能事前登記）。
+   REST 與資料中心 UI 建表都不會自動登記（Builder AI 建表、套用模板才會）；沒登記，`ctx.db` 會回「自建表不存在」（`data-center.md` §7）
 
 ### 選擇矩陣（速查——結論與決策樹一致）
 
@@ -733,8 +738,8 @@ const myRecords = allRecords.filter(
 | 歸屬 | 引用平台既有表 | 租戶自有的新表 |
 | 跨 app | 共用，靠 `app_domain` 區分來源 | 共用，**不需要也不該用** `app_domain` |
 | 外鍵 | 無原生 FK | relation → 自建表**有真 FK** |
-| 建立方式 | Builder 後台加入引用 | `POST /data-center/tables`（需 `system.admin`） |
-| 怎麼盤點 | `GET /refs/apps/{app_id}`（**不是** `db.json`，那個恆為 `{}`） | `GET /data-center/tables`（租戶級，不在 VFS） |
+| 建立方式 | Builder 後台加入引用 | `POST /data-center/tables`（需 `datacenter.schema_write`）＋**登記引用**（Builder AI 建表、套用模板才自動登記） |
+| 怎麼盤點 | `GET /refs/apps/{app_id}`（**不是** `db.json`，那個恆為 `{}`） | 租戶有哪些：`GET /data-center/tables`（租戶級，不在 VFS）；這支 app 引用了哪些：`GET /refs/apps/{app_id}` |
 
 ### 預設表常見結構
 
@@ -928,6 +933,10 @@ Phase 1.5 實作計畫時：
 > **重要**：`available-tables` 僅列出可用表名，實際將表加入 App 的 Data Reference 需在 AI GO Builder 後台操作。
 > 加入後，該表的 schema 由 Runtime 在執行期注入；**VFS 裡的 `src/db.json` 實測恆為 `{}`，
 > 不能用來確認引用狀態**——一律查 `GET /api/v1/refs/apps/{app_id}`（見 `platform-behaviors.md` §6）。
+
+> **自建表也走同一組引用**：`/refs/apps/{app_id}` 不只給預設表。app 要讀寫的自建表同樣得登記
+> （事前用 `POST /api/v1/refs/apps/{app_id}`，`builder.access`；被擋下後才可在 Builder「資料與 API 權限」分頁的「待允許的資料表」補），
+> 登記後即時生效、不必重新發布。完整說明與建表路徑對照 → `data-center.md` §7「app 讀寫自建表要先登記引用」。
 
 ## 21. 架構設計理念
 
@@ -1410,11 +1419,19 @@ def execute(ctx):
 > ⚠️ 授權**當下**會擋停用中的服務，但**之後把服務停用並不會回收授權清單裡的 id**。
 > 所以「已授權 ∧ 已停用」是可達狀態——只看「有沒有在授權清單裡」會誤判成通過，
 > 發布卻回 409 `service_inactive`。外部服務是租戶共用池，別人停用它你不會收到通知。
-> 遇到就去 Builder 重新啟用，**不要再建一個同名的**（slug 唯一）。→ `platform-behaviors.md` §13.5
+> 遇到就請用戶到 Builder 重新啟用，**不要再建一個同名的**（slug 唯一）。→ `platform-behaviors.md` §13.5
 
-設定位置：**Builder（`/builder/{app_id}`）的「外部服務」tab**——主要入口（API：`POST /builder/apps/{id}/egress-services`、`PUT …/authorized-egress-services` body `{services:[{service_id}]}`，見 `uat-environment.md` §3 步驟 5），
-同一處做租戶級建立／編輯與本 App 授權，新建預設順便授權本 App。
-（舊入口 `/dashboard/settings/integrations` 已移除，ADR 0011。）
+設定位置：**Builder（`/builder/{app_id}`）的「外部服務」tab**，同一處做租戶級建立／編輯與本 App 授權，
+新建預設順便授權本 App。（舊入口 `/dashboard/settings/integrations` 已移除，ADR 0011。）
+
+> ★ **人工設定政策**：在 AI 開發流程中，外部服務的建立／修改／啟停／刪除與 App 授權，以及金鑰
+> （`ctx.secrets`）的新增／更新／刪除，**由使用者或具權限的管理員在 Builder 手動完成**。這是刻意的
+> 安全設計——讓人理解並決定連線目的地、用途與可能送出的資料，不讓 AI 寫下使用者看不懂的設定、
+> 或把資料送出站外。AI 可整理設定需求（slug、base_url、用途、資料流向、key_name）、做唯讀檢查
+> （`GET /builder/apps/{id}/available-egress-services`、發布預檢 `egress_preflight()`），但**不得透過
+> API、腳本或代操作 UI 完成上述設定**；持有可用 token 不代表允許代設。平台保留受權限控管的寫入 API
+> 供人員自行執行的 provision／維運腳本用（`uat-environment.md` 附錄 A），AI 開發流程中不呼叫。
+> 遇到設定缺口＝「等待人工設定」，不是平台 bug（→ §25.3 第 6 點、`issue-reporting.md`）。
 
 > 一律用**相對路徑**指引用戶，不要寫死主機名稱——子網域日後可能變動。
 > 用戶自己登入的後台網域是什麼就接在前面。
@@ -1432,7 +1449,7 @@ def execute(ctx):
 |------|------|------|
 | timeout（約 20 秒） | raw `httpx`/`requests` 直連——default-deny egress，連線被黑洞 | 改寫成 `ctx.http.call` |
 | timeout，且**確實走 `ctx.http.call`** | 是閘道的 `timeout_ms`（預設 10000／上限 30000），不是 manifest，也不是直連 | 見 §25.4——先確認該外部服務的 `timeout_ms` 設成多少 |
-| `ctx.http.call` 連不出去／錯誤指向 egress | slug 沒有同名外部服務（`egress_service_not_found`）、服務**被停用**（`egress_service_inactive`），或服務未授權給本 App（`egress_not_authorized`） | 引導用戶到 Builder「外部服務」tab 建立（base_url）／重新啟用，並授權本 App |
+| `ctx.http.call` 連不出去／錯誤指向 egress | slug 沒有同名外部服務（`egress_service_not_found`）、服務**被停用**（`egress_service_inactive`），或服務未授權給本 App（`egress_not_authorized`） | 引導用戶到 Builder「外部服務」tab 建立（base_url）／重新啟用，並授權本 App（**人工完成，AI 不代設**，§25.2） |
 | 401 | 外部 API 拒絕請求帶的憑證——閘道不注入也不剝除，`Authorization` 是 action 自己組的 | 檢查 action 是否有帶 `Authorization` header、`ctx.secrets` 的金鑰是否正確 |
 
 給 AI Agent 的處理準則：
@@ -1441,11 +1458,18 @@ def execute(ctx):
    不要立刻假設是程式碼寫錯。
 2. 若訊息指向 Egress／權限，**停止改 code**——這是設定問題，改幾次都一樣。
 3. 把原始 error message 轉給用戶，並引導到 Builder（`/builder/{app_id}`）的
-   「外部服務」tab，以同名 slug 建立／修正外部服務並授權本 App；
+   「外部服務」tab，由用戶以同名 slug 建立／修正外部服務並授權本 App
+   （**人工完成，AI 不代設**——§25.2 人工設定政策）；
    權限不足（非本 App 擁有者且非 admin）→ 請管理員代設。
 4. **401 是 app 側問題不是平台設定**：回頭檢查 action 組的 header 與
    `ctx.secrets` 金鑰，別再往外部服務設定找。
 5. 確認設定生效後才重試。
+6. **這是「等待人工設定」，不是 bug**：外部服務未建立／停用／未授權、金鑰缺少
+   （發布 409 `EGRESS_NOT_READY` 的四種 `gaps[].kind`，或呼叫期的 `egress_service_not_found`／`egress_service_inactive`／`egress_not_authorized`）都是刻意的
+   安全設計——簡短說明這是刻意的安全設計、請用戶到 Builder 的外部服務頁／服務頁手動設定，
+   列出具體缺項、停止相關重試。**不要回報成平台問題**，也不要為了自審重現去打設定寫入 API。
+   只有人工在 Builder 操作本身失敗、或設定完成後回讀／發布結果與設定矛盾，才依
+   `pre-report-self-grill.md` 正常判定；不得僅因錯誤含 egress／secrets 就排除真正異常。
 
 ### 25.4 閘道的四道上限（★ 2026-09-09 prod 實打＋平台原始碼核對）
 
@@ -1462,10 +1486,10 @@ def execute(ctx):
 
 - ⚠️ **30000 是「上限」不是「你會拿到的值」**：外部服務建立時沒明給 `timeout_ms`，
   落庫預設是 **10000**（2026-09-09 測試租戶實打建立確認）——這種服務在**約 10 秒**就被切，
-  不是 30 秒。排查時先去 Builder「外部服務」看那支服務的 `timeout_ms` 實際是多少，
+  不是 30 秒。排查時先請用戶到 Builder「外部服務」看那支服務的 `timeout_ms` 實際是多少，
   錯誤訊息括號裡的毫秒數也會照實印。
 - `timeout_ms` **調不高**：`PATCH` 60000 與 120000 皆回 **422**
-  「`timeout_ms` 必須是 1～30000 之間的正整數（毫秒）」。要拿滿 30 秒得自己把它設上去。
+  「`timeout_ms` 必須是 1～30000 之間的正整數（毫秒）」。要拿滿 30 秒，請用戶在 Builder「外部服務」把該服務的 `timeout_ms` 調到 30000（人工設定政策，§25.2）。
 - `ctx.http.call` **沒有** per-call timeout 參數：傳 `timeout=90` 回
   `TypeError: HttpModule.call() got an unexpected keyword argument 'timeout'`。
   單次對外呼叫的逾時只由 EgressService 的 `timeout_ms` 決定，action 端覆寫不了。
@@ -1545,7 +1569,7 @@ POST /api/v1/builder/apps          （權限：builder.access）
   `DELETE /builder/apps/{id}/source/files` 帶 `paths` 與 `expected_version`（缺就 400）——`aigo_sync.py` 的
   `sync_to_cloud()` 只 PATCH 不會刪，本機清掉遠端還在，要用 `delete_remote_files()`。閘門規則與參數見 §8
 - 模板會一併 seed 模板定義的自訂表與 Data Reference 引用（起手式兩款不帶）
-- 金鑰**刻意不在建立時收**——建立後在 Builder「服務」tab 設定（API：`POST /api/v1/actions/apps/{app_id}/secrets` `{key_name, value}`、`PUT /api/v1/actions/secrets/{secret_id}`）
+- 金鑰**刻意不在建立時收**——建立後由使用者在 Builder「服務」tab **手動**設定：這是人工確認用途與憑證使用的安全步驟，**AI 不代為寫入**（§25.2 人工設定政策）。人工維運用的寫入 API 見 `uat-environment.md` 附錄 A
 - 複製既有 app：`POST /apps/{app_id}/duplicate` → 201
 
 ### 26.3 刪除
@@ -1722,7 +1746,7 @@ agent 不自行開、也不把「要不要常駐」丟給 owner 選。決策的�
 | 刪 | `DELETE …/records/{id}` | `DELETE /ext/…/records/{id}` | — | `DELETE /open/…/records/{id}` |
 | 預設表 proxy | `GET …/{table}`、`POST …/{table}/query`、`POST …/{table}`、`PATCH`／`DELETE …/{table}/{row_id}`（★ **單列 GET 不存在**，見下） | `/ext/proxy/{table}`（無 `app_id`） | `GET /pub/proxy/{slug}/{table}`、`POST …/query` | `/open/proxy/{table}` |
 | 跑 action | `POST /actions/apps/{app_id}/run/{name}` | `POST /ext/actions/run/{name}`（只讀已發布） | — | —（Hosted 沒有 action） |
-| 結構操作（建表／欄位） | `/data-center/tables…`（`system.admin`） | **無** | **無** | **無** |
+| 結構操作（建表／欄位） | `/data-center/tables…`（建改 `datacenter.schema_write`；刪除 `system.admin`） | **無** | **無** | **無** |
 | **身分與 ACL 的來源** | `__USER_ROLES__`／`__USER_PERMISSIONS__` 快照＋action 的 `ctx.user_permissions`／`ctx.user_id`（★ **不是** `/members`，見 `member-admin.md` §3.6） | app 脈絡的使用者，**沒有**平台角色（快照恆為空陣列） | 無身分 | **app 身分、沒有 user**——容器內打 `/api/v1/members*`、`/auth/me` 一律 401（`hosted-apps.md` §6） |
 
 ★ **預設表 proxy 面的兩條寫入契約**（2026-09-16 測試租戶實打，自己寫 client 或用本地腳本時會踩）：

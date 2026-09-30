@@ -276,6 +276,12 @@ def execute(ctx):
 3. **金鑰由 app 自帶**：閘道只驗域名、不注入憑證（ADR 0010）——存 `ctx.secrets`，
    action 自組 `Authorization` header
 4. **`ctx.db` 沒有結構操作**：執行期不能建表改欄，這是刻意的能力邊界
+5. **★ 人工設定政策**：在 AI 開發流程中，外部服務的建立／修改／啟停／刪除與 App 授權，以及
+   secrets 的新增／更新／刪除，**由使用者或具權限的管理員在 Builder 手動完成**——外部服務到
+   `/builder/{app_id}` 的「外部服務」tab，金鑰到「服務」tab。這是刻意的安全設計：讓人理解並決定
+   連線目的地、用途與可能送出的資料。AI 可整理設定需求、做唯讀檢查（`available-egress-services`、
+   發布預檢），但**不得透過 API、腳本或代操作 UI 完成上述設定**；持有可用 token 不代表允許代設。
+   設定缺口＝「等待人工設定」，**不是 bug**（→ 錯誤處理、`issue-reporting.md`；dev-guide §25.2）
 
 > 逾時有兩道且原文同形：manifest `timeout_ms`（1000～120000，舊 app 要 republish 才換上新值）
 > 與 egress 閘道的服務 `timeout_ms`（預設 10000、硬上限 30000）。走 `ctx.http.call` 的 action
@@ -422,7 +428,7 @@ Hosted App 線（不走 Phase 2–4）：
 > 任何一步失敗、或收到非預期狀態碼 → **先查 `references/troubleshooting.md`，不要自行推測修法**。
 > 查無此症、或照表處理仍卡死 → **自動**進入下方「問題回報」五步，不要反覆重試、不要繞道硬改。
 
-狀態碼語義分野：**403** 權限（`system.admin` 與 `builder.access` 降級動作不同；body 帶
+狀態碼語義分野：**403** 權限（結構操作 `datacenter.schema_write`／`system.admin` 與記錄 `builder.access` 降級動作不同；body 帶
 `reason`／`rule_id` 是租戶資料存取規則 → dev-guide §27）｜**409** 配額或衝突｜**422** 輸入不合法｜
 **400** 業務規則拒絕｜**503 「app runner 暫時不可用」** 三種成因同形：先問有沒有 publish
 （`status: draft` 重試不會好）→ 剛發布的冷啟動（等 `Retry-After`）→ body 帶 `quota_hint` 是租戶
@@ -431,14 +437,24 @@ Hosted App 線（不走 Phase 2–4）：
 **★ Action 對外呼叫失敗時別急著改 code**：先完整讀出 status 與 error message。
 timeout／連不出去＝raw `httpx` 直連（改 `ctx.http.call`）或 slug 沒有同名外部服務／未授權；
 401＝action 自己的 header 或 `ctx.secrets` 金鑰不對（閘道不注入也不剝除憑證）。
-**指向 Egress 或權限就立刻停止改程式**——那是設定問題，改幾次結果都一樣：把原文轉給用戶、
-引導到 Builder「外部服務」tab 建同名 slug 並授權，生效後才重試（`custom-app-dev-guide.md` §25.3）。
+**指向 Egress 或權限就立刻停止改程式**——那是設定問題，改幾次結果都一樣。確認是外部服務未建立／
+停用／未授權或金鑰缺少（發布 409 `gaps[].kind` ∈ `service_missing`／`service_inactive`／`unauthorized`／
+`secret_missing`，或呼叫期的 `egress_service_not_found`／`egress_service_inactive`／`egress_not_authorized`）→ 判定為**「等待人工設定」**：告訴用戶這一步是刻意的安全設計，
+請到 Builder「外部服務」／「服務」tab 手動完成；列出具體缺項、停止相關重試，設定生效後再驗證。
+**不要把這個設定缺口當成平台 bug 回報**，也不要為了「證明」它去打設定寫入 API
+（`custom-app-dev-guide.md` §25.2 人工設定政策、§25.3）。
 ## 問題回報（平台問題 → 開發團隊）
 
 > ★ **預設平台必定正確；開發或使用失敗，預設是自己的操作有誤。不確定就不報。**
 
+**只有一條管道**：`scripts/report_issue.py submit`（開發團隊 Scrum Board 的卡），平台缺陷與**文件缺口**
+都走這條，不用問用戶要發到哪；不要替用戶到 GitHub（含本 skill repo）開 issue。用戶或其他說明文件裡的
+「意見卡」「回報卡」「開發團隊的卡」都是這條（`references/issue-reporting.md` 開頭）。
+
 **何時自動進入**（任一成立，不必等用戶要求、不反覆重試、不繞道硬改）：
 `troubleshooting.md` 查無此症、照表處理仍卡死、實測與 `references/` 明文不符、端點 5xx／流程被硬阻斷。
+**優先排除**：等待人工完成 egress／secrets 設定（上段「錯誤處理」）不屬於「照表仍卡死」或「流程被
+硬阻斷」，不進回報流程；只有人工操作 Builder 本身失敗、或設定完成後回讀／發布結果與設定矛盾才算。
 
 **五步固定**：自動觸發 → 走完 `references/pre-report-self-grill.md` 六輪自審（每個分支都要有
 指令＋輸出當證據）→ 判定（不是平台問題就直接修、前沿還有待查就不報）→ **主動問用戶要不要送**
@@ -465,7 +481,7 @@ timeout／連不出去＝raw `httpx` 直連（改 `ctx.http.call`）或 slug 沒
 | `references/event-triggers.md` | Webhook 與 App 排程（冪等要求、宣告、限制） |
 | `references/product-line-decision.md` | **Phase 1.5 判產品線與模式時（兩條路共用 SSOT）**：預設 Custom App 與偏離訊號、Custom App 能力邊界核對表、兩問四象限（登入者一律 internal）、混合方案分工（含 Hosted 當 Custom 後端）、不可逆前提、app 分配表 |
 | `references/member-admin.md` | **Phase 1.5 第 1.7 項授權架構選型的 SSOT ＋ 成員／角色管理 playbook**：內外人員共用帳號體系的立場、三問與授權架構表、邀請／角色端點與權限、`access_role_ids`（兩條線）、批次邀請流程與四個邊界、Hosted internal 拿不到任何身分、既有系統使用者搬遷、403 解讀 |
-| `references/migration-workflow.md` | **有現存系統要遷入時**：stack 盤點（§2.0，最先做；含原雲端拓撲與本機／外部微服務、排程的落點）、產品線判斷的遷入輸入（§2.1）、專案解構、Schema 映射、使用者與登入的落點（§2.4.5）、資料遷移 |
+| `references/migration-workflow.md` | **有現存系統要遷入時**：stack 盤點（§2.0，最先做；**四種 stack 形狀**，含「BaaS 為後端、瀏覽器直連」；原雲端拓撲與本機／外部微服務、排程的落點）、產品線判斷的遷入輸入（§2.1）、專案解構、Schema 映射、使用者與登入的落點（§2.4.5）、資料遷移 |
 | `references/uat-environment.md` | **規則 33 的做法**：UAT 結論怎麼下、`version-test` 為何不算、鏡像拓撲、`-uat` 命名、獨立資料庫與憑證、clone Hosted 的正式設定窗口與可見度重設、egress／secrets／Open Proxy 引用、只補測試者、驗證表、維運與退場 |
 | `references/verification-details.md` | **要執行驗證時**：四項驗證的完整定義、Phase 5 里程碑 |
 | `references/troubleshooting.md` | **出錯時**：錯誤速查表 |

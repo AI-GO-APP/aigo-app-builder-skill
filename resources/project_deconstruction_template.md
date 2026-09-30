@@ -30,7 +30,7 @@
 | 接收外部 webhook | | `actions/manifest.json` 宣告 `"webhook": true` 的 action；必須冪等 + 驗簽 | event-triggers.md §0–1 |
 | 檔案上傳／儲存（S3、Supabase Storage…） | | Storage API（單檔 100MB）；歷史檔案要「原系統下載 → 重新上傳 → 資料列裡的 URL/path 改寫」，這是資料遷移的一部分，別漏。⚠️ 本地上傳的憑證路依 access_mode 不同（internal 現況無全自動路） | dev-guide §12.1 |
 | 呼叫第三方 API | | `ctx.http.call(slug, ...)` + Builder「外部服務」同名 slug 白名單；**計畫階段就要建** | dev-guide §25 |
-| 環境變數／金鑰 | | `ctx.secrets`（Builder「服務」tab 設定）；不進 code、不進 config | SKILL.md 規則、dev-guide §25 |
+| 環境變數／金鑰（★ 逐顆列：程式碼＋`.env.example`＋原託管平台 env 頁＋本機排程，四來源聯集） | | `ctx.secrets`（Builder「服務」tab 設定）；不進 code、不進 config。對帳表每列寫目標位置；後端密鑰由負責人在「服務」tab 設、前端設定另列。Hosted 線：runtime-settings，逐顆對帳、尚缺的列給用戶提醒設定 | SKILL.md 規則、dev-guide §25、hosted-apps.md §4 |
 | 寄信／通知 | | `ctx` 沒有寄信能力——走第三方郵件服務（同「第三方 API」列） | dev-guide §25 |
 | Realtime／WebSocket 推播 | | Custom App **無對應**——輪詢替代，或此需求足以改判 Hosted App（回 §2.1 重新判斷） | hosted-apps.md §1 |
 | 使用者／認證 | | ★ 特殊處理，見下節——**不進資料表映射流程** | 下節 |

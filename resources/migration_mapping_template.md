@@ -44,7 +44,7 @@
 >   （action 打端點 401、前端要 `builder.access`），寫入也只有本地腳本走得通；見 data-center.md §10
 > - `custom_data`：放入預設表的 `custom_data` JSONB 欄位（app 私有標記、鬆散擴充）
 > - `既有自建表加欄`：重用租戶既有自建表，缺的欄位用加實體欄位補（data-center.md §7）
-> - `自建表`：需建立新自建表來存放（租戶級，建表需 system.admin）
+> - `自建表`：需建立新自建表來存放（租戶級，建表需 datacenter.schema_write；建好要替 app 登記引用）
 > - `不遷移`：系統欄位，AI GO 自動管理
 
 ### 無法對應預設表的欄位 → 自建表（★ 上方對照項「已對照的預設表／理由」為空的表不得列在這裡）

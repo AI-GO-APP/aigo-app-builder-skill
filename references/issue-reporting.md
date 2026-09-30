@@ -4,6 +4,12 @@
 不開任何 UI、不經 AI GO 平台（回報系統獨立部署，平台掛掉時照樣可報）。
 回報會成為開發團隊 Scrum Board 上的一張卡，團隊的處理進度與回覆可隨時查。
 
+> ★ **回報只有這一條管道**：`scripts/report_issue.py submit` → 開發團隊 Scrum Board 的卡。
+> 平台缺陷與**文件缺口**都走這裡，agent 不必問使用者「要發到哪」。
+> **不要**替使用者到 GitHub 開 issue——包括本 skill 的 repo。
+> 本 skill 一律稱它「**平台問題回報**」；使用者或其他平台說明文件裡說的「意見卡」「回報卡」
+> 「開發團隊的卡」「AI GO 的卡」，都是同一條管道，照本文件走，不必再跟使用者對名稱。
+
 > ★ **回報前必走 `pre-report-self-grill.md`**：預設平台必定正確、失敗是自己操作有誤。
 > 六輪自審把每個分支用證據排除、寫得出「已排除清單」才有資格回報；不確定就不報。
 > `submit` 沒帶 `--ruled-out` 或 `--user-confirmed` 會拒收。
@@ -37,15 +43,23 @@
 - `troubleshooting.md` 查無此症、或照表處理後仍然卡死
 - 平台缺陷把開發流程整個擋住（部署/編譯/驗證壞掉、端點 5xx、資料異常）
 - 配額、權限、速率限制的行為與宣告不一致
+- **文件缺口**：平台照設計走（與設計或原始碼一致），但 `references/` 沒寫、照文件做會卡住
+  → 同一條管道，標題以「【文件缺口】」開頭（`pre-report-self-grill.md` Q5.4、§3 出口表）
 
 **不要回報**：App 自己的 bug、troubleshooting 已有解的症狀、
 還沒讀完錯誤訊息就想丟出去的問題。
 
-**也不要回報「刻意的能力邊界」**——症狀真實但平台是照設計走，缺的是 skill 文件（→ 報 skill repo，Q5.4）：
+**也不要回報「刻意的能力邊界」**——症狀真實但平台是照設計走，而且**文件已經寫了**
+（下面這些都已寫進 `references/`，查到就照文件處理；文件沒寫的才算文件缺口，走上面那條）：
 
 - Meta 面 `fields` 比實體表少欄（Workspace 用的策展白名單）→ 欄位判定用引用面 columns（issue #70）
 - Server Action 打使用者面 REST 回 401（runner 無使用者身分）→ 能力限制，不是權限（issue #71）
 - `ctx.erp` 白名單 403、seed 表唯讀、`__IS_AUTHENTICATED__` 恆 false（Q4.5 那批）
+- **等待人工完成 egress／secrets 設定**：外部服務未建立／停用／未授權、金鑰缺少（發布 409 `EGRESS_NOT_READY`
+  的四種 `gaps[].kind`，或呼叫期的 `egress_service_not_found`／`egress_service_inactive`／`egress_not_authorized`）→ 刻意的人工安全關卡，請使用者到 Builder「外部服務」／「服務」tab
+  手動設定，**不報平台、也不為了重現去打設定寫入 API**（dev-guide §25.2 人工設定政策）。
+  只有人工操作 Builder 本身失敗、或設定完成後回讀／發布與設定矛盾，才照常自審——不得僅因錯誤含
+  egress／secrets 就排除真正異常
 
 **回報前先窮盡使用者側的可能**（★ 平台事故單發錯的代價很高）：
 

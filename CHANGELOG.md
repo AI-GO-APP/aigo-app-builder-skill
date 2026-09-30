@@ -4,6 +4,121 @@
 - 編譯與發布都顯示 skipped_files；full_deploy 保留完整診斷。舊服務未回報時明確標示未知。
 - 請先部署支援 limits 的平台版本；端點不可用時只警告，仍由實際編譯判定，不臆測額度。版本號留待發行時更新。
 
+## 1.52.0
+
+### 回報只有一條管道；app 讀寫自建表要先登記引用
+
+兩張平台回報卡，RD 查證後都判定是 skill 文件的問題，這版補上。
+
+**回報去處統一**：`issue-reporting.md` 與 `pre-report-self-grill.md`（Q5.4、§3 出口表）把「文件缺口」
+導去 skill repo 開 GitHub issue，和 `SKILL.md`「問題回報」的 Scrum 卡流程互相矛盾，agent 照字面走會發錯地方；
+同一條管道在不同文件裡還有不同名稱。
+
+- `issue-reporting.md` 開頭寫明**只有一條管道**（`report_issue.py submit` → 開發團隊 Scrum Board），
+  不替使用者到 GitHub 開 issue；統一稱「平台問題回報」，「意見卡」「回報卡」等說法都指這條。
+  「要回報」清單加**文件缺口**（標題冠「【文件缺口】」）；「刻意的能力邊界」改成「文件已經寫了的不報」。
+- `pre-report-self-grill.md` Q5.4 與 §3 出口表：文件缺口改走同一條 `report_issue.py`，並寫明這類回報
+  已排除清單要列什麼、預期段怎麼寫才不會被開藥方閘門擋下。
+- `SKILL.md`「問題回報」補同一段單一管道說明。
+
+**自建表要先登記引用**：資料中心的 app 範圍閘逐租戶切到擋下模式後，帶 app 身分的呼叫（含 `ctx.db`）
+碰到**沒登記引用**的自建表會回 404「自建表不存在」——這是設計（不透露表存在），但文件從沒寫過這個前置步驟，
+照 `data-center.md` §7 的 Server Action 範例寫就會卡住。
+
+- `data-center.md` §7 新增「app 讀寫自建表要先登記引用」：為什麼要登記、哪條建表路徑會自動登記
+  （Builder AI 建表、套用模板會；REST 與資料中心 UI 不會）、兩條補登記路徑（`POST /api/v1/refs/apps/{app_id}`，或 Builder「資料與 API 權限」分頁
+  「待允許的資料表」按「允許」，後者需 `builder.manage_access`）、登記後不必重新發布、未切換租戶測過不算數。
+  Server Action 範例前加前置提醒；§7.5「正確寫法」補一條；另記登記了但沒給該動作是 403、`columns` 是白名單。
+- `data-center.md` §7 REST 速查表：建表／改表／加欄／改欄的權限由 `system.admin` 改為 `datacenter.schema_write`，
+  與 §2 及平台原始碼一致（刪表／刪欄仍是 `system.admin`）。
+- `custom-app-dev-guide.md` §11、§19 決策流程第 5 步與兩軌差異表、§20 補同一個前置步驟；§29 結構操作權限同步更正。
+- `dev-rules.md` 規則 18 與 `migration_mapping_template.md` 的「建表需 `system.admin`」同步更正，並補登記引用。
+- `data-center.md` §7 External 列表說明、`hosted-apps.md` Open Proxy 段「自建表整租戶可用、不用加引用」
+  同步更正：`/ext`、`/open` 同樣受這道閘，擋下模式下 `GET /tables` 只列已引用的表；External 終端使用者另需
+  `is_end_user_accessible`。Builder「待允許的資料表」寫明是被擋下後的補救，事前登記一律走 API。
+- `CONTEXT.md` 自建表條目、`data-center.md` §1 補「每支 app 要先登記引用」，並更正結構權限；
+  §7 列表／讀單表權限補上 `datacenter.schema_write`。
+- `troubleshooting.md` 新增一列：`ctx.db` 拋「自建表不存在」但表看得到 → 補登記引用，不是平台 bug、不回報。
+- `scripts/aigo_data_center.py`：結構操作 403 的提示與 docstring 改成 `datacenter.schema_write`（刪表／刪欄仍是
+  `system.admin`）；`PermissionDenied(needs="system.admin")` 是降級流程用的判斷值，邏輯不變。
+  `SKILL.md`、`troubleshooting.md` 的 403 分辨說明與 `aigo_e2e.py` docstring 同步更正。
+- `hosted-apps.md` Hosted 網域白名單改寫成由用戶在 Builder 設、AI 不代設（與 1.51.0 人工設定政策一致）。
+
+## 1.51.0
+
+### 人工設定政策：外部服務／金鑰由人在 Builder 手動設，AI 不代設、不當 bug 回報
+
+某租戶開發 app 時（2026-09-22），AI 依 skill 走流程、試著用 API 設外部服務與金鑰失敗、遍查文件
+找不到做法，就自動回報成 Urgent 單「無法以 API 設定外部服務與金鑰，需改用手動」。RD 定案：**這是刻意
+的人工關卡**（安全考量——不讓 AI 寫下使用者看不懂的設定、或把資料送出站外），平台不調整，skill 要改。
+平台原始碼核對：Builder 範圍的 egress／secrets 寫入 API **技術上開發者叫得到**
+（`builder.access`，建立／授權另需 App 擁有者或 admin），所以這是**工作流程政策**，不是 API 不可用——
+1.47.0 把 Builder 頁寫成「主要入口」又附 API 路徑，等於暗示 AI 可以走 API，這版改掉。
+
+- `SKILL.md` Action 硬規則新增第 5 條**人工設定政策**；「錯誤處理」改成先按 `gaps[].kind` 判定
+  「等待人工設定」、把缺項交給用戶、不回報、不為了證明去打設定寫入 API；「問題回報」加**優先排除**。
+- `custom-app-dev-guide.md` §25.2 拿掉 API 路徑、加人工設定政策方框；§25.3 表列與準則補「人工完成，AI 不代設」
+  與第 6 點「這是等待人工設定，不是 bug」；§26.2 金鑰那行改「由使用者手動設定，AI 不代為寫入」。
+- `uat-environment.md` §3 步驟 5–6 改成**人工交接**（AI 列出 slug／base_url／key_name，用戶在 Builder 設），
+  寫入 API 全部移到新增的**附錄 A**，標明「僅供人員自行執行的 provision 腳本，AI 開發流程中不呼叫」；
+  唯讀查詢與 `egress_preflight()` 不受限。
+- `issue-reporting.md`「刻意的能力邊界」清單、`pre-report-self-grill.md` 新增 Q4.5b 與 Q6.1 的排除：
+  排除範圍**精準到四種 `gaps[].kind`**，人工操作 Builder 本身失敗或設定後結果矛盾仍照常自審。
+- `scripts/aigo_publish.py` 的 409 `EGRESS_NOT_READY` 提示與 `egress_preflight()` 訊息改成人工交接措辭
+  （邏輯不變、仍不自動帶 confirm）；`troubleshooting.md`、`platform-behaviors.md` 與 §25.4 的 `timeout_ms`
+  幾處「去 Builder 建立／啟用／設上去」祈使句改成「請用戶到 Builder…」——AI 有瀏覽器工具，代操作 UI 也在禁止之列。
+
+## 1.50.0
+
+### 遷入必做：原專案環境變數逐顆盤點、對帳、提醒人設定
+
+遷入案實踩：搬上 Hosted App 後主流程正常，但備份、第三方同步、AI 呼叫幾支排程每天默默失敗——
+原系統的服務帳號憑證（還是**指向本機檔案的路徑型**）、第三方 API key 沒在新環境設，DB 設定表裡的
+設定列也因資料重新開始而缺席；平台排程照樣顯示成功，沒人發現。
+
+- `hosted-apps.md` §4「遷入既有系統時要重新提供的 env 清單」改成**必做流程**：
+  從程式碼、`.env.example`／compose、**原託管平台 env 設定頁**、本機排程四個來源盤出全部 key →
+  對帳表（用途、類型、處置、`runtime`／`build`、是否已設）→ 沒設的逐顆列給用戶、請負責人設定
+  （值由人貼，不在對話傳）→ 每列用途實跑驗證。清單沒清空不得回報遷入完成。
+  另補三個常見漏項類別（路徑型服務帳號憑證要改值型、只有單一功能用到的 API key、排程金鑰）、
+  「兩側都要改」（換了新值的密鑰與新網址，外面打進來的一方也要同步）、「設定不只在 env」（DB 設定列）。
+- `hosted-apps.md` §3.4：遷入列的驗收改成「對帳表的尚缺清空」。
+- 對帳表每列標**目標位置**（Hosted env／Custom App `ctx.secrets`／留原機／DB 設定列），「尚缺」只算目標需要而未設的；
+  `build`／`both` 的值設定後要重建部署才生效；Custom App 線另寫落點（「服務」tab，無 runtime-settings GET）；
+  盤點只輸出 key 名不印原始設定行；遷入與 UAT 的密鑰由負責人設定、AI 不代填；尚缺未清空＝不得交付。
+- `migration-workflow.md` §2.2、`project_deconstruction_template.md`：環境變數列加上四來源逐顆盤點，指向上述流程。
+
+## 1.47.0
+
+### 遷入案實踩：Hosted 打包兩坑、Next 15 綁定症狀、BaaS 為後端的第四種 stack 形狀
+
+某遷入案（2026-09-22 實踩；Next 15.5 standalone ＋ BaaS 當後端）踩出來的，分四個檔補：
+
+- `hosted-apps.md` §2：**fallback 成 static 站最常見的觸發是「tarball 裡沒有 Dockerfile」**——
+  部署會 `active`、全站 404，所以沒人翻日誌。三個判讀訊號：`Build Plan │ provider │ static`、
+  `load build definition from Dockerfile: 1.04kB`（zbpack 自產的 caddy Dockerfile）、
+  runtime-logs 全是 caddy 的行。另補「app 在子目錄（`app/`）不算 monorepo」。
+- `hosted-apps.md` §2 綁定介面陷阱：**Next 15.5 拿到 pod 名 `HOSTNAME` 是必現的啟動失敗**
+  （`getaddrinfo ENOTFOUND <pod 名>`），不是原本記的 Next 16 競態；綁對時字樣是
+  `Local: http://localhost:8080` ＋ `Network: http://0.0.0.0:8080`，判讀改看「有沒有 pod 名」；
+  Dockerfile 的 `ENV HOSTNAME=0.0.0.0` 蓋得過平台注入值（實測）。
+- `hosted-apps.md` §3.2 新增「★ 打包原始碼 tarball 的兩個坑」：`.dockerignore` 排掉 Dockerfile
+  自己；bsdtar 的 `--exclude` 比對**任一路徑片段**，一行根目錄的 `supabase` 連
+  `app/src/lib/supabase/` 一起排掉（`Module not found`）。**不要 `tar --exclude-from=.dockerignore`**。
+- `hosted-apps.md` §3.4 項目 ④：**生產模式不逐筆印請求的框架**（Next standalone）拿不到
+  「runtime-logs 看得到請求」這個證據，改由**回應**舉證（version marker ＋ 非打到資料層
+  生不出來的動態內容）。§4 補 `NEXT_PUBLIC_*` 標 `both` 已實證到得了 CodeBuild 的 `next build`
+  （不需 `--build-arg`；Dockerfile 仍寫 `ARG`＋`ENV` 兩條路都吃）。§8 補三行無害的建置噪音。
+- `migration-workflow.md` §2.0／§2.1：stack 形狀結論三選一改**四選一**，新增
+  **「BaaS 為後端、瀏覽器直連」**（辨識訊號：前端大量 BaaS client 直查、數十到數百條 RLS、
+  數十支 SQL function、Auth 發的 JWT）。預設 **Hosted App 整搬**；**資料層待平台決議**——
+  規則 32 的例外只限關聯式 PostgreSQL，不含 Auth／Storage／Realtime／Edge Functions／pg_cron，
+  這一型不被涵蓋（本版**不動規則 32**，只把落差寫成要提出的決議事項）。
+  另立前置步驟「**先取正式庫 schema-only dump**」：211 支手動貼上去的 migration 裡 7 支綁正式資料列、
+  1 個被 5 支引用的欄位 repo 裡沒建過——repo 不是 schema 的正本。
+- `uat-environment.md` §0：只換運算層、DB／schema 不動時可以不另建第二顆庫，但結論要寫
+  `UAT＝無；理由…；風險：驗證期間寫入即正式資料`，且因為確實有正式資料與對外副作用，要經 owner 簽核。
+
 ## 1.46.2
 
 ### 修正：同步腳本的 VFS 檔數上限仍是 200，與 1.46.1 改過的文件矛盾

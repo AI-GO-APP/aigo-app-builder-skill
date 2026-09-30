@@ -96,6 +96,18 @@
   專屬節點目前 **UAT／prod 都是 `ops-only`**——由平台替租戶開，租戶自助尚未開放。
   容器內可 root，但沒有任何 capability（上表）
 - 建置時可連的公網來源是**白名單**（npm/PyPI/Docker Hub 等）——私有 registry 會被擋
+- **app 不在 repo 根（例如在 `app/`）不算 monorepo**：Dockerfile 放 repo 根、
+  `COPY app/package.json app/package-lock.json ./` 再 `COPY app/ ./`，standalone 產物不會巢狀，
+  precheck 也不判 monorepo（某遷入案 2026-09-22 實踩）。有 Dockerfile 就不經 zbpack 偵測，
+  目錄形狀不再是問題
+
+**★ fallback 成 static 站，最常見的觸發是「tarball 裡沒有 Dockerfile」**（某遷入案 2026-09-22 實踩）：
+zbpack 看不到 Dockerfile 就自己偵測語言，認不出來就給一個 caddy 靜態站——**部署會成功**
+（`active`），所以沒人去翻日誌，只看到所有路由 404。三個判讀訊號（湊齊就是這件事）：
+建置日誌 `Build Plan │ provider │ static`、`load build definition from Dockerfile: 1.04kB`
+（那是 zbpack 自己產的 caddy Dockerfile，不是你的）、`queued`→`active` 只花 ~46 秒
+（框架專案不可能這麼快）；runtime-logs 全是 caddy 的行（`admin endpoint started`、
+`HTTP/2 skipped because it requires TLS`）。成因與修法在打包那一步，見 §3.2。
 
 **★ 綁定介面陷阱（2026-09-02 實測，Next.js 16 standalone）**：k8s 會把容器的
 `HOSTNAME` 設成 pod 名稱，而**以 `process.env.HOSTNAME` 決定 bind 位址的框架**
@@ -106,9 +118,19 @@ PORT 其實有聽。判讀與處置：
 
 - runtime-logs 印出 `Local: http://<pod 名稱>:8080` 而不是 `0.0.0.0` → 就是這個問題；
   pod `Running`、框架顯示 Ready、但整段生命週期**沒有任何請求進來** = 探針連不上，不是 app 掛
+- ★ **版本不同症狀不同：Next 15.5 standalone 是「必現的啟動失敗」**（某遷入案 2026-09-22 實踩）——
+  同樣拿到 pod 名 `HOSTNAME`，行程直接死在
+  `⨯ Failed to start server [Error: getaddrinfo ENOTFOUND <pod 名>]`，不是上面那種
+  「1 次成功 3 次失敗」的競態。看到這行不要往 PORT／探針查，直接補 `ENV HOSTNAME=0.0.0.0`
+- **Next 15 綁對時的日誌字樣**是 `- Local: http://localhost:8080` ＋
+  `- Network: http://0.0.0.0:8080`（**不是** `Local: http://0.0.0.0:8080`）。
+  ⇒ 判讀法是「這兩行裡有沒有出現 pod 名」，不是「`Local:` 後面是不是 `0.0.0.0`」
 - 處置：Dockerfile runner 階段加 `ENV HOSTNAME=0.0.0.0`（加上後連續 7 次部署穩定）；
-  手寫服務一律 `listen(port, "0.0.0.0")`
-- **後遺症**：綁 `0.0.0.0` 後 Next 從 request 推算的 origin 會變成 `https://0.0.0.0:8080`，
+  手寫服務一律 `listen(port, "0.0.0.0")`。Dockerfile 的 `ENV` **蓋得過平台注入的 `HOSTNAME`**
+  （2026-09-22 容器內實測：`$HOSTNAME` 是 `0.0.0.0`，`hostname` 指令仍回容器 id——不衝突，
+  框架讀的是前者）
+- **後遺症**：綁 `0.0.0.0` 後 Next 從 request 推算的 origin 會變成 `https://0.0.0.0:8080`
+  （Next 的 `req.nextUrl.origin` 就是其一），
   凡是用「本次請求 origin」組絕對網址的地方（OAuth `redirect_uri`、`redirect(origin + …)`、
   金流 success/cancel URL、通知信連結）都會導錯。**對外網址一律由 env（如 `APP_URL`）指定，
   不從 request 推算**——放進 §4 的遷入 env 清單
@@ -178,6 +200,19 @@ POST {deployd_upload_url}  ← multipart/form-data，第一個欄位必須叫 ta
 建置日誌：GET .../deployments/{deployment_id}/logs?after={cursor}（增量 cursor）
 ```
 
+- **★ 打包原始碼 tarball 的兩個坑**（某遷入案 2026-09-22 實踩，兩次部署各踩一個；兩次都**不是**
+  建置失敗的形狀，所以很難往打包那一步想）：
+  - **tarball 必須含 Dockerfile**。`.dockerignore` 把 `Dockerfile`／`.dockerignore` 自己列進去
+    對 `docker build` 無害（daemon 另外拿），但拿它當 `tar --exclude-from` 就真的排掉了 →
+    zbpack 看不到 Dockerfile、整包 fallback 成 static 站（部署成功、全站 404，判讀訊號見 §2）
+  - **`tar --exclude` 的比對語意 ≠ `.dockerignore` 的比對語意**。bsdtar（macOS 內建 `tar`）的
+    pattern 比對**任一路徑片段**，於是 `.dockerignore` 裡一行根目錄的 `supabase`
+    （原意只排 repo 根的那個目錄）會把 `app/src/lib/supabase/` 一起排掉，
+    要到建置 `Module not found: Can't resolve '@/lib/supabase/client'` 才炸；
+    寫成 `./supabase` 一樣中
+  - 修法：打包用**真正實作 `.dockerignore` 規則的工具**（pattern 錨在根，只有 `**/x` 才代表
+    任意深度），或直接餵明確的檔案清單——**不要 `tar --exclude-from=.dockerignore`**。
+    打完先 `tar -tzf` 核一遍：Dockerfile 在裡面，且每個被排掉的目錄都是你想排的那一個
 - **redeploy**（`POST /{id}/redeploy`）＝重跑**最後一次成功上傳**的原始碼，不需重傳；
   沒有可重跑的來源回 409
 - **restart**（`POST /{id}/restart`）不重建映像（⚠️ prod 2026-09-02 仍 404，見檔頭）
@@ -246,8 +281,8 @@ Custom App 線每次變更都要過 SKILL.md Phase 4.2 的驗證閘門；Hosted 
 |---|---|---|
 | **只改 env／持久碟** | **1–6 分鐘**傳播（§4）；延遲窗內驗證會誤判成沒生效 | ① `GET /{id}/runtime-settings` 讀回確認值 ② 實測**依賴那顆 env 的路徑**（登入、OAuth 導向、第三方呼叫），不是只看設定頁 |
 | **常駐設定**（首次部署、改 runtime-settings、接手既有 app 的第一次驗證都要做） | — | ① `GET /{id}/runtime-settings` 讀回 `always_on`，**必須等於 §3.0 的決策**（沒過閘＝`false`）② 讀到 `true` 就要拿得出計畫裡那句「常駐＝開，理由 X；退場條件 Y」，拿不出來視同未通過 |
-| **程式碼變更**（deploy／redeploy） | 建置完成 | ① `deployments/{id}` 狀態 `active`（不是 `queued`／`building`／`failed`／`superseded`）② **version marker**：回應帶得到本次版本識別 ③ 主要路由各打一次拿 200 ④ `runtime-logs` **看得到請求進來**——pod `Running`、框架顯示 Ready 卻整段沒有請求 = 探針連不上（§2 綁定介面陷阱） |
-| **首次部署／遷入既有系統** | 同上 | 上列全部（**含常駐設定列**）＋ §4「遷入 env 清單」逐顆核 ＋ 持久化落點（§7：容器檔案不持久，資料要落平台）＋ 取平台資料的路徑（§5：容器內要 `/open` 前綴、隨附整合要加引用） |
+| **程式碼變更**（deploy／redeploy） | 建置完成 | ① `deployments/{id}` 狀態 `active`（不是 `queued`／`building`／`failed`／`superseded`）② **version marker**：回應帶得到本次版本識別 ③ 主要路由各打一次拿 200 ④ `runtime-logs` **看得到請求進來**——pod `Running`、框架顯示 Ready 卻整段沒有請求 = 探針連不上（§2 綁定介面陷阱）。⚠️ **生產模式不逐筆印請求的框架**（Next standalone 即是，某遷入案 2026-09-22 實踩）拿不到這個證據：④ 改由**回應**舉證——version marker ＋ 一個「非打到資料層生不出來」的動態內容，兩者都要，不可用「日誌沒錯誤」交差 |
+| **首次部署／遷入既有系統** | 同上 | 上列全部（**含常駐設定列**）＋ §4「遷入 env 清單」**對帳表的「尚缺」清空**（未清空＝只能給進度／阻塞說明、列出缺項與影響，不得交付）＋ 持久化落點（§7：容器檔案不持久，資料要落平台）＋ 取平台資料的路徑（§5：容器內要 `/open` 前綴、隨附整合要加引用） |
 | **自訂網域** | DNS／憑證 | `POST /{id}/domains/{domain_id}/verify` 走到 `active`（§9；**session-only，Deploy Token 打不了**），再用**該網域**重跑一次主要路由，不是只驗 `*.ai-go.app` |
 
 **驗證後決策**：
@@ -276,6 +311,10 @@ Custom App 線每次變更都要過 SKILL.md Phase 4.2 的驗證閘門；Hosted 
 | 保留 | `PORT`（平台注入）、`K_*` 前綴、**`AIGO_*` 整族** |
 
 - 每顆可標 `runtime`／`build`／`both`（缺漏視為 `runtime`）
+- **要在建置期內嵌進前端 bundle 的（`NEXT_PUBLIC_*` 這一族），標 `both` 就夠**——
+  某遷入案 2026-09-22 實踩：標 `both` 後 CodeBuild 上的 `next build` 讀得到，部署後瀏覽器端
+  打的是正確的後端網址，**不需要**另外傳 `--build-arg`。Dockerfile 仍建議每顆寫
+  `ARG X` ＋ `ENV X=$X`：build-arg 與 env 注入哪條生效不由 app 決定，兩條都吃最省事
 - 🚨 **「build」不是 compile-only**：標 build 的值會寫進映像的 `ENV`，
   **出現在租戶可見的建置日誌**、也留在執行中行程——只該留在伺服器的機密**不要**標 build
 - 🚨 **`PUT /runtime-settings` 是全量替換不是 merge**：省略 `env_vars`＝清空、
@@ -317,7 +356,46 @@ Custom App 線每次變更都要過 SKILL.md Phase 4.2 的驗證閘門；Hosted 
 
 Hosted App 容器**只帶平台注入的 `AIGO_*`**，原系統的 env 一顆都不會自動過來。
 沒帶到的典型症狀是「頁面能開、登入後每個操作都 401／導去奇怪網址」——看起來像資料層或
-認證層壞了，其實只是 env 缺席。遷入計畫要逐顆列出並在 runtime-settings 重設：
+認證層壞了，其實只是 env 缺席。更難發現的是**只有某個功能或某支排程用到的 env**：
+主流程全好，缺的那顆只讓備份、第三方同步、AI 呼叫這類工作**每天默默失敗**，
+平台排程仍顯示成功（action 本身有回應），沒人會來報錯。
+
+**★ 遷入必做：env 盤點 → 對帳 → 提醒人設定**（不可省；只憑「記得的那幾顆」盤一定漏）
+
+1. **從四個來源盤出原系統實際用到的全部 key**，聯集成一張清單
+   （★ 只輸出 key 名、所在位置與用途：搜尋時只印 key 名或遮罩後的行，**不得**把原始設定行、
+   憑證 JSON、`.env` 內容或完整 API 回應印到工具結果／對話裡）：
+   - 程式碼：全文搜 `process.env.`／`import.meta.env.`／`os.environ`／`os.getenv`／`getenv(`／
+     設定檔讀取函式（含間接讀取：`env("X")`、`config.get("X")`）
+   - `.env.example`／`.env.sample`／`docker-compose*.yml`／Dockerfile 的 `ENV`／`ARG`
+   - **原託管平台的 env 設定頁**（PaaS 控制台、CI secrets）——請用戶匯出**key 名稱**
+     （值不要貼進對話）；repo 裡沒寫、只設在平台上的 key 只能從這裡找到
+   - 原系統的**本機／外部排程與微服務**（`migration-workflow.md` §2.0）各自讀的 env——
+     它們留原機時，要改的是**它們那一側**的網址與金鑰（見下方「兩側都要改」）
+2. **做對帳表**：每顆 key 一列——用途（哪個功能／哪支排程會用）、類型（密鑰／網址／開關／
+   路徑）、處置（照搬值／**換新值**／改成值型／不搬／退役）、**目標位置**（Hosted runtime-settings／
+   Custom App 的 `ctx.secrets`／留原機那一側／DB 設定列）、`runtime`／`build`／`both`、**驗證狀態**。
+   是否已設依目標位置各自核對：Hosted 用 `GET /{id}/runtime-settings` 讀回 **key 名**比對（不印值）；
+   其他落點見下方。**「尚缺」只算「目標位置需要、但還沒設」的列**——不搬／退役的列寫理由即可，
+   不算尚缺（例如原系統的 `DATABASE_URL`，見本節末）
+3. **把「尚缺」逐顆列給用戶**，說明缺了哪個功能會壞，請負責人到對應位置設定（Hosted：「環境變數」tab）。
+   遷入與其 UAT 的密鑰值一律**由負責人設定**；AI 只提供設定規格、盤點與驗證，**不代填密鑰**、
+   值不在對話裡傳（人工設定政策）。尚缺未清空時，只能給**進度／阻塞說明**（列出缺項與影響），
+   **不得對外交付、不得回報遷入完成**
+4. **驗證**：依 `env_availability` 分開——`runtime` 等滿傳播窗後驗（§3.4「只改 env」列）；
+   **`build`／`both` 要設定後重新建置部署**（改設定不會觸發重建，舊 bundle 裡還是舊值），
+   確認 version marker，並驗證瀏覽器實際拿到新值。每列的「用途」都實際跑一次——排程類手動觸發一次、
+   看**工作本身的執行結果**，不是平台排程的「成功」
+
+**Custom App 線**同樣要盤點、對帳，但落點不同：後端密鑰由負責人在 Builder「服務」tab 設定、
+action 以 `ctx.secrets` 讀取（Builder 沒有 runtime-settings 這支 GET，已設與否在「服務」tab 核對，
+`custom-app-dev-guide.md` §26、§28）；前端公開設定與打包時注入的值另列落點與驗證方式，不套用上面的 Hosted GET。
+
+**設定不只在 env**：原系統若把設定存在 DB 的設定表（公司代碼、功能總開關、停用清單之類），
+而遷入時資料是**重新開始**而不是整庫搬過來，這些設定列也要一併列進對帳表——症狀跟缺 env 一樣，
+是某個功能自己報「X 未設定」。
+
+常見類別：
 
 | 類別 | 例 | 沒帶到的症狀 |
 |---|---|---|
@@ -325,7 +403,13 @@ Hosted App 容器**只帶平台注入的 `AIGO_*`**，原系統的 env 一顆都
 | session／簽章密鑰 | `SESSION_SECRET`／`JWT_SECRET`／`NEXTAUTH_SECRET` | 登入後全 401，或每次部署都把使用者登出 |
 | 第三方憑證 | OAuth client id/secret、金流 key、郵件服務 key | 對應功能 4xx／5xx |
 | 功能開關 | 逐模組切換資料後端的旗標 | 走錯後端 |
+| 雲端服務帳號（檔案路徑型） | `GOOGLE_APPLICATION_CREDENTIALS=/path/key.json` 這類**指向本機檔案**的 | 容器裡沒有那個檔 → 依賴它的功能（雲端硬碟備份、試算表同步）全失敗。改成**值型**（整份 JSON 或 base64 放進一顆 env，程式改讀值），不要把金鑰檔打進映像 |
+| AI／LLM 與其他 API key | 模型供應商 key、地圖／簡訊／推播 key | 只有用到的那個功能或排程失敗，主流程正常，最容易漏 |
+| 排程／內部呼叫金鑰 | 外部排程打 app 用的共享密鑰 | 排程全部 403；AI GO 上若**換了新值**，原機上打過來的排程也要一起換（見下） |
 
+- **兩側都要改**：換了新值的密鑰（session、排程金鑰、webhook 簽章）與新的對外網址，
+  凡是**從外面打進來的**（留原機的排程、第三方 webhook 設定、其他系統）都要同步改到新值與新網址；
+  對帳表加一欄「誰會打進來」，逐一通知負責人
 - 密鑰類一律標 `runtime`，**不要標 `build`**（會進映像與建置日誌，見上）
 - 原系統的 `DATABASE_URL` 一類**不要**搬——資料層改走 Open Proxy（§7.1），直連在網路層不通
 
@@ -364,7 +448,9 @@ Hosted App 容器**只帶平台注入的 `AIGO_*`**，原系統的 env 一顆都
   或 `GET /api/v1/refs/apps/{id}` 試探取得）。此端點**不在 `/hosted-apps` 前綴下**，
   Deploy Token 打不到，要登入 session（帳號有 `hosted_apps.deploy` 即可，不必 `builder.access`）。
   2026-09-02 實測 17 張預設表 201 後容器內 403 隨即轉 200，**不需重新部署**。
-  資料中心自建表預設是整租戶可用，不用加引用
+  資料中心自建表**也要加引用**（同一支端點、同一個整合 id）：租戶切到擋下模式後，`/open/data-center`
+  對沒引用的表回 404「自建表不存在」、`GET /tables` 只列已引用的表；還沒切換的租戶暫時不擋，
+  但一律照「要登記」來做（`data-center.md` §7「app 讀寫自建表要先登記引用」）
 - 憑證三動詞（session-only，**互不替代**）：`POST /{id}/credential/provision`（補建，冪等）
   ／`rotate`（輪替，新舊重疊 30 分鐘）／`revoke`（立即失效）
 - ★ **Open Proxy 也在租戶「資料存取規則」（Auth gate v1）的執法範圍**（T66；端點與執法碼 v1.13.0
@@ -385,7 +471,7 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
   302、fetch 401 `hosted_app_auth_required`），Server Action 端看到的是 401／HTML，不是資料
 - **app 自驗簽章**：Custom 端把共享金鑰存 `ctx.secrets`，action 自組 `Authorization: Bearer …`
   （egress 閘道原樣轉送 `Authorization`，dev-guide §25）；Hosted 端每個請求驗證，驗不過 401
-- Hosted 的網域要先在 Builder「外部服務」以同名 slug 建成 egress 白名單（SKILL.md 計畫第 4.6 項）
+- Hosted 的網域要先由**用戶**在 Builder「外部服務」以同名 slug 建成 egress 白名單，AI 列出 slug 與網域交給用戶，不代設（SKILL.md 計畫第 4.6 項、dev-guide §25.2 人工設定政策）
 - **使用者身分由 Custom 端帶**：action 內用 `ctx.user_id`／`ctx.user_permissions` 分流後，把需要的
   身分欄位放進 request body；Hosted 不自行認人、不另建使用者表
 - 前端**不要**跨來源直打 Hosted：帶憑證的 CORS 平台不支援（proxy 只處理同站 cookie）
@@ -464,7 +550,7 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
 - **落點依雙軌分流**（與 Custom App 同一套規則，`dev-rules.md` 規則 18）：
   平台有同語意實體的資料（先用業務語言查 `default-table-lookup.md` §2）→ 在「資料存取」tab 加**預設表引用**
   （預設表零授權起步，要先加引用並發布，§5）；查過仍沒有的 → **自建表**
-  （資料中心自建表預設整租戶可用，§5）
+  （自建表同樣要替整合加引用，§5、`data-center.md` §7）
 - **映射先行**：逐表逐欄做完 Schema 映射（`custom-app-dev-guide.md` §22、
   映射表模板）並經用戶確認，**才可執行匯入**——Hosted 線不因「程式整套搬」而免掉這一步
 - **程式的資料層要改寫**：原專案的 ORM／SQL／DB driver 呼叫全部改成
@@ -543,6 +629,12 @@ Hosted App 讓其他 App 打 HTTP 過去——這是明文禁止的反模式，�
   限制 worker 數、heap 設包絡的 60–65%）；③ 還是不明 → 三段對照各部署一次定位失敗點：
   最小 Node 服務（無建置）→ 真實 `package.json` 只跑 `npm ci` 不 build → 完整專案。
   日誌為空時檔頭的「先懷疑部署落差」原則不適用——這是使用者側建置失敗，只是沒訊息
+- **建置日誌的無害噪音**（某遷入案 2026-09-22 實踩；三行都**不是**失敗原因，看到不要追）：
+  `tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'`
+  （macOS 打包帶的 xattr）、`failed to configure registry cache importer:
+  localhost:5000/cache:buildcache: not found`（第一次建置還沒有快取層）、
+  `failed to read oom_kill event ... memory.events: no such file`
+  （CodeBuild 上沒有那個 cgroup 檔，**不代表**發生 OOM——真 OOM 的判讀走上一條）
 - **執行期日誌**：`GET /{id}/runtime-logs?tail=&since=&until=&severity=`
   （tail 1–1000 預設 200；`reason: scaled_to_zero` 也是 HTTP 200，不是錯誤）
 - **AI 解讀**：`POST /{id}/logs/interpret`——`source=build` 必帶 `deployment_id`

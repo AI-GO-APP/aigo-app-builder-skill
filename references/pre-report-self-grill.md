@@ -129,6 +129,11 @@
 - **Q4.5 平台刻意設計**：`__CURRENT_USER__` 任何模式都不存在、`__IS_AUTHENTICATED__` 恆 false、
   seed 表唯讀、`ctx.erp` 白名單 403、runner default-deny egress、空渲染偵測 8 秒——
   這些是行為不是缺陷。
+- **Q4.5b 等待人工設定**：外部服務未建立／停用／未授權、金鑰缺少（發布 409 `EGRESS_NOT_READY` 的
+  `service_missing`／`service_inactive`／`unauthorized`／`secret_missing`，或呼叫期的 `egress_service_not_found`／`egress_service_inactive`／`egress_not_authorized`）
+  → 由人在 Builder 手動設定是**刻意的安全設計**（dev-guide §25.2），不是缺陷：**在這裡停，把缺項交給用戶**。
+  不得為了重現去打設定寫入 API（第 6 輪對這類不適用）。只有人工操作 Builder 本身失敗、或設定完成後
+  回讀／發布結果與設定矛盾，才繼續往下自審。
 - **Q4.6 自己的產物**：白畫面先開 console。`ReferenceError` 帶 minified 名稱＝自家 bundle 的
   use-before-declaration；compile 走 esbuild **只轉譯不驗型別**，`compile_errors: []` 不是「程式正確」的證據。
   先跑 `uv run --project scripts python scripts/aigo_typecheck.py <專案目錄>`（SKILL.md Phase 4 步驟 1.5）。
@@ -138,12 +143,15 @@
 - **Q5.1 `troubleshooting.md`**：逐列比對症狀。有列 → 照表處理後再看。
 - **Q5.2 對應 reference 章節**：讀完整段，不是只讀被引用的那一句。文件寫的行為是否其實就是現在看到的？
 - **Q5.3 `CONTEXT.md` 術語**：是否把 CustomObject 當自建表、Data Reference 當新表、延伸欄位當 `custom_data`？
-- **Q5.4 文件沒寫 ≠ 平台錯**：文件缺口是 **skill 文件的問題**，回報到 skill repo，不是報平台。
+- **Q5.4 文件沒寫 ≠ 平台錯**：行為與設計或原始碼一致、只是 `references/` 沒寫 → 判「**文件缺口**」，
+  不必再走第 6 輪。出口**仍是同一條 `report_issue.py`**（§3 出口表），不是 GitHub issue、
+  也不是本 skill 的 repo——回報只有一條管道（`issue-reporting.md` 開頭）。
 
 ### 第 6 輪：最小重現（走到這裡才有資格說「平台問題」）
 
 - **Q6.1 去除 app 程式碼**：不經前端、不經 action，用登入 session 直接打同一端點、同一 payload
   （`aigo_data.py call` 或 curl），是否重現？不能重現 → app 側問題，停。
+  ★ **egress／secrets 設定缺口不適用本輪**：不得為了重現去呼叫外部服務／secrets 的寫入 API（Q4.5b）。
 - **Q6.1b 資料操作線的替代判準**（★ 本線 Q6.1 恆真，不可拿它當證據）：這條線本來就是純 API，
   「去掉 app 程式碼仍重現」不排除任何東西——全樹最強的那道「app 側 vs 平台側」濾網在此自動通過。
   改用兩個對照：① **平台 UI 對照**——同一顆帳號在平台介面做同一件事（同一張表、同一筆、同一個值），
@@ -171,7 +179,7 @@
 |------|------|
 | 不確定 | **不報**。把自審紀錄與缺的證據交給使用者，問的是「要不要繼續追」，不是「要不要送」 |
 | app 側 | 回 `troubleshooting.md`／修 app |
-| 文件缺口 | skill repo issue |
+| 文件缺口 | **同一條 `report_issue.py submit`**，標題以「【文件缺口】」開頭。§3 條件 1 只要求第 0–5 輪排除完（Q5.4 成立即停，第 6 輪不必走），條件 2（硬條件擇一）不適用。已排除清單**至少 3 行**（`submit` 少於 3 行會拒收），寫出：核對過哪幾節文件（Q5.2）、實測到的行為與怎麼重現、憑什麼判定是照設計走（錯誤訊息原文、文件其他段落或平台回應）。結果段寫實際行為；預期段寫「照文件做應該得到什麼、哪一節沒提到」——寫成事實，不寫「文件應該加…」（會被開藥方閘門擋下）。送出前照下方問法先給摘要問使用者，摘要開頭改成「【文件缺口】」 |
 | 部署落差 | 記錄症狀，隔幾天再試 |
 
 兩個條件都成立後，**由 Agent 主動問使用者要不要送出**（對應 grilling 的「使用者確認共識後才行動」）。
