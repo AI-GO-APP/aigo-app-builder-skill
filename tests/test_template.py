@@ -23,6 +23,7 @@ VFS = {
         '    ctx.db.insert("cnst_billings", {"a": 1})\n'
         '    ctx.http.call("billing-api", "/x")\n'
         '    ctx.approval.submit({})\n'
+        '    ctx.mcp.trigger("sync")\n'
         '    ctx.response.json({})\n'
     ),
     'actions/broken.py': 'def (',
@@ -32,7 +33,7 @@ DETAIL = {
     'access_mode': 'internal',
     'data_center_schema': {'version': 1, 'tables': [{'key': 'cnst_billings', 'fields': []}]},
     'data_references_schema': [{'table_name': 'crm_leads', 'columns': ['id']}],
-    'setup_schema': {'properties': {'BILLING_API_KEY': {}}},
+    'setup_schema': {'BILLING_API_KEY': {'required': True}},  # 平台真實形狀：扁平 {KEY: {required}}
 }
 
 
@@ -56,13 +57,21 @@ class InventoryTest(unittest.TestCase):
         self.assertEqual(inv['data_references'], ['crm_leads'])
         self.assertEqual(inv['setup_keys'], ['BILLING_API_KEY'])
         self.assertEqual(list(inv['http_slugs']), ['billing-api'])
-        self.assertEqual(sorted(inv['ctx_calls']), ['approval', 'db', 'http'])
+        self.assertEqual(sorted(inv['ctx_calls']), ['approval', 'db', 'http', 'mcp'])
         self.assertEqual(len(inv['ctx_calls']['db']['insert']), 1)
         self.assertNotIn('response', inv['ctx_calls'])
         self.assertFalse(inv['has_ports_layer'])
         self.assertIn('ports 層：無', t.format_inventory('cnst-billing', inv))
 
-    def test_declared_effects_win(self):
+    def test_platform_overwritten_meta_is_inferred(self):
+        # preview 的 _template_meta.json 是平台覆寫的這個形狀，帶不出 effects
+        meta = {'factory_key': 'cnst-billing', 'template_version': '1.0.0', 'generated_at': 'x', 'source': 'storage'}
+        inv = t.inventory_effects(dict(VFS, **{'_template_meta.json': json.dumps(meta)}), DETAIL)
+        self.assertEqual(inv['source'], 'inferred')
+        self.assertIn('推斷清單', t.format_inventory('cnst-billing', inv))
+
+    def test_future_declared_effects_path(self):
+        # 預留路徑：平台日後保留 effects 時才會走到
         effects = [{'id': 'billing.approved', 'kind': 'output',
                     'default_binding': {'via': 'owned_table', 'ref': 'cnst_billings'}, 'alternatives': ['http']}]
         vfs = dict(VFS, **{'_template_meta.json': json.dumps({'effects': effects}),
@@ -95,13 +104,27 @@ class PreviewTest(unittest.TestCase):
 
     def test_write_preview_skips_unsafe_paths(self):
         files = {'src/App.tsx': 'a', '../escape.txt': 'x', '/abs.txt': 'x', 'a/../../b': 'x',
-                 './actions/x.py': 'p', 'bin.png': None}
+                 './actions/x.py': 'p', 'bin.png': None, 'C:/x.txt': 'x', 'C:x.txt': 'x', 'a\\b.txt': 'x',
+                 'nul\x00.txt': 'x', 'src/a.ts:stream': 'x'}
         with tempfile.TemporaryDirectory() as d:
             dest = Path(d) / 'tpl'
             written = t.write_preview(files, dest)
             self.assertEqual(sorted(written), ['actions/x.py', 'src/App.tsx'])
             self.assertEqual((dest / 'src/App.tsx').read_text(encoding='utf-8'), 'a')
             self.assertFalse((Path(d) / 'escape.txt').exists())
+
+    def test_write_preview_path_clash_leaves_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            dest = Path(d) / 'tpl'
+            with self.assertRaises(ValueError):
+                t.write_preview({'a': 'file', 'a/b.ts': 'x', 'z.ts': 'y'}, dest)
+            self.assertFalse(dest.exists())
+            self.assertEqual(list(Path(d).iterdir()), [])
+
+    def test_write_preview_into_existing_empty_dir(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(t.write_preview({'a.ts': 'x'}, d), ['a.ts'])
+            self.assertEqual((Path(d) / 'a.ts').read_text(encoding='utf-8'), 'x')
 
     def test_write_preview_refuses_non_empty_dir(self):
         with tempfile.TemporaryDirectory() as d:

@@ -286,10 +286,10 @@ def execute(ctx):
 3. **金鑰由 app 自帶**：閘道只驗域名、不注入憑證（ADR 0010）——存 `ctx.secrets`，
    action 自組 `Authorization` header
 4. **`ctx.db` 沒有結構操作**：執行期不能建表改欄，這是刻意的能力邊界
-5. **★ 外部服務與金鑰：AI 可代設，先講清楚再動手**：建立／授權外部服務、寫入 secrets 之前，
-   用白話告訴用戶**連到哪個網域、會送出哪些資料、哪支 action 用**，**用戶同意才做**；金鑰的值由用戶
-   自己填進本機檔或 Builder「服務」tab，**不在對話裡傳、不印出**。權限：`builder.access`＋本 App 擁有者
-   或 `system.admin`（dev-guide §25.2）。設定缺口**不是 bug**——經確認後補上，不回報
+5. **★ 外部服務與金鑰：AI 可代設，先講清楚再動手**：建立／授權外部服務、寫入 secrets 之前，用白話告訴用戶
+   **連到哪個網域、會送出哪些資料、哪支 action 用**，**單獨取得同意**（不併進計畫同意；網域或資料變了要重問）；
+   金鑰值由用戶填進 600 權限的本機檔、`aigo_secrets.py` 讀檔寫入，**不在對話裡傳、不印出、不讀回**。權限：外部服務
+   `builder.access`＋本 App 擁有者或 `system.admin`；金鑰 `builder.access`＋看得到該 app（dev-guide §25.2）。缺口**不是 bug**、不回報
 
 > 逾時有兩道且原文同形：manifest `timeout_ms`（1000～120000，舊 app 要 republish 才換上新值）
 > 與 egress 閘道的服務 `timeout_ms`（預設 10000、硬上限 30000）。走 `ctx.http.call` 的 action
@@ -478,7 +478,7 @@ timeout／連不出去＝raw `httpx` 直連（改 `ctx.http.call`）或 slug 沒
 |------|------|
 | `CONTEXT.md` | ★ 術語表——預設表／自建表兩大類＋四個機制詞（含稱謂對照與禁用詞：舊稱 SaaS 表與外部產品名都不出現） |
 | `references/dev-rules.md` | **Phase 3 規則 18–33 的完整版**（資料雙軌分流、自建表命名、app_domain、冪等、排程限制、角色沿用、簽核攔截、分頁排序、時間、租戶網址、skeleton、builder.access 破口、Hosted 不承載 DB 與外接庫的唯一例外、UAT 結論）——主檔只有速查表，動手前讀原文 |
-| `references/planning.md` | **Phase 1.5 的完整版**：§1.0 四問的理由與選項、計畫九項逐項展開、閘門每一條的踩坑紀錄 |
+| `references/planning.md` | **Phase 1.5 的完整版**：§1.0 四問的理由與選項、計畫十三項逐項展開、閘門七條的理由與踩坑紀錄 |
 | `references/template-workflow.md` | **Phase 1.5 §1.0.5 模板盤點與「模板當素材」動線**：查詢端點與 slug 前綴分類、a／b／c 結論、`preview` 取碼與效果清單、效果繫結表、starter 建殼與自行 provision、端點權限表 |
 | `references/environment.md` | **Phase 1 的完整版**：租戶網址規則的推導與 401 同形成因、三層模型、`config.json` schema 2 與 `base_url` 三層來源、設定六步、憑證規則 |
 | `references/review-workflow.md` | **Phase 0 的完整版**：九步各自打哪個端點、Review 報告要列什麼、哪些情況標「必改」 |

@@ -185,12 +185,13 @@
 4.6. **對外 API 呼叫盤點**（★ 若有打第三方 API 就不可省）
    - 列出**所有要連出去的外部服務**
      `| egress slug | base_url（網域） | 用途 | 哪個 action 會用 | 會送出的資料 |`（最後一欄是給用戶確認用的白話）
-   - **在計畫階段就取得同意**：把這張表用白話講給用戶聽（連到哪、送出什麼），同意後 app 一建好就由 AI
-     以**同名 slug** 建立外部服務（base_url 域名白名單，建立時預設授權本 App）——dev-guide §25.2 確認流程
+   - **這張表要單獨確認，不併進計畫同意**：計畫同意後、動手建外部服務前，把表用白話講給用戶聽（連到哪、送出什麼、
+     哪支 action 用、租戶共用池），得到明確同意的列才由 AI 以**同名 slug** 建立（base_url 域名白名單，建立時預設授權本 App）；
+     網域或送出的資料之後有變就重新確認——dev-guide §25.2 確認流程
      - 權限：`builder.access`＋本 App 擁有者或 `system.admin`；403 → 請租戶管理員操作
    - 外部服務沒建立或沒授權，寫完的 code 一律連不出去——**等部署才發現等於整段白做**
    - 金鑰歸 app 自管：為每個 API 金鑰開 `ctx.secrets` 欄位，action 自組
-     `Authorization` header——閘道只驗域名，不代管憑證（ADR 0010）。金鑰值由用戶填本機檔、AI 讀檔寫入，不經對話
+     `Authorization` header——閘道只驗域名，不代管憑證（ADR 0010）。金鑰值由用戶填本機檔（600）、AI 用 `aigo_secrets.py` 讀檔寫入，不經對話
    - 詳見 `references/custom-app-dev-guide.md` §25
 
 4.7. **平台 API 權限面盤點**（權限 gate 目前 audit，enforce 後前端呼叫會 403）

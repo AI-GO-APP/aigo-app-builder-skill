@@ -1426,19 +1426,23 @@ def execute(ctx):
 新建預設順便授權本 App。（舊入口 `/dashboard/settings/integrations` 已移除，ADR 0011。）
 
 > ★ **AI 代設，先確認再動手**：外部服務的建立／修改／啟停與 App 授權、金鑰（`ctx.secrets`）的新增／更新，
-> **AI 可以直接用 API 完成**（端點見下方與 `uat-environment.md` 附錄 A），但每一次寫入前都要過這道確認：
+> **AI 可以直接用 API 完成**（端點見下方與 `uat-environment.md` 附錄 A），但寫入前一律過這道確認：
 >
-> 1. **用白話說明**（非技術語言，一次講完）：要連到**哪個網域**（base_url）、**會送出哪些資料**
->    （哪些欄位、有沒有個資或客戶資料）、**哪支 action／哪個功能**會用、這支外部服務是**租戶共用池**
->    （同租戶其他 App 擁有者看得到、也能改）；寫金鑰時說明 `key_name` 與用途
-> 2. **用戶明確同意才寫**；沒回覆、回覆含糊或只同意其中幾支 → 只做同意的那幾支，其餘不動
-> 3. **金鑰的值不經過對話**：請用戶自己填進本機檔（例：`<工作區>/.aigo/secrets.env`，權限 600，
->    `.aigo/` 已在 `.gitignore`），腳本讀檔後直接送 API，**不印出、不寫進 log／repo／指令列**；
->    用戶也可以選擇自己到 Builder「服務」tab 貼上。不向用戶要金鑰值、不代為產生第三方的金鑰
-> 4. 寫完回讀驗證（`available-egress-services` 看 `is_active` 與授權清單、`GET /actions/apps/{id}/secrets`
->    看 `key_name`，不讀值），再重試發布或呼叫
+> 1. **列一張外部服務／資料表，用白話講給用戶聽**（非技術語言）：每一列是要連到**哪個網域**（base_url）、
+>    **會送出哪些資料**（哪些欄位、有沒有個資或客戶資料）、**哪支 action／哪個功能**會用，並說明外部服務是
+>    **租戶共用池**（同租戶其他 App 擁有者看得到、也能改）；金鑰列出 `key_name` 與用途
+> 2. **這是獨立的一步，不併進計畫同意**：用戶說「計畫同意」不等於同意這張表——要單獨問、單獨得到明確同意。
+>    沒回覆、回覆含糊或只同意其中幾列 → 只做同意的那幾列。**網域或送出的資料一有變動就重新確認那一列**
+>    （含 Pending host 核准 `egress-pending-hosts/{id}/approve`，它會建立並授權一支共用池服務）
+> 3. **金鑰的值不經過對話**：請用戶自己填進本機檔（例：`<工作區>/.aigo/secrets.env`，權限必須 600，
+>    `.aigo/` 已在 `.gitignore`），再用 `scripts/aigo_secrets.py set <app> <KEY> --from-file <檔>` 寫入——
+>    值只放在 HTTPS 請求本體，**不印出、不寫進 log／repo／指令列**；用戶也可以選擇自己到 Builder「服務」tab 貼上。
+>    不向用戶要金鑰值、不代為產生第三方的金鑰。**永遠不讀金鑰值**：平台有 `GET /actions/secrets/{id}/value`
+>    （只要 `builder.access`），本 skill 不呼叫它，回讀只看 `key_name`（`aigo_secrets.py list`）
+> 4. 寫完回讀驗證（`available-egress-services` 看 `is_active` 與授權清單、`aigo_secrets.py list` 看 `key_name`），
+>    再重試發布或呼叫
 >
-> 刪除外部服務（租戶共用池，別的 App 可能在用）與刪除金鑰要另外逐項確認。
+> **刪除**外部服務（租戶共用池，別的 App 可能在用）與刪除金鑰（`aigo_secrets.py delete … --confirm`）要另外逐項確認。
 > 設定缺口不是平台 bug（→ §25.3 第 6 點、`issue-reporting.md`）——經確認後補上即可。
 
 > 一律用**相對路徑**指引用戶，不要寫死主機名稱——子網域日後可能變動。
@@ -1522,9 +1526,9 @@ def execute(ctx):
 
 ### 25.5 規劃階段就要處理
 
-Phase 1.5 實作計畫裡就該**列出所有要打出去的外部服務（egress slug + base_url + 會送出的資料）**，
-計畫確認時就把 §25.2 的說明一併給用戶看；同意後在寫 code 前由 AI 建立外部服務並授權本 App、
-請用戶把金鑰值填進本機檔再由 AI 寫進 `ctx.secrets`——等到部署後才發現連不出去，等於整段開發白做。
+Phase 1.5 實作計畫裡就該**列出所有要打出去的外部服務（egress slug + base_url + 會送出的資料）**。
+計畫同意之後、寫 code 之前，把這張表當成**獨立的一步**照 §25.2 再確認一次，同意的列才由 AI 建立外部服務並授權本 App、
+請用戶把金鑰值填進本機檔再用 `aigo_secrets.py` 寫進 `ctx.secrets`——等到部署後才發現連不出去，等於整段開發白做。
 
 ## 26. 建立與刪除 App（API，不必走 UI）
 

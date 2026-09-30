@@ -75,10 +75,13 @@ uv run --project scripts python scripts/aigo_template.py effects <slug>         
 - `preview` 只回 **UTF-8 文字檔**（圖片等二進位檔會被略過），而且**不含 `_template.json`**——
   那個檔是建 app 當下才由平台寫進 VFS。所以模板的 `required_egress` 宣告**沒有唯讀端點看得到**，
   對外呼叫只能從 `actions/*.py` 的字面 `ctx.http.call` slug、README 與 `setup_schema` 推
-- **效果清單**：模板若在 `_template_meta.json` 帶了 `effects` 宣告（Template Protocol：每個 I/O 的 `id`、
-  預設繫結 `default_binding.via`、可替換繫結 `alternatives`、`binding_params`），**以宣告為準**。
-  還沒有宣告的模板（目前多數）從 `data_center_schema`（自建表）、`data_references_schema`（預設表引用）、
-  `setup_schema`（參數／金鑰）與 `actions/*.py` 的 `ctx.*` 呼叫推斷——`effects` 指令兩種都會印
+- **效果清單今天只能推斷**：從 `data_center_schema`（自建表）、`data_references_schema`（預設表引用）、
+  `setup_schema`（參數／金鑰，扁平 `{KEY: {required}}`）與 `actions/*.py` 的 `ctx.*` 呼叫（含 `ctx.http.call` 字面 slug）盤出，
+  前端直接呼叫的效果再讀 README 與 `src/` 補齊——`aigo_template.py effects` 印的就是這份推斷清單
+- ⚠️ **`effects` 宣告目前讀不到**：Template Protocol（上游提案）把 `effects` 放在 `_template_meta.json`，但 v1.15.4 的
+  `build_vfs_from_storage`（preview 與建 app 共用）一律把 `_template_meta.json` **覆寫**成
+  `{factory_key, template_version, generated_at, source}`，模板作者寫的內容到不了 preview。要讀宣告得等平台隨該協定
+  改成保留這個欄位；腳本留了讀宣告的路徑（標為預留），平台改之前恆走推斷
 - 同時讀 README（「為什麼這樣設計」「對外介面」若有）與 `docs/recipes/`：「刻意不做什麼」是**不能當缺陷修掉**的取捨
 
 ## 4. 拷問效果繫結 → 效果繫結表
@@ -121,7 +124,8 @@ uv run --project scripts python scripts/aigo_template.py effects <slug>         
      `POST /data-center/tables/{key}/fields`（兩步命名法，規則 18.5）→ **`POST /refs/apps/{app_id}` 登記引用**
      （REST 建表不會自動登記，沒登記 `ctx.db` 會說表不存在）
    - `platform_table` → `POST /refs/apps/{app_id}`（欄位以引用面 columns 為準）
-   - `http` → 外部服務＋授權＋金鑰，**AI 可代設，但每一支都要先過確認**（`custom-app-dev-guide.md` §25.2）
+   - `http` → 外部服務＋授權＋金鑰，**AI 可代設，但外部服務／資料表要單獨確認過**（不併進計畫同意；
+     網域或送出資料有變就重新確認；`custom-app-dev-guide.md` §25.2）；金鑰用 `aigo_secrets.py set`
    - `approval`／`messaging`／`knowledge`／`erp` → 依各效果面既有規則（簽核攔截規則 24、`ctx.erp` 白名單等）
 4. **灌改造後的 VFS**：模板碼抄進 app 專案目錄改造（非預設繫結改 ports 實作）→ Phase 3–4 的同步、編譯、驗證、發布
 
@@ -135,5 +139,10 @@ uv run --project scripts python scripts/aigo_template.py effects <slug>         
 | `POST /api/v1/builder/apps` | 建 starter 空殼 | `builder.access` |
 | `POST /api/v1/data-center/tables`、`POST …/tables/{key}/fields` | 建自建表、加欄 | `datacenter.schema_write`（`system.admin` 直通） |
 | `POST /api/v1/refs/apps/{app_id}` | 登記資料引用 | `builder.access` |
-| `POST /api/v1/builder/apps/{app_id}/egress-services`、`PUT …/authorized-egress-services` | 建外部服務（預設授權本 App）、改授權清單 | `builder.access` ＋ 本 App 擁有者或 `system.admin` |
-| `POST /api/v1/actions/apps/{app_id}/secrets`、`PUT /api/v1/actions/secrets/{secret_id}` | 設金鑰 | `builder.access`（且看得到這支 app） |
+| `POST /api/v1/builder/apps/{app_id}/egress-services`、`PUT …/authorized-egress-services` | 建外部服務（預設授權本 App）、改授權清單（整份覆寫） | `builder.access` ＋ 本 App 擁有者或 `system.admin` |
+| `PATCH`／`DELETE /api/v1/builder/apps/{app_id}/egress-services/{service_id}` | 改／停用／刪除共用池服務 | `builder.access` ＋ 同租戶任一 App 擁有者或 `system.admin` |
+| `POST /api/v1/builder/apps/{app_id}/egress-pending-hosts/{pending_id}/approve` | 核准待審網域：重用或**建立**共用池服務並授權本 App | `builder.access`（App 擁有者檢查） |
+| `POST /api/v1/actions/apps/{app_id}/secrets`、`PUT`／`DELETE /api/v1/actions/secrets/{secret_id}` | 設／改／刪金鑰（`aigo_secrets.py`） | `builder.access`（且看得到這支 app） |
+
+外部服務與金鑰的寫入（上表後四列）一律先過 `custom-app-dev-guide.md` §25.2 的確認流程；**不讀金鑰值**
+（`GET /api/v1/actions/secrets/{secret_id}/value` 存在，本 skill 不呼叫）。

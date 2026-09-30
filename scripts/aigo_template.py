@@ -26,7 +26,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 # ctx 暴露的效果面（平台 action_context；`response`／`params` 不是 I/O 效果，不列）
-CTX_EFFECT_SURFACES = ("db", "erp", "http", "secrets", "approval", "knowledge", "messaging", "crypto", "csv")
+CTX_EFFECT_SURFACES = ("db", "erp", "http", "secrets", "approval", "knowledge", "messaging", "mcp", "crypto", "csv")
 
 # 預設 starter 兩支是空白腳手架，不是業務模板；盤點時排除
 STARTER_SLUGS = frozenset({"starter-internal", "starter-external"})
@@ -58,13 +58,16 @@ def group_by_suite(templates: list[dict]) -> dict[str, list[dict]]:
 
 
 def safe_relpath(path: str) -> str | None:
-    """VFS 路徑轉成可安全寫入本機的相對路徑；絕對路徑、跳出根目錄或空路徑回 None。"""
-    if not isinstance(path, str) or not path or path.startswith("/") or "\\" in path:
+    """VFS 路徑轉成可安全寫入本機的相對路徑；不安全回 None。
+
+    拒絕：空值、絕對路徑、反斜線、NUL、任何片段含冒號（`C:/x`、`C:x`、NTFS stream）、`..`。
+    """
+    if not isinstance(path, str) or not path or path.startswith("/") or "\\" in path or "\0" in path:
         return None
-    parts = PurePosixPath(path).parts
-    if not parts or any(p in ("..", "") for p in parts):
+    parts = [p for p in PurePosixPath(path).parts if p != "."]
+    if not parts or any(p in ("..", "") or ":" in p for p in parts):
         return None
-    return str(PurePosixPath(*[p for p in parts if p != "."])) or None
+    return str(PurePosixPath(*parts))
 
 
 def scan_ctx_effects(vfs: dict) -> dict[str, dict[str, list[str]]]:
@@ -99,7 +102,13 @@ def scan_http_slugs(vfs: dict) -> dict[str, list[str]]:
 
 
 def declared_effects(vfs: dict) -> list[dict] | None:
-    """讀 `_template_meta.json` 的 `effects`（Template Protocol）；沒有或壞掉回 None。"""
+    """【預留，今天恆為 None】讀 `_template_meta.json` 的 `effects`（Template Protocol 提案）。
+
+    v1.15.4 的 `build_vfs_from_storage`（preview 與建 app 共用）一律用
+    `{factory_key, template_version, generated_at, source}` **覆寫** `_template_meta.json`，
+    模板作者寫的 `effects` 到不了 preview。要等平台隨 Template Protocol 改動保留該欄位，這條才會有值；
+    在那之前唯一的真實來源是 `inventory_effects` 的推斷。
+    """
     raw = (vfs or {}).get("_template_meta.json")
     if not isinstance(raw, str):
         return None
@@ -107,14 +116,15 @@ def declared_effects(vfs: dict) -> list[dict] | None:
         meta = json.loads(raw)
     except ValueError:
         return None
-    effects = meta.get("effects") if isinstance(meta, dict) else None
+    effects = meta.get("effects") if isinstance(meta, dict) else None  # 預留路徑
     return effects if isinstance(effects, list) else None
 
 
 def inventory_effects(vfs: dict, detail: dict | None = None) -> dict[str, Any]:
     """盤出拿去拷問的效果清單。
 
-    有 `effects` 宣告就以宣告為準（source=declared）；沒有就從 schema 與 code 推斷（source=inferred）。
+    今天一律是推斷（source=inferred）：preview 的 `_template_meta.json` 被平台覆寫、帶不出 `effects`。
+    平台日後保留 `effects` 時才會出現 source=declared（見 `declared_effects`）。
     推斷的來源：詳情的 `data_center_schema`（自建表）、`data_references_schema`（引用）、
     `setup_schema`（金鑰／參數）、actions 裡的 `ctx.*` 呼叫與 `ctx.http.call` 字面 slug。
     `required_egress` 沒有唯讀端點看得到（建 app 時才寫進 `_template.json`），只能靠字面 slug 推。
@@ -133,7 +143,7 @@ def inventory_effects(vfs: dict, detail: dict | None = None) -> dict[str, Any]:
         if isinstance(r, dict):
             refs.append(r.get("table_name") or r.get("table") or r.get("object") or json.dumps(r, ensure_ascii=False))
     setup = detail.get("setup_schema") or {}
-    setup_keys = sorted(setup.get("properties", setup).keys()) if isinstance(setup, dict) else []
+    setup_keys = sorted(k for k in setup if isinstance(k, str)) if isinstance(setup, dict) else []  # 扁平 {KEY: {required}}
     declared = declared_effects(vfs)
     return {
         "source": "declared" if declared is not None else "inferred",
@@ -150,7 +160,7 @@ def inventory_effects(vfs: dict, detail: dict | None = None) -> dict[str, Any]:
 
 def format_inventory(slug: str, inv: dict) -> str:
     lines = [f"模板 {slug}（access_mode={inv.get('access_mode')}；效果來源："
-             f"{'_template_meta.json effects 宣告' if inv['source'] == 'declared' else '推斷（模板尚無 effects 宣告）'}）"]
+             f"{'_template_meta.json effects 宣告' if inv['source'] == 'declared' else '從 schema 與 code 推斷'}）"]
     if inv["declared_effects"]:
         for e in inv["declared_effects"]:
             if isinstance(e, dict):
@@ -168,7 +178,9 @@ def format_inventory(slug: str, inv: dict) -> str:
         lines.append(f"  ctx.{surface}：" + "; ".join(f"{m}×{len(w)}" for m, w in sorted(methods.items())))
     lines.append("  ports 層：" + ("有（非預設繫結＝換 ports 函式實作）" if inv["has_ports_layer"]
                                    else "無（非預設繫結要自己找出所有呼叫點改寫）"))
-    return "\n".join(lines)
+    lines.append("  ⚠️ 推斷清單：前端直接顯示／呼叫的效果（src/ 的 SDK 呼叫）不在內，讀 README 與 src/ 補齊"
+                 if inv["source"] == "inferred" else "")
+    return "\n".join(l for l in lines if l)
 
 
 def write_preview(files: dict, dest: str | os.PathLike) -> list[str]:
@@ -177,19 +189,38 @@ def write_preview(files: dict, dest: str | os.PathLike) -> list[str]:
     回寫入的相對路徑；不安全路徑略過。參考目錄**不是** app 專案目錄——app 由 starter 建殼，
     這裡的碼是抄回去改造的素材（`template-workflow.md`）。
     """
+    import shutil
+    import tempfile
     root = Path(dest)
-    if root.exists() and any(root.iterdir()):
+    if root.exists() and (not root.is_dir() or any(root.iterdir())):
         raise FileExistsError(f"{root} 已存在且非空——模板素材請放新的空目錄，不要覆蓋 app 專案")
-    written = []
+    # 先驗完所有路徑（含「同一路徑既是檔又是目錄」），再寫進暫存目錄，最後整包搬過去——中途失敗不留半套
+    plan: dict[str, str] = {}
     for path, content in sorted((files or {}).items()):
         rel = safe_relpath(path)
-        if rel is None or not isinstance(content, str):
-            continue
-        target = root / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-        written.append(rel)
-    return written
+        if rel is not None and isinstance(content, str):
+            plan[rel] = content
+    dirs = {str(PurePosixPath(*PurePosixPath(r).parts[:i])) for r in plan for i in range(1, len(PurePosixPath(r).parts))}
+    clash = sorted(set(plan) & dirs)
+    if clash:
+        raise ValueError(f"模板路徑衝突（同一路徑既是檔案又是目錄）：{clash[:5]}")
+    root.parent.mkdir(parents=True, exist_ok=True)
+    tmp = Path(tempfile.mkdtemp(prefix=".tpl-", dir=root.parent))
+    try:
+        tmp_resolved = tmp.resolve()
+        for rel, content in plan.items():
+            target = tmp / rel
+            if not target.resolve().is_relative_to(tmp_resolved):
+                raise ValueError(f"路徑跳出目標目錄：{rel}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+        if root.exists():
+            root.rmdir()  # 已確認是空目錄
+        tmp.rename(root)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    return list(plan)
 
 
 # ---------------------------------------------------------------------------
