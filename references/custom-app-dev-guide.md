@@ -112,15 +112,17 @@ POST /api/v1/compile/compile/{slug}?dev=true
 → {"success": false, "error": "..."}
 ```
 
-限制：500 檔案、單檔 1,000,000 bytes、30 秒超時。
+限制：取得 App ID 後查 `GET /api/v1/builder/apps/{app_id}/limits`（平台 Bearer token、`builder.access`）。`vfs` 回檔數、UTF-8 單檔 bytes 與編譯 timeout；`action` 回執行時間範圍；`egress` 回有效全域上限，停用時為 null。個別外部服務可能另設較低值。404／503 代表目前無法取得，勿改用固定值。
 
-> **單檔超限的行為與檔數不同**：檔數超過 500 會編譯失敗並回傳錯誤；單檔超過上限則**不報錯**，
-> 該檔被靜默排除在 bundle 外，編譯仍回報成功——症狀會延後到執行期（模組 undefined）。
-> 交付前自行檢查檔案大小，不要依賴編譯結果。
+編譯與發布回應的 `skipped_files` 含 path、size、reason；不論 success 與否都要讀取。空陣列代表沒有略過，null／缺欄位代表未知。node_modules 與 tsconfig 不計入檔數；其餘輸入即使略過仍計數。
 
-> **這些數值以平台為準，本文件只是抄本。** 平台尚未提供限制查詢 API，
-> 已於 urfit-tech/AI-GO#1673 提案增設 `GET /api/v1/builder/apps/{app_id}/limits`；
-> 端點上線後，本 skill 改為呼叫 API 取得限制，以 API 回傳值為準，不再於文件記載數字。
+單檔超限仍會被略過，檔數超限會使編譯失敗；靜態 import 被略過的檔案也可能使
+整體編譯失敗。請檢查報告並向用戶說明哪些內容未納入，不能只看 success。
+
+本節的 API 需要平台部署 #1673；尚未部署時明確回報限制未知，不採用歷史版本數字。
+本文件其餘章節有日期的實測 timeout 數字只代表當時環境；當前 Action／egress 的全域
+範圍與預設以 limits 為準，個別服務以該服務設定為準。
+
 External 模組（不需安裝）：react, react-dom, lucide-react, react-router-dom, react-hot-toast
 
 ## 6. 內建 SDK
