@@ -284,9 +284,18 @@ records 平面的三個契約（自己寫 client 時最常踩；2026-09-02 實�
 - **POST records 的 body 必須包 `{"data": {...}}`**。裸物件不報格式錯，而是整包被忽略後回
   422 `not_null_violation`「欄位「x」為必填」——訊息指向第一個必填欄位，容易誤以為欄位名對不上。
   `PATCH .../records/{id}` 兩種形狀都收。`scripts/aigo_data_center.py` 的 `insert_record` 已包好
-- **`filters` 的運算子依欄位型別限縮**：`text` 只有 `eq`／`contains`；`number`／`date`／`datetime`
-  才有 `gte`／`lte`（對 text 用 → 422「欄位「x」（型別 text）不支援運算子 'gte'」）。
-  **沒有 `in`、`ne`、`is_null`，沒有 OR**——錯了會回 422 並列出合法集合。
+- **`filters` 的運算子依欄位型別限縮**（核自 prod tag v1.15.4 `field_types.py` 的 `query_ops`）：
+
+  | 欄位型別 | 合法運算子 |
+  |---|---|
+  | `text` | `eq` `ne` `in` `not_in` `is_null` `contains` |
+  | `number`／`date`／`datetime` | `eq` `ne` `in` `not_in` `is_null` `gt` `gte` `lt` `lte` |
+  | `select`／`boolean`／`image`／`relation` | `eq` `ne` `in` `not_in` `is_null` |
+  | `json` | 只有 `is_null` |
+
+  型別不合（例：對 text 用 `gte`）→ 422「欄位「x」（型別 text）不支援運算子 'gte'」；完全不認得的運算子
+  → 422 並列出合法集合。`in`／`not_in` 的 value 必須是陣列（`in []` 命中 0 列、`not_in []` 命中全部）；
+  `is_null` 可省略 value。**沒有 OR、沒有 `is_not_null`**，多條一律 AND
   需要範圍查詢的日期欄要建成 `date`／`datetime`（§23.7 降級表本就如此），別存 text
 - 與預設表 proxy 平面的完整對照（鍵名、運算子、錯誤反應都不同）→ `platform-behaviors.md` §1.5
 
@@ -304,7 +313,7 @@ const tables = await listTables();
 
 // 分頁信封 {items, total, page, page_size}
 const page = await queryTable("orders", {
-  filters: [{ field: "status", op: "eq", value: "open" }],  // op ∈ eq/contains/gte/lte
+  filters: [{ field: "status", op: "eq", value: "open" }],  // op 依欄位型別，見上方表
   sort: "-created_at",     // <實體名> 升冪，-<實體名> 降冪，單欄
   page: 1,
   page_size: 25,

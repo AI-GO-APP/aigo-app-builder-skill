@@ -490,7 +490,10 @@ def query_records(base_url: str, token: str, key: str, *,
                   page: int = 1, page_size: int = 25) -> dict:
     """查記錄。回傳分頁信封 {items, total, page, page_size}。
 
-    filters 元素：{"field": <實體名>, "op": "eq|contains|gte|lte", "value": ...}（多條 AND）
+    filters 元素：{"field": <實體名>, "op": <運算子>, "value": ...}（多條 AND、無 OR）。
+    運算子依欄位型別（平台 field_types.query_ops）：json 以外共通 eq/ne/in/not_in/is_null；
+    text 另有 contains；number/date/datetime 另有 gt/gte/lt/lte；json 只有 is_null。
+    in/not_in 的 value 須為陣列；is_null 可省略 value。本函式不先驗，由平台回 422
     sort：<實體名> 升冪，或 -<實體名> 降冪，單欄
     """
     import httpx

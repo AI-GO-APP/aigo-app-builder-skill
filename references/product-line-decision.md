@@ -94,7 +94,7 @@ app、拆不成 Hosted public 靜態站）。它不是「給外部人用」的�
 | | 有登入者（員工、外部人員都算） | 只有匿名訪客 |
 |---|---|---|
 | **Custom App** | `starter-internal`（access_mode=`internal`，沿用平台角色；誰能開由 `access_role_ids` 決定） | 例外列：`starter-external`——**只在問題一的進入條件成立時**（匿名頁必須留在 Custom App 內）；匿名 `/pub` 要平台核可（dev-guide §15.1） |
-| **Hosted App** | `visibility=internal`（平台 proxy 代處理登入；`access_role_ids` 限角色）——**只是門禁：容器拿不到任何身分**（`hosted-apps.md` §6），畫面內要依角色分流的案子不能靠它，走 Custom App 或混合方案（§5） | `visibility=public`（預設；不設認證，或 app 自理） |
+| **Hosted App** | `visibility=internal`（平台 proxy 代處理登入；`access_role_ids` 限角色）——門禁之外，容器從 proxy 注入的 `X-Aigo-User-Id` 認人、用 `/open/members/{user_id}/context` 取角色／權限（prod v1.15.4 起，`hosted-apps.md` §6），畫面內依角色分流由 app 伺服端自己判斷 | `visibility=public`（預設；不設認證，或 app 自理） |
 
 ## 5. 混合方案的分工原則
 

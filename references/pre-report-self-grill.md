@@ -95,7 +95,7 @@
   已知例：延伸欄位寫值必須 `{"values": {...}}`，扁平 body 靜默 no-op（`data-center.md` §10）。
 - **Q3.2 實體名 vs 顯示名**：所有 API 用實體名；`/impact` 確認值也是實體名。
 - **Q3.3 查詢契約**：只有 `filters:[{column,op,value}]` 生效，`where`／`filter` 靜默忽略；
-  records 平面只有 `eq/contains/gte/lte`；`custom_data` 不能伺服器端過濾（`platform-behaviors.md` §1.5）。
+  records 平面運算子依欄位型別（text 無 `gt/lt`、json 只有 `is_null`、無 OR）；`custom_data` 不能伺服器端過濾（`platform-behaviors.md` §1.5）。
 - **Q3.4 型別格式**：TIMESTAMP 要 offset-naive；TIME 要完整 ISO；`select` 的 `options` 是純字串陣列；
   CHECK 值域查 `custom-app-dev-guide.md` §20.2 或 Meta API。
 - **Q3.5 路徑**：VFS 路徑 POSIX 相對、無 `\`、無 `..`；`DELETE /source/files` 帶 `expected_version`；
