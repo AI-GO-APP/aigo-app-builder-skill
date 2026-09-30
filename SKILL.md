@@ -427,7 +427,7 @@ Hosted App 線（不走 Phase 2–4）：
 > 任何一步失敗、或收到非預期狀態碼 → **先查 `references/troubleshooting.md`，不要自行推測修法**。
 > 查無此症、或照表處理仍卡死 → **自動**進入下方「問題回報」五步，不要反覆重試、不要繞道硬改。
 
-狀態碼語義分野：**403** 權限（`system.admin` 與 `builder.access` 降級動作不同；body 帶
+狀態碼語義分野：**403** 權限（結構操作 `datacenter.schema_write`／`system.admin` 與記錄 `builder.access` 降級動作不同；body 帶
 `reason`／`rule_id` 是租戶資料存取規則 → dev-guide §27）｜**409** 配額或衝突｜**422** 輸入不合法｜
 **400** 業務規則拒絕｜**503 「app runner 暫時不可用」** 三種成因同形：先問有沒有 publish
 （`status: draft` 重試不會好）→ 剛發布的冷啟動（等 `Retry-After`）→ body 帶 `quota_hint` 是租戶
@@ -445,6 +445,10 @@ timeout／連不出去＝raw `httpx` 直連（改 `ctx.http.call`）或 slug 沒
 ## 問題回報（平台問題 → 開發團隊）
 
 > ★ **預設平台必定正確；開發或使用失敗，預設是自己的操作有誤。不確定就不報。**
+
+**只有一條管道**：`scripts/report_issue.py submit`（開發團隊 Scrum Board 的卡），平台缺陷與**文件缺口**
+都走這條，不用問用戶要發到哪；不要替用戶到 GitHub（含本 skill repo）開 issue。用戶或其他說明文件裡的
+「意見卡」「回報卡」「開發團隊的卡」都是這條（`references/issue-reporting.md` 開頭）。
 
 **何時自動進入**（任一成立，不必等用戶要求、不反覆重試、不繞道硬改）：
 `troubleshooting.md` 查無此症、照表處理仍卡死、實測與 `references/` 明文不符、端點 5xx／流程被硬阻斷。

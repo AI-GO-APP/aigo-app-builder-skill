@@ -1,7 +1,8 @@
 """AI GO 資料中心自建表管理工具
 
 自建表是**租戶級**資源（不綁 app），端點前綴 /api/v1/data-center/。
-權限：建／改／刪結構需 system.admin；讀結構與記錄 CRUD 需 builder.access。
+權限：建／改結構需 datacenter.schema_write（system.admin 直通）；刪表／刪欄需 system.admin；
+讀結構與記錄 CRUD 需 builder.access。
 
 規格見 references/data-center.md，術語見 CONTEXT.md。
 """
@@ -189,13 +190,13 @@ def _base(base_url: str) -> str:
 def _raise_for(resp, scope: str = "schema") -> None:
     """把常見狀態碼翻成有語義的例外。
 
-    scope="schema"：結構操作，403 代表缺 system.admin
+    scope="schema"：結構操作，403 代表建改缺 datacenter.schema_write、刪除缺 system.admin
     scope="data"  ：讀取／記錄操作，403 代表缺 builder.access（或跨租戶）
     """
     if resp.status_code == 403:
         if scope == "schema":
             raise PermissionDenied(
-                "結構操作需 system.admin 權限。請改為輸出建表規格，"
+                "結構操作被拒：建表／改表／加欄／改欄需 datacenter.schema_write，刪表／刪欄需 system.admin。請改為輸出建表規格，"
                 "引導用戶到資料中心 UI 自建，建完再以 list_tables() 驗收。",
                 needs="system.admin",
             )
@@ -252,7 +253,7 @@ def find_similar_tables(tables: list[dict], keywords: list[str]) -> list[dict]:
     return hits
 
 
-# ── 表結構（需 system.admin）──────────────────────────────────────────
+# ── 表結構（建改需 datacenter.schema_write）─────────────────────────────
 
 def validate_field_spec(field: dict) -> None:
     """建表／加欄前的本地檢查，避免送出必然失敗的請求。"""
@@ -289,7 +290,8 @@ def validate_field_spec(field: dict) -> None:
 def create_table(base_url: str, token: str, display_name: str,
                  fields: list[dict], section_path: Optional[list[str]] = None,
                  *, labels: Optional[dict] = None) -> dict:
-    """建表（含首批欄位）＋自動補上中文顯示名。需 system.admin。
+    """建表（含首批欄位）＋自動補上中文顯示名。需 datacenter.schema_write。
+    建好不會自動登記 app 引用——app 要讀寫前另行 POST /api/v1/refs/apps/{app_id}。
 
     ★ **兩步命名法**（SKILL.md 規則 18.5）：`display_name` 與各欄位的
     `display_name` 建立時一律填**英文實體名**（表 biz_xxx、欄位 snake_case），
@@ -385,7 +387,7 @@ def update_table(base_url: str, token: str, key: str, updates: dict) -> dict:
 
 
 def add_field(base_url: str, token: str, key: str, field: dict) -> dict:
-    """加欄。key = 表實體名。需 system.admin。"""
+    """加欄。key = 表實體名。需 datacenter.schema_write。"""
     import httpx
     validate_field_spec(field)
     resp = httpx.post(f"{_base(base_url)}/tables/{key}/fields",
@@ -396,7 +398,7 @@ def add_field(base_url: str, token: str, key: str, field: dict) -> dict:
 
 def update_field(base_url: str, token: str, key: str, field_key: str,
                  updates: dict) -> dict:
-    """改欄。需 system.admin。
+    """改欄。需 datacenter.schema_write。
 
     只送真正要改的鍵——未帶的鍵不動。
     可改：display_name / is_required / is_unique / default_value /

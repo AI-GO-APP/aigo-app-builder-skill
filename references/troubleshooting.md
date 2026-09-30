@@ -78,6 +78,7 @@
 | CRUD 驗證失敗 | 確認自建表已建立且欄位實體名正確 |
 | Action 驗證失敗 | 檢查 execute(ctx) 函式、依賴模組是否可用 |
 | Publish 一致性失敗 | 重新 sync → compile → publish 完整循環 |
+| **`ctx.db` 讀寫自建表拋「自建表不存在：<實體名>」，但 `GET /data-center/tables` 看得到這張表** | 這支 app **沒有登記這張表的資料引用**——平台對沒引用的表回 404，刻意不透露表存在。`GET /api/v1/refs/apps/{app_id}` 確認後補登記：`POST /api/v1/refs/apps/{app_id}` `{table_name, columns[], permissions[]}`（`builder.access`），或 Builder「資料與 API 權限」分頁→「待允許的資料表」按「允許」（需 `builder.manage_access`）。**登記後不必重新發布**。REST 與資料中心 UI 建表都不會自動登記（Builder AI 建表、套用模板才會）。這是設計行為，**不是平台 bug、不回報** → `data-center.md` §7 |
 | 建表 403 | 帳號缺 `datacenter.schema_write`（也非 `system.admin`），改輸出建表規格引導用戶到資料中心 UI 自建；**刪表／刪欄另限 `system.admin`**（建改與刪除是兩段權限）→ `data-center.md` §2 |
 | **建出來的表名是 `tbl` / `tbl_2`，欄位是 `col`、`col_2`** | `display_name` 填了純中文。實體名是 NFKD 折疊後丟掉非 ASCII 生成的，中文折疊後是空字串→落到 `tbl`/`col` 保底名。**還沒資料就當場刪掉重建**（上游用兩步命名法）；已有資料要走重建式遷移 → `dev-rules.md` 規則 18.5、`data-center.md` §1、§11 |
 | **想把已建好的表／欄位實體名改掉** | 沒有這條路——`PATCH /tables/{key}` 只收顯示名等五項，改欄 payload 是 `extra="forbid"`，帶 `physical_name` 直接 422。唯一做法是重建式改名（建新表→搬資料→改引用→驗收→刪舊表），**要先出計畫書給用戶同意**；只有部分欄位不合規則加新欄→搬值→刪舊欄，不用動表 → `data-center.md` §11 |
@@ -148,7 +149,7 @@
 
 1. 對照 `references/data-center.md` §7 / `references/event-triggers.md` §3 的分項速查；
    不開發 app、直接讀寫資料的情境 → `references/data-operations.md`（§3.5 寫入閘門、§7 出口）
-2. 狀態碼語義：**403**＝權限（看是 `system.admin` 還是 `builder.access`）；
+2. 狀態碼語義：**403**＝權限（看是結構操作的 `datacenter.schema_write`／`system.admin`，還是記錄的 `builder.access`）；
    **409**＝配額或衝突；**422**＝輸入不合法（欄位／型別／查詢契約）；
    **400**＝業務規則拒絕（tier 超限、草稿 app 建排程、暫停排程 run-now）
 3. 仍無解 → **自動**啟動 `pre-report-self-grill.md` 六輪自審（不必用戶要求、不先問要不要查），

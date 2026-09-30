@@ -1,3 +1,43 @@
+## 1.52.0
+
+### 回報只有一條管道；app 讀寫自建表要先登記引用
+
+兩張平台回報卡，RD 查證後都判定是 skill 文件的問題，這版補上。
+
+**回報去處統一**：`issue-reporting.md` 與 `pre-report-self-grill.md`（Q5.4、§3 出口表）把「文件缺口」
+導去 skill repo 開 GitHub issue，和 `SKILL.md`「問題回報」的 Scrum 卡流程互相矛盾，agent 照字面走會發錯地方；
+同一條管道在不同文件裡還有不同名稱。
+
+- `issue-reporting.md` 開頭寫明**只有一條管道**（`report_issue.py submit` → 開發團隊 Scrum Board），
+  不替使用者到 GitHub 開 issue；統一稱「平台問題回報」，「意見卡」「回報卡」等說法都指這條。
+  「要回報」清單加**文件缺口**（標題冠「【文件缺口】」）；「刻意的能力邊界」改成「文件已經寫了的不報」。
+- `pre-report-self-grill.md` Q5.4 與 §3 出口表：文件缺口改走同一條 `report_issue.py`，並寫明這類回報
+  已排除清單要列什麼、預期段怎麼寫才不會被開藥方閘門擋下。
+- `SKILL.md`「問題回報」補同一段單一管道說明。
+
+**自建表要先登記引用**：資料中心的 app 範圍閘逐租戶切到擋下模式後，帶 app 身分的呼叫（含 `ctx.db`）
+碰到**沒登記引用**的自建表會回 404「自建表不存在」——這是設計（不透露表存在），但文件從沒寫過這個前置步驟，
+照 `data-center.md` §7 的 Server Action 範例寫就會卡住。
+
+- `data-center.md` §7 新增「app 讀寫自建表要先登記引用」：為什麼要登記、哪條建表路徑會自動登記
+  （Builder AI 建表、套用模板會；REST 與資料中心 UI 不會）、兩條補登記路徑（`POST /api/v1/refs/apps/{app_id}`，或 Builder「資料與 API 權限」分頁
+  「待允許的資料表」按「允許」，後者需 `builder.manage_access`）、登記後不必重新發布、未切換租戶測過不算數。
+  Server Action 範例前加前置提醒；§7.5「正確寫法」補一條；另記登記了但沒給該動作是 403、`columns` 是白名單。
+- `data-center.md` §7 REST 速查表：建表／改表／加欄／改欄的權限由 `system.admin` 改為 `datacenter.schema_write`，
+  與 §2 及平台原始碼一致（刪表／刪欄仍是 `system.admin`）。
+- `custom-app-dev-guide.md` §11、§19 決策流程第 5 步與兩軌差異表、§20 補同一個前置步驟；§29 結構操作權限同步更正。
+- `dev-rules.md` 規則 18 與 `migration_mapping_template.md` 的「建表需 `system.admin`」同步更正，並補登記引用。
+- `data-center.md` §7 External 列表說明、`hosted-apps.md` Open Proxy 段「自建表整租戶可用、不用加引用」
+  同步更正：`/ext`、`/open` 同樣受這道閘，擋下模式下 `GET /tables` 只列已引用的表；External 終端使用者另需
+  `is_end_user_accessible`。Builder「待允許的資料表」寫明是被擋下後的補救，事前登記一律走 API。
+- `CONTEXT.md` 自建表條目、`data-center.md` §1 補「每支 app 要先登記引用」，並更正結構權限；
+  §7 列表／讀單表權限補上 `datacenter.schema_write`。
+- `troubleshooting.md` 新增一列：`ctx.db` 拋「自建表不存在」但表看得到 → 補登記引用，不是平台 bug、不回報。
+- `scripts/aigo_data_center.py`：結構操作 403 的提示與 docstring 改成 `datacenter.schema_write`（刪表／刪欄仍是
+  `system.admin`）；`PermissionDenied(needs="system.admin")` 是降級流程用的判斷值，邏輯不變。
+  `SKILL.md`、`troubleshooting.md` 的 403 分辨說明與 `aigo_e2e.py` docstring 同步更正。
+- `hosted-apps.md` Hosted 網域白名單改寫成由用戶在 Builder 設、AI 不代設（與 1.51.0 人工設定政策一致）。
+
 ## 1.51.0
 
 ### 人工設定政策：外部服務／金鑰由人在 Builder 手動設，AI 不代設、不當 bug 回報
