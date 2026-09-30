@@ -163,6 +163,7 @@ aigo-builder/
 └── scripts/
     ├── pyproject.toml                # uv 專案設定
     ├── check_update.py               # Skill 自我更新檢查（零相依，不走 uv）
+    ├── aigo_cli_check.py             # aigo CLI 版本閘門（零相依；瀏覽器登入需 ≥ 0.5.0）
     ├── uv.lock                       # 鎖定依賴版本
     ├── aigo_auth.py                  # 認證（登入、Token 管理、App 資訊）
     ├── aigo_review.py                # Review（VFS 分析、CSS 檢查、租戶級資源盤點）
