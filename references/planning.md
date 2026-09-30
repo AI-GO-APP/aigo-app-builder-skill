@@ -90,8 +90,8 @@
      ② 每支 app 誰能開 → `access_role_ids`（空＝全租戶成員；Custom 與 Hosted 都有此欄）；
      ③ 人怎麼進來 → 已是成員／邀請（一人一連結、落點直達 app）／既有系統搬遷（`member-admin.md` §7）
    - **要攤開的陷阱**：非員工帳號沒有員工列，租戶資料存取規則用到 `$user.employee_id` 類欄位會對他們
-     整列 deny；Hosted internal app 內**拿不到任何身分**（連使用者 id 都沒有，2026-09-09 實打），
-     角色分流只能在門口做，要在畫面內分流就得換 Custom internal app；
+     整列 deny；Hosted internal app 的身分在伺服端 header（`X-Aigo-User-Id` 等，只有識別、不帶角色），
+     畫面內要依角色分流得再用 app 的 API key 查 `GET /api/v1/open/members/{user_id}/context`（`hosted-apps.md` §6）；
      外部人員角色的 permissions 從空集合起步，`system.*`／`hr.*`／`accounting.*` 不給
    - **產出：授權架構表**（與 app 分配表並列寫進計畫；確認後照表建角色、設白名單、發邀請）
      `| app（alias） | 模式 | access_role_ids（角色名） | 角色 → permissions（新開／沿用） | 進入方式／邀請落點 |`

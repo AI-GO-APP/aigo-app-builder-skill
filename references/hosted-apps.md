@@ -460,7 +460,7 @@ action 以 `ctx.secrets` 讀取（Builder 沒有 runtime-settings 這支 GET，�
   遷入案的資料層改寫前把這條告訴租戶：對 app 身分要另設不帶 `$user.*` 的規則、或用 app 級規則放行；
   app 端改 code 無解 → `custom-app-dev-guide.md` §27
 - ⚠️ **`POLICY_GATE_MODE` 現況（2026-09-21）**：UAT 已 on；**prod manifest 於 2026-09-17 改 on（commit `00d4c86c`）
-  但尚未隨 `v*` tag 發版**——下一個 tag 上線即生效。走 Open Proxy 的 Hosted App 要在那之前把上一條處理掉。
+  但 v1.15.3、v1.15.4 都沒帶上（2026-09-30 核）**——要等主線下一次發版（預計平台 1.16.0）才生效。走 Open Proxy 的 Hosted App 要在那之前把上一條處理掉。
 
 ### 5.1 Hosted App 當 Custom App 的後端（混合方案的一種）
 
@@ -509,7 +509,7 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
   - 平台 cookie 仍在進容器前被剝掉，**別拿 cookie 認人**，認人只看 `X-Aigo-User-Id`
   - 歷史：2026-09-09 測試租戶實打時 proxy 尚未開注入，容器一個 `X-Aigo-*` 都沒有；那是當時的現況，
     不是設計。今天仍收不到 → 先確認 app 是 `internal`、請求走的是平台 proxy，再回報平台
-- **角色／權限：用 app 的 API key 查 `GET /api/v1/open/members/{user_id}/context`**（v1.15.4 起；
+- **角色／權限：用 app 的 API key 查 `GET /api/v1/open/members/{user_id}/context`**（prod v1.15.4 已有；
   `Authorization: Bearer $AIGO_API_TOKEN`，核自原始碼 `api/open_members.py`，未實打）：
   - 回 `{user_id, email, role_ids, role_names, permissions}`，**每次即時計算**（改角色後下一次呼叫就反映）
   - **404「成員不存在」**＝這個人不在這支 app 的受眾內：非 active、別租戶、app 不是 `internal`、

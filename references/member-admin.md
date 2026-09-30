@@ -68,7 +68,7 @@
   對外部人員的角色，規則只能用 `$user.id`／`$user.role_ids`，或另設 app 級規則放行；
   計畫裡要提醒租戶管理員這一點。
 - **Hosted internal app 內依角色分功能**：容器從 `X-Aigo-User-Id` 認人，再用 app API key 打
-  `GET /api/v1/open/members/{user_id}/context` 取 `role_ids`／`permissions`（§6，prod v1.15.4 起），
+  `GET /api/v1/open/members/{user_id}/context` 取 `role_ids`／`permissions`（§6，prod v1.15.4 已有），
   判斷放在 app 伺服端；門口仍用 `access_role_ids` 粗分。
 - **判斷授權用 permission 標籤，不用角色名**（角色可被改名，`dev-rules.md` 規則 23）。
 - **經銷商角色的 permissions 從空集合起步**：Custom internal app 的資料存取走 Server Action

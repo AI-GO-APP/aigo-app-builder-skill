@@ -82,9 +82,10 @@
 - **路由事實以本 skill 的 references 為準**：平台 prod／UAT **都不再供應** `/api/v1/openapi.json`
   （`/docs`、`/redoc` 一併關閉；`aigo_data.py openapi` 子指令只印停用說明）。必填欄位看 reference
   與 Meta（例：客戶建立必填 `name`、`customer_type`）；權限用 §1 的表推估
-- **確認路由在不在就直接打**：FastAPI 預設 404 `{"detail":"Not Found"}`＝路由不存在；
-  401／403／405／422 或帶業務訊息的錯誤＝路由存在。寫入路由不要用寫入去試——對同路徑打 GET，
-  405 Method Not Allowed＝路徑存在。旗標關閉的端點也可能回 404，對不上時再看部署落差（`troubleshooting.md`）
+- **確認路由在不在就直接打**：FastAPI 預設 404 `{"detail":"Not Found"}`＝這個 method＋path 不存在；
+  405＝路徑存在（最可靠）；401／403＝路由在但權限不足。422 或帶業務訊息的 404 可能來自相鄰的 `/{id}` 路由
+  （例如對 `/crm/leads/<字串>` 打 GET 會落到 `GET /leads/{id}`），不能單獨當證據。寫入路由不要用寫入去試——
+  對同路徑打 GET，只有 405 Method Not Allowed 才代表路徑存在。旗標關閉的端點也可能回 404，對不上時再看部署落差（`troubleshooting.md`）
 - **分頁形狀不一致**：`client`／`sale`／`hr`／`stock`／`purchase` 用 `skip`＋`limit`，`crm` 用 `page`＋`page_size`；
   回應多為 `{items, total, …}` 信封。單頁上限多為 **500**（`sale/orders`、`hr/employees`、`stock/pickings`、
   `crm/leads`；`client` 未設上限，預設 100）。`call --all` 依第一頁回應的形狀自動翻頁（信封回聲 `skip`／`limit` 或 `page`／`page_size`；裸 list 走 skip），

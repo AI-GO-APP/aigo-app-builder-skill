@@ -84,7 +84,7 @@
 | **想把已建好的表／欄位實體名改掉** | 沒有這條路——`PATCH /tables/{key}` 只收顯示名等五項，改欄 payload 是 `extra="forbid"`，帶 `physical_name` 直接 422。唯一做法是重建式改名（建新表→搬資料→改引用→驗收→刪舊表），**要先出計畫書給用戶同意**；只有部分欄位不合規則加新欄→搬值→刪舊欄，不用動表 → `data-center.md` §11 |
 | **重建式改名後圖片全壞了（404／403）** | image 欄位的 storage key 內嵌**舊表實體名**，取 URL 端點會驗「key 裡的表是本租戶現存的表」——舊表一刪就取不到。key 不可直接複製：舊表還在時逐張下載→重傳到新表→寫新 key → `data-center.md` §11.5 第 4 步 |
 | 建表／加欄 409 | 撞配額（`table_quota_exceeded` / `field_quota_exceeded`，數值見 `data-center.md` §4）或實體名撞名；「**與平台保留表名衝突**」= 撞到平台地板表名（users/tenants/api_keys…），沒有補救管道，換個實體名（⚠️ 2026-09-01 實測此檢查 prod 尚未生效——沒被擋≠可以用，一律自律避開）→ `data-center.md` §1 |
-| 文件宣稱的端點回 404／回應缺欄位 | 先懷疑**部署落差**——prod 跑**最新的 `v*` tag**（2026-09-30 核：v1.15.4）、main 先上 UAT，prod 可能落後 main 數天到一週，文件依 main 寫的端點 prod 可能還沒有。判準是**直接打那條路徑**：FastAPI 預設 404 `{"detail":"Not Found"}`＝這個環境沒有這條路由；結構化錯誤（401／403／405／422）＝路由在，問題在別處。平台已不供應 `openapi.json`，別再拿它判斷。歷史紀錄見 `hosted-apps.md` 檔頭與 `data-center.md` §9 |
+| 文件宣稱的端點回 404／回應缺欄位 | 先懷疑**部署落差**——prod 跑**最新的 `v*` tag**（2026-09-30 核：v1.15.4）、main 先上 UAT，prod 可能落後 main 數天到一週，文件依 main 寫的端點 prod 可能還沒有。判準是**直接打那條路徑**：FastAPI 預設 404 `{"detail":"Not Found"}`＝這個環境沒有這個 method＋path；405 或 401／403＝路由在，問題在別處（422、業務 404 可能來自相鄰的 `/{id}` 路由，不能當證據）。平台已不供應 `openapi.json`，別再拿它判斷。歷史紀錄見 `hosted-apps.md` 檔頭與 `data-center.md` §9 |
 | 刪表／刪欄被擋 | 兩段式刪除：先取 `/impact`，確認值必須是**實體名**不是顯示名 |
 | **Hosted App rollout 卡「ksvc ready 逾時」，runtime-logs 卻顯示已 Ready** | 框架綁到 pod 名稱、不綁 loopback（`HOSTNAME` 被 k8s 設成 pod 名）。看 runtime-logs 的 `Local:` 是否印 pod 名稱；Dockerfile 加 `ENV HOSTNAME=0.0.0.0`。平台訊息「未聽 PORT」是錯方向；症狀時好時壞 → `hosted-apps.md` §2 |
 | **Hosted App 建置 failed、日誌全空、「builder 未留下 termination message」** | 先**原樣重送一次**（偶發型）；再失敗往建置記憶體查：限制建置 worker 數、`--max-old-space-size` 設包絡 60–65%（設太高反而無日誌 OOM）→ `hosted-apps.md` §8 |
