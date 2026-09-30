@@ -84,7 +84,7 @@
 | **想把已建好的表／欄位實體名改掉** | 沒有這條路——`PATCH /tables/{key}` 只收顯示名等五項，改欄 payload 是 `extra="forbid"`，帶 `physical_name` 直接 422。唯一做法是重建式改名（建新表→搬資料→改引用→驗收→刪舊表），**要先出計畫書給用戶同意**；只有部分欄位不合規則加新欄→搬值→刪舊欄，不用動表 → `data-center.md` §11 |
 | **重建式改名後圖片全壞了（404／403）** | image 欄位的 storage key 內嵌**舊表實體名**，取 URL 端點會驗「key 裡的表是本租戶現存的表」——舊表一刪就取不到。key 不可直接複製：舊表還在時逐張下載→重傳到新表→寫新 key → `data-center.md` §11.5 第 4 步 |
 | 建表／加欄 409 | 撞配額（`table_quota_exceeded` / `field_quota_exceeded`，數值見 `data-center.md` §4）或實體名撞名；「**與平台保留表名衝突**」= 撞到平台地板表名（users/tenants/api_keys…），沒有補救管道，換個實體名（⚠️ 2026-09-01 實測此檢查 prod 尚未生效——沒被擋≠可以用，一律自律避開）→ `data-center.md` §1 |
-| 文件宣稱的端點回 404／回應缺欄位 | 先懷疑**部署落差**——prod 由 `v*` tag 觸發，可能落後 main 數天到一週；**判準是查 prod 的 `GET /api/v1/openapi.json`（免登入）有沒有那條路徑**，不是文件錯也不是打錯。2026-09-07 prod＝v1.13.0，與 main 幾乎同步；歷史紀錄見 `hosted-apps.md` 檔頭與 `data-center.md` §9 |
+| 文件宣稱的端點回 404／回應缺欄位 | 先懷疑**部署落差**——prod 跑**最新的 `v*` tag**、main 先上 UAT，prod 可能落後 main 數天到一週，文件依 main 寫的端點 prod 可能還沒有。判準是**直接打那條路徑**：FastAPI 預設 404 `{"detail":"Not Found"}`＝這個環境沒有這條路由；結構化錯誤（401／403／405／422）＝路由在，問題在別處。平台已不供應 `openapi.json`，別再拿它判斷。歷史紀錄見 `hosted-apps.md` 檔頭與 `data-center.md` §9 |
 | 刪表／刪欄被擋 | 兩段式刪除：先取 `/impact`，確認值必須是**實體名**不是顯示名 |
 | **Hosted App rollout 卡「ksvc ready 逾時」，runtime-logs 卻顯示已 Ready** | 框架綁到 pod 名稱、不綁 loopback（`HOSTNAME` 被 k8s 設成 pod 名）。看 runtime-logs 的 `Local:` 是否印 pod 名稱；Dockerfile 加 `ENV HOSTNAME=0.0.0.0`。平台訊息「未聽 PORT」是錯方向；症狀時好時壞 → `hosted-apps.md` §2 |
 | **Hosted App 建置 failed、日誌全空、「builder 未留下 termination message」** | 先**原樣重送一次**（偶發型）；再失敗往建置記憶體查：限制建置 worker 數、`--max-old-space-size` 設包絡 60–65%（設太高反而無日誌 OOM）→ `hosted-apps.md` §8 |
@@ -100,7 +100,7 @@
 | 自建表 records POST 回 422 `not_null_violation` 但欄位明明有給 | body 沒包 `{"data": {...}}`，整包被忽略後報第一個必填欄位 → `data-center.md` §7 |
 | 建自建表 relation 回 422「無法解析 target_erp_key」 | 預設表目標只有部分可解析，無法事先查。改 `text` 存 UUID，唯一性用 `legacy_id`(unique) 承載 → `data-center.md` §3 |
 | 自建表 `select` 欄位建欄 422 `Input should be a valid string` | `options` 必須是**純字串陣列**，不收 `{label,value}` → `data-center.md` §3 |
-| **模組 REST 分頁抓不齊／筆數與 `total` 對不上**（資料操作線） | 分頁參數**分兩派**：`client`／`sale`／`hr`／`stock`／`purchase` 用 `skip`＋`limit`，`crm` 用 `page`＋`page_size`；單頁上限多為 500（`client` 未設上限、預設 100）。不要手刻翻頁，用 `aigo_data.py call --all` 依 openapi 自動判形狀 → `data-operations.md` §4 |
+| **模組 REST 分頁抓不齊／筆數與 `total` 對不上**（資料操作線） | 分頁參數**分兩派**：`client`／`sale`／`hr`／`stock`／`purchase` 用 `skip`＋`limit`，`crm` 用 `page`＋`page_size`；單頁上限多為 500（`client` 未設上限、預設 100）。不要手刻翻頁，用 `aigo_data.py call --all` 依回應自動判形狀（判錯加 `--paging`） → `data-operations.md` §4 |
 | 匯出 `/download` 回 409「匯出尚未完成」 | 匯出是**非同步任務**（`queued` → `completed`，實測數十秒）。先輪詢任務狀態再下載，不是壞了 → `data-operations.md` §5 |
 | 匯出送自建表回 failed（`custom object not in tenant`／`badly formed hexadecimal UUID string`） | `source_type: custom_table` 指的是**舊 CustomObject**，**資料中心自建表不在匯出範圍**（白名單只有 6 張預設表）。整表取出改用 `call GET /api/v1/data-center/tables/{key}/records --all` → `data-operations.md` §5 |
 | `aigo_data.py perm-check` 回 ✅ 卻仍 403 | perm-check 是**推估不是權威**，少數端點另有細權限（`hr.leave_manage`、`accounting.post`）。403 就停、請管理員授權，**不要換路徑繞** → `data-operations.md` §6、`pre-report-self-grill.md` Q3.7 |

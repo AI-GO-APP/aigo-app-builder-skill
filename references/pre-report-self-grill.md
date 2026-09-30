@@ -101,8 +101,8 @@
 - **Q3.5 路徑**：VFS 路徑 POSIX 相對、無 `\`、無 `..`；`DELETE /source/files` 帶 `expected_version`；
   容器內打 data-center 要 `/open` 前綴。
 - **Q3.6 平台有沒有既有路徑**：想要的能力可能已存在於別的入口（型別檢查在 Builder AI 的
-  `check_types`、值域在 Meta API、路由權威在 `/api/v1/openapi.json`）。
-  「API 沒提供」要先查 `references/` 與 openapi 再說。
+  `check_types`、值域在 Meta API、路由事實在 `references/`——平台已不供應 openapi）。
+  「API 沒提供」要先查 `references/`、再直接打該路徑確認（404 `Not Found`＝沒有）再說。
 - **Q3.7 「平台缺這張表／這個欄位」的權威面**：宣稱預設表缺欄位前，
   **打過引用面 `GET /refs/tables/{t}/columns` 了嗎**？Meta 面的 `fields` 是 Workspace 用的
   策展白名單、比實體表少欄（`hr_employees` 20 vs 42），依它判「平台沒有」是必錯的

@@ -11,14 +11,13 @@ aigo_data.py — 以**登入使用者身分**直接操作 AI GO 資料（不經 
 | 批次匯出／匯入 | `/api/v1/exports`（6 張預設表白名單）／`/api/v1/imports`（admin） | 該模組 read／`system.data_import` |
 | 值域與結構 | `/api/v1/data-center/meta/tables/{key}`（select 型欄位帶 options） | 登入即可 |
 
-路由來源是平台的 `/api/v1/openapi.json`（733 條路徑、675 個 schema，免登入可讀）——
-本腳本**不手抄路由**，`openapi` 子指令現查現用，`call` 子指令通用呼叫並自動翻頁。
+路由事實以本 skill 的 references/ 為準（平台 prod／UAT 都已不對外供應 openapi.json）；
+要確認一條路由在不在就直接打（寫入路由改對同路徑打 GET）：FastAPI 預設的 404 `{"detail":"Not Found"}`
+＝路由不存在，結構化錯誤（401／403／405／422、或帶業務訊息的 404）＝路由存在。`call --all` 依第一頁回應的形狀自動翻頁。
 
 用法（工作區由 `--root` 或 `AIGO_PROJECT_ROOT` 指定，預設從目前目錄往上找）：
     uv run --project scripts python scripts/aigo_data.py me
     uv run --project scripts python scripts/aigo_data.py perm-check GET /api/v1/sale/orders
-    uv run --project scripts python scripts/aigo_data.py openapi paths --prefix /api/v1/sale
-    uv run --project scripts python scripts/aigo_data.py openapi op POST /api/v1/client
     uv run --project scripts python scripts/aigo_data.py call GET /api/v1/client --params limit=50 --all --out customers.json
     uv run --project scripts python scripts/aigo_data.py call POST /api/v1/client --json '{"name":"…","customer_type":"company"}'
     uv run --project scripts python scripts/aigo_data.py export sale_orders --format csv --wait --out sale_orders.csv
@@ -41,11 +40,8 @@ from urllib.parse import urlsplit
 import httpx
 
 sys.path.insert(0, os.path.dirname(__file__))
-from aigo_auth import CONFIG_DIR, find_workspace, get_token, resolve_base_url  # noqa: E402
+from aigo_auth import find_workspace, get_token, resolve_base_url  # noqa: E402
 
-OPENAPI_PATH = "/api/v1/openapi.json"
-OPENAPI_CACHE_FILE = "openapi.json"
-OPENAPI_TTL = 24 * 3600
 PAGE_SAFETY_CAP = 20000  # --all 最多收多少列，避免把整個租戶拉下來
 MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
 
@@ -131,89 +127,16 @@ class Session:
         return f"→ 租戶 {self.tenant}  身分 {me.get('email')}（{roles}）"
 
 
-# ── OpenAPI ───────────────────────────────────────────────────
+# ── OpenAPI（已停供） ─────────────────────────────────────────
 
-
-def load_openapi(s: Session, refresh: bool = False) -> dict:
-    """抓 `/api/v1/openapi.json`（免登入），快取在工作區 `.aigo/openapi.json`，24 小時內重用。"""
-    cache = Path(s.root) / CONFIG_DIR / OPENAPI_CACHE_FILE
-    if not refresh and cache.exists() and time.time() - cache.stat().st_mtime < OPENAPI_TTL:
-        try:
-            return json.loads(cache.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            pass
-    r = httpx.get(s.base_url + OPENAPI_PATH, timeout=60)
-    r.raise_for_status()
-    spec = r.json()
-    cache.parent.mkdir(parents=True, exist_ok=True)
-    cache.write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
-    return spec
-
-
-def _deref(spec: dict, node: Any, depth: int = 0) -> Any:
-    """把 $ref 展開（最多 4 層），讓 agent 一次看到 body 的欄位與必填。"""
-    if depth > 4 or not isinstance(node, (dict, list)):
-        return node
-    if isinstance(node, list):
-        return [_deref(spec, n, depth + 1) for n in node]
-    if "$ref" in node:
-        name = node["$ref"].split("/")[-1]
-        target = spec.get("components", {}).get("schemas", {}).get(name, {})
-        out = _deref(spec, target, depth + 1)
-        if isinstance(out, dict):
-            out = {"$schema_name": name, **out}
-        return out
-    return {k: _deref(spec, v, depth + 1) for k, v in node.items()}
-
-
-def find_paths(spec: dict, prefix: str = "", grep: str = "") -> list[tuple[str, str, str]]:
-    """回 (METHOD, path, summary)。"""
-    out = []
-    g = grep.lower()
-    for path, ops in spec.get("paths", {}).items():
-        if prefix and not path.startswith(prefix):
-            continue
-        for verb, op in ops.items():
-            if verb not in ("get", "post", "put", "patch", "delete"):
-                continue
-            summary = op.get("summary") or op.get("operationId") or ""
-            if g and g not in (path + " " + summary).lower():
-                continue
-            out.append((verb.upper(), path, summary))
-    return sorted(out, key=lambda t: (t[1], t[0]))
-
-
-def describe_op(spec: dict, method: str, path: str) -> dict:
-    """單一端點的參數、body schema（已展開）、回應 schema 名稱。"""
-    op = spec.get("paths", {}).get(path, {}).get(method.lower())
-    if op is None:
-        raise RuntimeError(f"❌ openapi 裡沒有 {method} {path}——用 `openapi paths --grep` 找正確路徑")
-    params = [
-        {"name": p["name"], "in": p.get("in"), "required": p.get("required", False),
-         "schema": _deref(spec, p.get("schema", {}))}
-        for p in op.get("parameters", [])
-    ]
-    body = None
-    rb = op.get("requestBody", {}).get("content", {}).get("application/json", {}).get("schema")
-    if rb:
-        body = _deref(spec, rb)
-    resp = op.get("responses", {}).get("200") or op.get("responses", {}).get("201") or {}
-    resp_schema = resp.get("content", {}).get("application/json", {}).get("schema", {})
-    return {
-        "method": method.upper(), "path": path, "summary": op.get("summary"),
-        "parameters": params, "body": body,
-        "response": resp_schema.get("$ref", "").split("/")[-1] or resp_schema.get("type"),
-    }
-
-
-def pagination_scheme(spec: dict, path: str) -> str | None:
-    """`page`（page/page_size）、`skip`（skip/limit）或 None——模組間不一致，要現查。"""
-    names = {p["name"] for p in spec.get("paths", {}).get(path, {}).get("get", {}).get("parameters", [])}
-    if {"page", "page_size"} <= names:
-        return "page"
-    if {"skip", "limit"} <= names:
-        return "skip"
-    return None
+OPENAPI_GONE = """❌ 平台已不對外供應 `/api/v1/openapi.json`（prod 與 UAT 都關閉，/docs、/redoc 一併關閉），
+   `openapi paths／op／schema` 子指令因此停用。改用：
+   1. 路由、參數、必填欄位 → 本 skill 的 references/（資料操作看 data-operations.md，
+      各模組表結構看 default-table-lookup.md；值域用 `aigo_data.py meta table <key>`）
+   2. 確認路由在不在 → 直接打：`aigo_data.py call GET <path>`。FastAPI 預設 404 `{"detail":"Not Found"}`
+      ＝路由不存在；401／403／405／422 或帶業務訊息的錯誤＝路由存在。寫入路由**不要用寫入去試**——
+      對同路徑打 GET，405 Method Not Allowed 就代表路徑存在
+   3. 文件說有、prod 打卻 404 → 可能是部署落差：prod 跑最新的 `v*` tag，main 先上 UAT"""
 
 
 # ── 權限 ─────────────────────────────────────────────────────
@@ -232,17 +155,22 @@ def permission_for(method: str, path: str) -> str | None:
         return "datacenter.schema_write" if m in MUTATING else "builder.access"
     if path.startswith("/api/v1/imports"):
         return "system.data_import"
-    # 成員／角色管理線（references/member-admin.md §2；核自 api/invitations.py、members.py，2026-09-08）
+    # 成員／角色管理線（references/member-admin.md §2；核自 api/invitations.py、members.py @ v1.15.4）
     if path.startswith("/api/v1/invitations"):
         return "system.invitations"
-    if path.startswith("/api/v1/members/roles"):
-        return "system.roles_manage"
+    if path == "/api/v1/members/roles" or path.startswith("/api/v1/members/roles/"):
+        return "system.roles_manage" if m in MUTATING else None  # GET 角色清單：登入即可
     if path.startswith("/api/v1/members"):
-        return "hr.member_manage" if m in MUTATING else "hr.read"
+        return "hr.member_manage"  # 列表／單筆讀取也要 hr.member_manage，不是 hr.read
     if path.startswith("/api/v1/hosted-apps") and path.endswith("/access-settings"):
         return "hosted_apps.deploy"
     if path.startswith("/api/v1/builder/apps") and path.endswith("/settings"):
         return "builder.manage_access"
+    # erp_core.py @ v1.15.4：分析帳走會計權限、銀行帳戶有獨立權限，其餘參考資料
+    if path.startswith("/api/v1/erp/analytic"):
+        return f"accounting.{VERB_ACTION[m]}"
+    if path.startswith("/api/v1/erp/partner-banks"):
+        return "system.partner_banks"
     if path.startswith("/api/v1/erp"):
         return "system.reference_data"
     if path.startswith("/api/v1/exports"):
@@ -277,46 +205,93 @@ def _items_of(payload: Any) -> tuple[list, int | None]:
     return [], None
 
 
+PAGING_CHOICES = ("auto", "page", "skip", "offset", "none")
+
+
+def infer_pagination(payload: Any, params: dict | None = None) -> str | None:
+    """從**實際回應**判分頁形狀（平台不再供應 openapi，無法事先查參數）。
+
+    - 使用者已在 `--params` 帶 page／page_size → `page`；帶 skip → `skip`；帶 offset → `offset`
+    - 信封回聲欄位：有 `page`／`page_size` → `page`；有 `offset` → `offset`；有 `skip`／`limit` → `skip`
+      （平台模組 REST 多回 `{items,total,skip,limit}`，crm／資料中心回 `{items,total,page,page_size}`）
+    - 只有 `{items,total}` 沒回聲 → `page`；裸 list → `skip`
+    - 其他（單筆物件、無 items 的 dict）→ None，不翻頁
+    """
+    keys = set(params or {})
+    if keys & {"page", "page_size"}:
+        return "page"
+    if "offset" in keys:
+        return "offset"
+    if "skip" in keys:
+        return "skip"
+    if isinstance(payload, list):
+        return "skip"
+    if isinstance(payload, dict):
+        if not any(isinstance(payload.get(k), list) for k in ("items", "data", "results")):
+            return None
+        pk = set(payload)
+        if pk & {"page", "page_size"}:
+            return "page"
+        if "offset" in pk:
+            return "offset"
+        if pk & {"skip", "limit"}:
+            return "skip"
+        if "total" in pk:
+            return "page"
+    return None
+
+
 def call(
     s: Session, method: str, path: str, params: dict | None = None, body: Any = None,
-    all_pages: bool = False, spec: dict | None = None, max_rows: int = PAGE_SAFETY_CAP,
+    all_pages: bool = False, max_rows: int = PAGE_SAFETY_CAP, paging: str = "auto",
 ) -> Any:
-    """通用呼叫。`all_pages=True` 時依 openapi 的分頁形狀自動翻頁，回合併後的 list。"""
+    """通用呼叫。`all_pages=True` 時翻完所有頁、回合併後的 list。
+
+    `paging="auto"` 先打一次（照使用者給的 params），依回應形狀判 page／skip／offset；
+    也可明確指定 `page`（page＋page_size）、`skip`（skip＋limit）、`offset`（offset＋limit）、`none`。
+    """
     m = method.upper()
+    params = dict(params or {})
     if not all_pages:
         r = s.client.request(m, path, params=params or None, json=body)
         return _result(r)
-    spec = spec or load_openapi(s)
-    scheme = pagination_scheme(spec, path)
-    params = dict(params or {})
-    rows: list = []
-    if scheme == "page":
-        size = int(params.get("page_size") or 100)
-        page = int(params.get("page") or 1)
-        while True:
-            params.update({"page": page, "page_size": size})
-            payload = _result(s.client.request(m, path, params=params))
-            items, total = _items_of(payload)
-            rows += items
-            if not items or len(items) < size or (total is not None and len(rows) >= total) or len(rows) >= max_rows:
-                break
-            page += 1
-    elif scheme == "skip":
-        limit = int(params.get("limit") or 100)
-        skip = int(params.get("skip") or 0)
-        while True:
-            params.update({"skip": skip, "limit": limit})
-            payload = _result(s.client.request(m, path, params=params))
-            items, total = _items_of(payload)
-            rows += items
-            if not items or len(items) < limit or (total is not None and len(rows) >= total) or len(rows) >= max_rows:
-                break
-            skip += limit
-    else:
+    scheme: str | None = paging
+    if paging == "auto":
+        probe = _result(s.client.request(m, path, params=params or None))
+        scheme = infer_pagination(probe, params)
+        items, total = _items_of(probe)
+        if scheme is None or (total is not None and len(items) >= total):
+            if not items and probe and not isinstance(probe, list):
+                return probe
+            return items[:max_rows]
+    if scheme == "none":
         payload = _result(s.client.request(m, path, params=params or None))
         rows, _ = _items_of(payload)
-        if not rows and payload:
-            return payload
+        return payload if (not rows and payload and not isinstance(payload, list)) else rows[:max_rows]
+    if scheme == "page":
+        size_key, pos_key = "page_size", "page"
+        size = int(params.get("page_size") or 100)
+        pos = int(params.get("page") or 1)
+    else:  # skip / offset
+        size_key, pos_key = "limit", scheme
+        size = int(params.get("limit") or 100)
+        pos = int(params.get(scheme) or 0)
+    rows: list = []
+    prev: list | None = None
+    while True:
+        params.update({pos_key: pos, size_key: size})
+        payload = _result(s.client.request(m, path, params=params))
+        items, total = _items_of(payload)
+        if prev is not None and items and items == prev:
+            # 端點不吃這組分頁參數、每次回同一頁——停，別無限重抓
+            print(f"⚠️ 第二頁與前一頁相同：{path} 似乎不支援 {pos_key}／{size_key}，已停止翻頁；"
+                  "可用 --paging 指定其他形狀", file=sys.stderr)
+            break
+        rows += items
+        prev = items
+        if not items or len(items) < size or (total is not None and len(rows) >= total) or len(rows) >= max_rows:
+            break
+        pos += 1 if scheme == "page" else size
     return rows[:max_rows]
 
 
@@ -440,18 +415,18 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("perm-check", help="推估端點需要的權限並對照目前身分")
     p.add_argument("method"); p.add_argument("path")
 
-    p = sub.add_parser("openapi", help="查平台 openapi（免登入；快取 24h）")
-    ps = p.add_subparsers(dest="sub", required=True)
-    q = ps.add_parser("paths"); q.add_argument("--prefix", default=""); q.add_argument("--grep", default=""); q.add_argument("--refresh", action="store_true")
-    q = ps.add_parser("op"); q.add_argument("method"); q.add_argument("path"); q.add_argument("--refresh", action="store_true")
-    q = ps.add_parser("schema"); q.add_argument("name")
+    # 已停用：平台不再供應 openapi.json。保留指令外形讓舊用法得到明確說明，而不是 argparse 錯誤
+    p = sub.add_parser("openapi", help="（已停用）平台不再供應 openapi.json")
+    p.add_argument("rest", nargs=argparse.REMAINDER)
 
     p = sub.add_parser("call", help="通用呼叫；GET 加 --all 自動翻頁")
     p.add_argument("method"); p.add_argument("path")
     p.add_argument("--params", nargs="*", help="k=v …（query string）")
     p.add_argument("--json", dest="json_body", help="JSON 字串 body")
     p.add_argument("--json-file", help="從檔案讀 body")
-    p.add_argument("--all", action="store_true", help="翻完所有頁（依 openapi 分頁形狀）")
+    p.add_argument("--all", action="store_true", help="翻完所有頁（依第一頁回應判分頁形狀）")
+    p.add_argument("--paging", choices=PAGING_CHOICES, default="auto",
+                   help="--all 的分頁形狀：auto（預設，看回應）／page（page+page_size）／skip（skip+limit）／offset／none")
     p.add_argument("--max", type=int, default=PAGE_SAFETY_CAP)
     p.add_argument("--out", help="結果寫入檔案（JSON）")
     p.add_argument("--dry-run", action="store_true", help="只印出將送出的請求")
@@ -470,10 +445,11 @@ def main(argv: list[str] | None = None) -> int:
     q = ps.add_parser("table"); q.add_argument("key")
 
     a = ap.parse_args(argv)
+    if a.cmd == "openapi":
+        print(OPENAPI_GONE)
+        return 2
     if getattr(a, "path", None):
         a.path = norm_path(a.path)
-    if getattr(a, "prefix", None):
-        a.prefix = norm_path(a.prefix)
     s = Session(a.root)
 
     if a.cmd == "me":
@@ -486,17 +462,6 @@ def main(argv: list[str] | None = None) -> int:
         ok, why = check_permission(s, a.method, a.path)
         print(("✅" if ok else "❓" if ok is None else "❌"), f"{a.method.upper()} {a.path}：{why}")
         return 0 if ok is not False else 1
-
-    if a.cmd == "openapi":
-        spec = load_openapi(s, refresh=getattr(a, "refresh", False))
-        if a.sub == "paths":
-            for verb, path, summary in find_paths(spec, a.prefix, a.grep):
-                print(f"{verb:<6} {path:<60} {summary}")
-        elif a.sub == "op":
-            _dump(describe_op(spec, a.method, a.path), None)
-        else:
-            _dump(_deref(spec, {"$ref": f"#/components/schemas/{a.name}"}), None)
-        return 0
 
     if a.cmd == "call":
         m = a.method.upper()
@@ -516,7 +481,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.dry_run:
             print(json.dumps({"method": m, "url": s.base_url + a.path, "params": params, "body": body}, ensure_ascii=False, indent=2))
             return 0
-        result = call(s, m, a.path, params=params, body=body, all_pages=a.all and m == "GET", max_rows=a.max)
+        result = call(s, m, a.path, params=params, body=body, all_pages=a.all and m == "GET", max_rows=a.max, paging=a.paging)
         _dump(result, a.out)
         return 0
 

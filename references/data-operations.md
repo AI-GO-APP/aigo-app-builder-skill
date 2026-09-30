@@ -21,7 +21,7 @@
 
 | 資料面 | 端點 | 權限閘 | 腳本 |
 |---|---|---|---|
-| **預設表** | 各模組 REST：`/api/v1/client`（客戶）、`/sale`、`/crm`、`/hr`、`/stock`、`/purchase`、`/accounting`、`/mrp`、`/project`、`/supplier` | `<module>.read`／`.write`／`.delete`（與平台 UI 同一套 RBAC；`system.admin` 直通） | `aigo_data.py call`（路由現查 openapi） |
+| **預設表** | 各模組 REST：`/api/v1/client`（客戶）、`/sale`、`/crm`、`/hr`、`/stock`、`/purchase`、`/accounting`、`/mrp`、`/project`、`/supplier` | `<module>.read`／`.write`／`.delete`（與平台 UI 同一套 RBAC；`system.admin` 直通） | `aigo_data.py call`（路由以 §4 與各模組 reference 為準） |
 | **自建表** | `/api/v1/data-center/tables/{key}/records` 記錄 CRUD；結構操作另有端點 | 記錄 CRUD `builder.access`；建改結構 `datacenter.schema_write`；刪表刪欄 `system.admin` | `aigo_data_center.py`（已封裝） |
 | **批次匯出／匯入** | `POST /api/v1/exports` → 輪詢 → `/download`；`/api/v1/imports`（csv／excel／json，有對應引擎） | 匯出：該表模組的 read；匯入：`system.data_import`（admin 直通） | `aigo_data.py export`；匯入走平台 UI |
 | **結構與值域** | `/api/v1/data-center/meta/tables`（193 張：85 預設＋108 自建）、`/meta/tables/{key}` | 登入即可 | `aigo_data.py meta` |
@@ -46,7 +46,7 @@
 1. aigo_auth.py status              ← 工作區＝租戶；登錄表可為空（這條線不需要 app）
 2. aigo_data.py me                  ← 身分、角色、permissions 清單（/api/v1/auth/me 直接帶）
 3. aigo_data.py perm-check METHOD PATH   ← 推估權限並對照；❌ 就停，請管理員授權，不要試
-4. aigo_data.py openapi paths --prefix /api/v1/sale   ← 路由現查，不猜；op 看參數與 body schema
+4. 路由與欄位查本 skill 的 references（§4、default-table-lookup.md）；不確定在不在就打 GET 試（§4）
 5. aigo_data.py call ...            ← 寫入一律先過 §3.5 寫入閘門（估影響面→備份→試一筆→確認）
 6. 讀回驗證（GET 單筆或 --all 比對筆數）
 ```
@@ -79,12 +79,16 @@
 
 ## 4. 各模組 REST 的實測慣例（測試租戶 2026-09-03）
 
-- **路由權威是 `/api/v1/openapi.json`**（免登入、733 條路徑、675 個 schema）。本 skill 不手抄路由；
-  `aigo_data.py openapi op POST /api/v1/client` 會把 body schema 展開成欄位與必填
-  （例：`CustomerCreate` 必填 `name`、`customer_type`）。openapi **沒有權限標註**，權限用 §1 的表推估
+- **路由事實以本 skill 的 references 為準**：平台 prod／UAT **都不再供應** `/api/v1/openapi.json`
+  （`/docs`、`/redoc` 一併關閉；`aigo_data.py openapi` 子指令只印停用說明）。必填欄位看 reference
+  與 Meta（例：客戶建立必填 `name`、`customer_type`）；權限用 §1 的表推估
+- **確認路由在不在就直接打**：FastAPI 預設 404 `{"detail":"Not Found"}`＝路由不存在；
+  401／403／405／422 或帶業務訊息的錯誤＝路由存在。寫入路由不要用寫入去試——對同路徑打 GET，
+  405 Method Not Allowed＝路徑存在。旗標關閉的端點也可能回 404，對不上時再看部署落差（`troubleshooting.md`）
 - **分頁形狀不一致**：`client`／`sale`／`hr`／`stock`／`purchase` 用 `skip`＋`limit`，`crm` 用 `page`＋`page_size`；
   回應多為 `{items, total, …}` 信封。單頁上限多為 **500**（`sale/orders`、`hr/employees`、`stock/pickings`、
-  `crm/leads`；`client` 未設上限，預設 100）。`call --all` 依 openapi 自動判斷形狀翻頁，安全上限 20000 列
+  `crm/leads`；`client` 未設上限，預設 100）。`call --all` 依第一頁回應的形狀自動翻頁（信封回聲 `skip`／`limit` 或 `page`／`page_size`；裸 list 走 skip），
+  判錯就用 `--paging page|skip|offset|none` 指定，安全上限 20000 列
 - ⚠️ **Windows Git Bash 會把 `/api/v1/...` 參數改寫成 `C:/Program Files/Git/api/v1/...`**（MSYS 路徑轉換）。
   `aigo_data.py` 會自動剝掉前面的垃圾，也接受省略前綴（`call GET client`）；
   要根治就在該指令前加 `MSYS_NO_PATHCONV=1`，或改用 PowerShell

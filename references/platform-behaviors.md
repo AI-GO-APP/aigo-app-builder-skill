@@ -605,7 +605,7 @@ export function currentIdentity(): { userId: string; email: string; tenantId: st
 建表規格階段就要避開（→ `data-center.md` §1）。
 
 > ⚠️ 2026-09-01 實測 `GET /api/v1/apps/{app_id}/api-grants` 在 prod 回 404——**v1.13.0（2026-09-07）
-> 起 prod openapi 已有此端點**，本節的「準備動作」現在做得了。保留表名 409 當時實測尚未生效
+> 起 prod 已有此端點**（當時以 prod openapi 核對），本節的「準備動作」現在做得了。保留表名 409 當時實測尚未生效
 > （仍可建成，見 `data-center.md` §1），v1.13.0 後**未重測**，一律自律避開。
 
 **enforce 前的準備（寫 code 時就做，不要等）**：

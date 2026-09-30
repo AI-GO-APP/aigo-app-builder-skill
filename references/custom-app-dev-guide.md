@@ -31,7 +31,7 @@
 - 25. 對外 API 呼叫與 Egress 閘道
 - 26. 建立與刪除 App（API，不必走 UI）
 - 27. 租戶資料存取規則（Auth gate）：平台側人軸執法（2026-09 起）
-- 28. 執行模式：冷啟動／常駐（`always_on`，租戶自選；v1.13.0 起，prod openapi 已實查）
+- 28. 執行模式：冷啟動／常駐（`always_on`，租戶自選；v1.13.0 起上 prod）
 - 29. 存取通道端點總表：internal／external／匿名／Hosted（★ 四條通道，四種憑證）
 
 ---
@@ -1588,7 +1588,7 @@ DELETE /api/v1/builder/apps/{app_id}   （builder.access；實測回 200，之�
 > app 不用也不該各自實作一套。
 
 **現況（2026-09-07）**：規則 API、explain、拒絕紀錄、Builder 分頁等**程式面已隨 v1.13.0 上 prod**
-（openapi 實查），但執法開關 `POLICY_GATE_MODE` **UAT＝on、prod＝off**（核自 k8s manifest）。
+（2026-09-07 當時以 prod openapi 核對），但執法開關 `POLICY_GATE_MODE` **UAT＝on、prod＝off**（核自 k8s manifest）。
 prod 切 on 前規則只會被記錄（audit）不會生效；切 on 後本節全部成立。**新開發的 app 現在就按本節寫**，切 on 時才不用回頭救。
 
 ### 27.1 規則長什麼樣、掛在哪
@@ -1654,7 +1654,7 @@ user_attrs=…)` 拿 `(allow, row_filter, columns)`，**row_filter 要自己接�
 模組會退回空清單＝「沒有任何角色」，只有 `entity_id="*"` 的規則列會命中——方向是更嚴不是誤放行，
 但表示 v0 模板現階段**做不到依角色放行**。要人軸控管請等 v1 切 on，不要再擴 v0。
 
-## 28. 執行模式：冷啟動／常駐（`always_on`，租戶自選；v1.13.0 起，prod openapi 已實查）
+## 28. 執行模式：冷啟動／常駐（`always_on`，租戶自選；v1.13.0 起上 prod）
 
 已發布 app 的 runner 預設 **scale-to-zero**：閒置後縮到 0，下一次呼叫 action 要等 pod 拉起
 （第一發明顯慢、甚至逾時）。租戶可把單支 app 切成**常駐**（隨時保留一個實例）：
@@ -1677,7 +1677,7 @@ PATCH /api/v1/builder/apps/{app_id}/runtime-settings   （builder.publish）
 - 草稿（draft runner）**固定冷啟動**，本設定只作用於已發布 runner
 - **縮到零時 pod 的 `/tmp`（emptyDir）與程序記憶體一起消失**——action 寫在本機的 `.json`／sqlite
   不是資料層，常駐也擋不住 publish 換 revision；業務資料與 app 狀態一律落表（§19「禁止項」）
-- **怎麼讀回現況**（2026-09-11 測試租戶實查 prod openapi＋實打）：Builder 線**只有 `PATCH`，沒有
+- **怎麼讀回現況**（2026-09-11 測試租戶實查，當時以 prod openapi 核對＋實打）：Builder 線**只有 `PATCH`，沒有
   `GET /runtime-settings`**（該路徑只存在於 Hosted 線）；`GET /builder/apps/{id}` 明細（`CustomAppResponse`）
   **也不含** `always_on`。唯一的讀回點是**列表** `GET /api/v1/builder/apps`——`CustomAppListItem`
   每筆帶 `always_on` 與 `has_messaging_trigger`。
@@ -1724,9 +1724,8 @@ agent 不自行開、也不把「要不要常駐」丟給 owner 選。決策的�
 
 ## 29. 存取通道端點總表：internal／external／匿名／Hosted（★ 四條通道，四種憑證）
 
-> 核自 `backend/app/main.py` 的 router 掛載與各 router 的 `Depends`（2026-09-09），並以 prod
-> `/api/v1/openapi.json` 逐條對照（`aigo_data.py openapi paths --prefix /api/v1/ext|/pub|/open`
-> 三組路徑與原始碼一致）。**同一種資料在四條通道各有一組前綴，憑證不能互換。**
+> 核自 `backend/app/main.py` 的 router 掛載與各 router 的 `Depends`（2026-09-09；當時另以 prod
+> openapi 逐條對照 `/ext`、`/pub`、`/open` 三組路徑與原始碼一致——平台後來已停供 openapi，本表即權威）。**同一種資料在四條通道各有一組前綴，憑證不能互換。**
 
 | 通道 | 誰在用 | 憑證 | 前綴 | 權限閘 |
 |---|---|---|---|---|

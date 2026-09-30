@@ -69,7 +69,7 @@
 2. **回到自己的產物**：白畫面先看 console；`ReferenceError` 帶 minified 名稱＝自家 bundle，
    跑 `aigo_typecheck.py`。compile 綠燈不是「程式正確」的證據
 3. **確認平台有沒有既有路徑**：想要的能力可能已存在於別的入口（例如型別檢查在 Builder AI 的
-   `check_types`、值域在 Meta API）——「API 沒提供」要先查 `references/` 與 openapi 再說
+   `check_types`、值域在 Meta API）——「API 沒提供」要先查 `references/`、再直接打該路徑確認（404 `Not Found`＝沒有）再說
 4. 以上都排除、且症狀能在乾淨環境重現 → 再走 `pre-report-self-grill.md` 的六輪自審（本清單是它的速覽），
    把證據濃縮成已排除清單，**先拿摘要問使用者**，同意後帶 `--ruled-out` ＋ `--user-confirmed` 回報
 
