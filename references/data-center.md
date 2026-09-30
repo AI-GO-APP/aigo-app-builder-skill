@@ -21,8 +21,9 @@
 
 ## 1. 核心語義：租戶級資源
 
-自建表綁 **tenant**，不綁 app。同一租戶下的所有 custom app 與資料中心 UI 看到同一批表、
-同一份資料。這與已退場的 CustomObject（綁 app）是最重要的語義差異。
+自建表綁 **tenant**，不綁 app。同一租戶下的所有 custom app 與資料中心 UI 共用同一批表、
+同一份資料；但**每支 app 能碰哪幾張，要先登記資料引用**（§7「app 讀寫自建表要先登記引用」），
+app 身分列出來的表可能只是子集。這與已退場的 CustomObject（綁 app）是最重要的語義差異。
 
 **因此建表前必須先盤點。** 兩個 app 各建一張「客戶」表 = 資料分裂成兩份，事後難以合併。
 
@@ -255,14 +256,14 @@ data-center/{租戶 UUID}/{表實體名}/{隨機 UUID}.{png|jpg|gif|webp}
 
 | 操作 | 方法 | 端點 | 權限 |
 |---|---|---|---|
-| 列表 | GET | `/api/v1/data-center/tables` | `builder.access` |
-| 讀單表 | GET | `/api/v1/data-center/tables/{key}` | `builder.access` |
-| 建表 | POST | `/api/v1/data-center/tables` | `system.admin` |
-| 改表（顯示名等） | PATCH | `/api/v1/data-center/tables/{key}` | `system.admin` |
+| 列表 | GET | `/api/v1/data-center/tables` | `builder.access` 或 `datacenter.schema_write` |
+| 讀單表 | GET | `/api/v1/data-center/tables/{key}` | `builder.access` 或 `datacenter.schema_write` |
+| 建表 | POST | `/api/v1/data-center/tables` | `datacenter.schema_write`（§2） |
+| 改表（顯示名等） | PATCH | `/api/v1/data-center/tables/{key}` | `datacenter.schema_write`（§2） |
 | 刪表影響 | GET | `/api/v1/data-center/tables/{key}/impact` | `builder.access` |
 | 刪表 | DELETE | `/api/v1/data-center/tables/{key}` | `system.admin` |
-| 加欄 | POST | `/api/v1/data-center/tables/{key}/fields` | `system.admin` |
-| 改欄 | PATCH | `/api/v1/data-center/tables/{key}/fields/{field_key}` | `system.admin` |
+| 加欄 | POST | `/api/v1/data-center/tables/{key}/fields` | `datacenter.schema_write`（§2） |
+| 改欄 | PATCH | `/api/v1/data-center/tables/{key}/fields/{field_key}` | `datacenter.schema_write`（§2） |
 | 刪欄影響 | GET | `/api/v1/data-center/tables/{key}/fields/{field_key}/impact` | `builder.access` |
 | 刪欄 | DELETE | `/api/v1/data-center/tables/{key}/fields/{field_key}` | `system.admin` |
 | 查記錄 | GET | `/api/v1/data-center/tables/{key}/records` | `builder.access` |
@@ -270,8 +271,10 @@ data-center/{租戶 UUID}/{表實體名}/{隨機 UUID}.{png|jpg|gif|webp}
 | 更新記錄 | PATCH | `/api/v1/data-center/tables/{key}/records/{record_id}` | `builder.access` |
 | 刪記錄 | DELETE | `/api/v1/data-center/tables/{key}/records/{record_id}` | `builder.access` |
 
-External app 的執行期走 `/api/v1/ext/data-center/...`——含 `GET /tables`（列出整租戶自建表
-及其欄位定義）與記錄 CRUD，但**沒有結構操作**。前端 SDK 依 `window.__IS_EXTERNAL__` 自動分流。
+`datacenter.schema_write` 那幾列 `system.admin` 直通；刪表／刪欄刻意只給 `system.admin`（§2）。
+
+External app 的執行期走 `/api/v1/ext/data-center/...`——含 `GET /tables`（列出自建表及其欄位定義；
+租戶切到擋下模式後**只列這支 app 已引用的表**，見下方「app 讀寫自建表要先登記引用」）與記錄 CRUD，但**沒有結構操作**。前端 SDK 依 `window.__IS_EXTERNAL__` 自動分流。
 **Hosted App 容器內**（`AIGO_API_TOKEN`）走 `/api/v1/open/data-center/...`——照上表路徑打會 401
 （`hosted-apps.md` §5）。匿名訪客走 `/api/v1/pub/data-center/{slug}/...`（唯讀）。
 四條通道同一張表的完整對照（前綴、憑證、權限閘）→ `custom-app-dev-guide.md` §29。
@@ -316,6 +319,9 @@ SDK 依 `window.__IS_EXTERNAL__` 自動分流 `/data-center` 或 `/ext/data-cent
 
 ### Server Action（`ctx.db`，Python）
 
+> ★ **前置步驟：先替 app 登記這張自建表的資料引用**（下方「app 讀寫自建表要先登記引用」）。
+> 沒登記時 `ctx.db` 拋「自建表不存在：<實體名>」——表明明在，訊息卻說不存在。
+
 ```python
 def execute(ctx):
     tables = ctx.db.list_tables()
@@ -332,6 +338,44 @@ def execute(ctx):
 ```
 
 **SDK 不提供結構操作**——app 執行期無法建表或改欄，這是刻意的能力邊界。
+
+### app 讀寫自建表要先登記引用（★ `ctx.db` 必踩）
+
+自建表是**租戶共用資源**，不屬於建表者或哪一支 app。平台不從「誰建的」推「哪支 app 能讀」：
+每支 app 要碰哪幾張自建表都得宣告成**資料引用**（`/api/v1/refs/apps/{app_id}`），跟預設表的
+Data Reference 同構。帶 app 身分的呼叫碰到**沒引用的表**，平台回 404「自建表不存在：<實體名>」——
+刻意不透露表存不存在，所以症狀跟打錯表名一模一樣。
+
+| 建表路徑 | 會不會自動登記引用 |
+|---|---|
+| Builder AI 在對話裡建表 | **會** |
+| 套用模板建 app（模板自帶的表） | **會**（依模板宣告的欄位與權限） |
+| `POST /api/v1/data-center/tables`（REST／`aigo_data_center.py`） | **不會**——零引用是合法狀態 |
+| 資料中心 UI 手動建表 | **不會** |
+
+**登記的兩條路**（登記後**即時生效**，不必重新發布——引用是執行期即時讀的，不看發布快照）：
+
+1. **API**：`POST /api/v1/refs/apps/{app_id}`（`builder.access`），
+   body `{"table_name": "<實體名>", "columns": [<要用的欄位實體名>], "permissions": ["read", ...]}`；
+   `permissions` 只給 app 真的要做的動作（`read`／`create`／`update`／`delete`）。
+   登記後用 `GET /api/v1/refs/apps/{app_id}` 驗收（**不要看 `db.json`**，見 `platform-behaviors.md` §6）。
+   **事前登記一律走這條**。External app 的終端使用者要透過 `/ext/data-center` 讀寫這張表，
+   還要再用 `PATCH /api/v1/refs/{ref_id}` 把 `is_end_user_accessible` 設為 `true`（預設不開；
+   沒開一樣回 404。這道開關不看租戶是否切到擋下模式）
+2. **Builder UI（事後補救）**：app 的「資料與 API 權限」分頁 →「待允許的資料表」區塊，找到被擋下的那張表按「允許」。
+   這份清單**只在 app 實際碰過這張表、被閘判定範圍外之後**才會出現那一列——新 app 還沒跑過就是空的，
+   不能拿來事前登記。按「允許」需要 **`builder.manage_access`**；沒有這個權限時面板是唯讀，改走第 1 條
+
+登記了但 `permissions` 沒給這個動作（例如只給 `read` 卻呼叫 `insert_row`）→ 回 **403**，不是 404；
+`columns` 也是白名單，之後新加的欄位要補進引用才讀得到。
+目錄也跟著縮：擋下模式下 `ctx.db.list_tables()`、`/ext`／`/open` 的 `GET /tables` 只列已引用的表，
+「列表裡沒有」不代表租戶沒這張表——租戶有哪些表用登入身分的 `GET /api/v1/data-center/tables` 查。
+
+**什麼時候做**：REST 建表（§2 建表流程第 4 步）驗收完 `physical_name` 之後、寫第一支會讀寫它的
+action 之前；**重用既有自建表**時也一樣——先 `GET /refs/apps/{app_id}` 看這支 app 有沒有引用它。
+
+⚠️ **這道閘是逐租戶啟用的**：還沒切到擋下模式的租戶只記錄不擋，沒登記也讀得到。
+在那種租戶測過不算數——一律照「要登記」來寫，換租戶或平台切換後才不會突然整頁讀不到。
 
 ---
 
@@ -365,6 +409,8 @@ runner 沒有使用者身分，那些端點吃 `get_current_user`，一律 **401
 ### 正確寫法（新開發）
 
 - internal app：自建表讀寫**一律**包 Server Action，前端 `runAction`。
+- 包進 Server Action 之前，先確認這支 app 已登記該自建表的資料引用（§7「app 讀寫自建表要先登記引用」）；
+  沒登記，`ctx.db` 會回「自建表不存在」。
 - 前端 SDK 僅限受眾全員持有 `builder.access` 的開發工具型 app 直呼
   （判進 external 的例外 app 由 SDK 自動分流 `/ext/data-center`，不在此閘）。
 - 受眾在 Phase 1.5 計畫階段就要確認（SKILL.md 核心規則 31）。

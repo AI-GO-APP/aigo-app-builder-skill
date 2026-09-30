@@ -448,7 +448,9 @@ action 以 `ctx.secrets` 讀取（Builder 沒有 runtime-settings 這支 GET，�
   或 `GET /api/v1/refs/apps/{id}` 試探取得）。此端點**不在 `/hosted-apps` 前綴下**，
   Deploy Token 打不到，要登入 session（帳號有 `hosted_apps.deploy` 即可，不必 `builder.access`）。
   2026-09-02 實測 17 張預設表 201 後容器內 403 隨即轉 200，**不需重新部署**。
-  資料中心自建表預設是整租戶可用，不用加引用
+  資料中心自建表**也要加引用**（同一支端點、同一個整合 id）：租戶切到擋下模式後，`/open/data-center`
+  對沒引用的表回 404「自建表不存在」、`GET /tables` 只列已引用的表；還沒切換的租戶暫時不擋，
+  但一律照「要登記」來做（`data-center.md` §7「app 讀寫自建表要先登記引用」）
 - 憑證三動詞（session-only，**互不替代**）：`POST /{id}/credential/provision`（補建，冪等）
   ／`rotate`（輪替，新舊重疊 30 分鐘）／`revoke`（立即失效）
 - ★ **Open Proxy 也在租戶「資料存取規則」（Auth gate v1）的執法範圍**（T66；端點與執法碼 v1.13.0
@@ -469,7 +471,7 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
   302、fetch 401 `hosted_app_auth_required`），Server Action 端看到的是 401／HTML，不是資料
 - **app 自驗簽章**：Custom 端把共享金鑰存 `ctx.secrets`，action 自組 `Authorization: Bearer …`
   （egress 閘道原樣轉送 `Authorization`，dev-guide §25）；Hosted 端每個請求驗證，驗不過 401
-- Hosted 的網域要先在 Builder「外部服務」以同名 slug 建成 egress 白名單（SKILL.md 計畫第 4.6 項）
+- Hosted 的網域要先由**用戶**在 Builder「外部服務」以同名 slug 建成 egress 白名單，AI 列出 slug 與網域交給用戶，不代設（SKILL.md 計畫第 4.6 項、dev-guide §25.2 人工設定政策）
 - **使用者身分由 Custom 端帶**：action 內用 `ctx.user_id`／`ctx.user_permissions` 分流後，把需要的
   身分欄位放進 request body；Hosted 不自行認人、不另建使用者表
 - 前端**不要**跨來源直打 Hosted：帶憑證的 CORS 平台不支援（proxy 只處理同站 cookie）
@@ -548,7 +550,7 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
 - **落點依雙軌分流**（與 Custom App 同一套規則，`dev-rules.md` 規則 18）：
   平台有同語意實體的資料（先用業務語言查 `default-table-lookup.md` §2）→ 在「資料存取」tab 加**預設表引用**
   （預設表零授權起步，要先加引用並發布，§5）；查過仍沒有的 → **自建表**
-  （資料中心自建表預設整租戶可用，§5）
+  （自建表同樣要替整合加引用，§5、`data-center.md` §7）
 - **映射先行**：逐表逐欄做完 Schema 映射（`custom-app-dev-guide.md` §22、
   映射表模板）並經用戶確認，**才可執行匯入**——Hosted 線不因「程式整套搬」而免掉這一步
 - **程式的資料層要改寫**：原專案的 ORM／SQL／DB driver 呼叫全部改成

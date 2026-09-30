@@ -61,8 +61,10 @@
       （`hr_employees`：20 vs 42）；依 Meta 面判會誤以為欄位不存在（issue #70、查表 §0）。
     - **建表前必須先 `GET /api/v1/data-center/tables` 盤點**（Phase 0 步驟 6）。
       語意相同的表已存在就重用，不要新建——自建表跨 app 共用，重複建表 = 資料分裂。
-    - 建表需 `system.admin`。收到 **403 不重試、不繞路**：輸出可照抄的建表規格，
+    - 建表需 `datacenter.schema_write`（`system.admin` 直通）。收到 **403 不重試、不繞路**：輸出可照抄的建表規格，
       引導用戶到資料中心 UI 自建，建完 `GET` 驗收再繼續。
+    - **建好或重用的自建表，app 要讀寫前先登記資料引用**（`POST /api/v1/refs/apps/{app_id}`）；
+      REST 與資料中心 UI 建表都不會自動登記（Builder AI 建表、套用模板才會），沒登記 `ctx.db` 回「自建表不存在」（`data-center.md` §7）。
       （`aigo_data_center.py` 會把 403 拋成 `PermissionDenied`；`needs == "system.admin"`
       才走建表降級，用 `format_create_spec()` 產出規格表。`needs == "builder.access"`
       是帳號沒有資料中心存取權，該請用戶開權限，不是叫他去建表）

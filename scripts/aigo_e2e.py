@@ -45,7 +45,7 @@ def _test_compile(base_url: str, token: str, slug: str) -> dict:
 def _test_custom_data(base_url: str, token: str, app_id: str) -> dict:
     """測試資料中心自建表：建表 → 兩段式刪除清理。
 
-    結構操作需 system.admin；非管理員帳號回 403，記為 SKIP 而非 FAIL
+    建表需 datacenter.schema_write、刪表需 system.admin；權限不足回 403，記為 SKIP 而非 FAIL
     ——那是平台刻意的授權界線，不是這個 app 的問題。
     """
     import time as _t

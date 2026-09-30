@@ -332,7 +332,7 @@ def t5_1():
             {"display_name": "備註", "field_type": "text"},
         ])
     except PermissionDenied:
-        skip_reason = "帳號非 system.admin，結構操作測試略過（403 為預期）"
+        skip_reason = "帳號缺 datacenter.schema_write（也非 system.admin），結構操作測試略過（403 為預期）"
         return [(True, skip_reason)]
     except QuotaOrConflict as e:
         skip_reason = f"撞配額或衝突，結構操作測試略過：{e}"

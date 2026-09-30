@@ -333,6 +333,8 @@ action 路徑約定不變：`actions/**.py` 是可呼叫 action（`action_name` 
 自建表是**租戶級**的真實 Postgres 表，端點前綴 `/api/v1/data-center/`。
 建表／改結構需 `datacenter.schema_write`（2026-08 起，`system.admin` 直通）；
 **刪表／刪欄仍限 `system.admin`**；記錄 CRUD 需 `builder.access`。
+app（含 Server Action 的 `ctx.db`）要讀寫某張自建表，**先替 app 登記資料引用**（`POST /api/v1/refs/apps/{app_id}`），
+否則回「自建表不存在」（`data-center.md` §7）。
 
 **完整規格見 `data-center.md`**——型別、配額、兩段式刪除、SDK 用法都在那裡。
 
@@ -677,7 +679,10 @@ const myRecords = allRecords.filter(
    **不要看 `db.json`**，見 `platform-behaviors.md` §6）。
    可用 API `POST /api/v1/refs/apps/{app_id}`（`builder.access`，
    body `{table_name, columns[], permissions[]}`），或引導用戶到 Builder 後台操作
-   走自建表 → 產出建表規格交用戶確認，再 `POST /api/v1/data-center/tables`
+   走自建表 → 產出建表規格交用戶確認，再 `POST /api/v1/data-center/tables`；
+   **建好（或決定重用既有自建表）後，同樣要替 app 登記引用**——用同一支 `POST /api/v1/refs/apps/{app_id}`
+   （Builder「待允許的資料表」只在被擋下之後才有那一列，是事後補救，不能事前登記）。
+   REST 與資料中心 UI 建表都不會自動登記（Builder AI 建表、套用模板才會）；沒登記，`ctx.db` 會回「自建表不存在」（`data-center.md` §7）
 
 ### 選擇矩陣（速查——結論與決策樹一致）
 
@@ -731,8 +736,8 @@ const myRecords = allRecords.filter(
 | 歸屬 | 引用平台既有表 | 租戶自有的新表 |
 | 跨 app | 共用，靠 `app_domain` 區分來源 | 共用，**不需要也不該用** `app_domain` |
 | 外鍵 | 無原生 FK | relation → 自建表**有真 FK** |
-| 建立方式 | Builder 後台加入引用 | `POST /data-center/tables`（需 `system.admin`） |
-| 怎麼盤點 | `GET /refs/apps/{app_id}`（**不是** `db.json`，那個恆為 `{}`） | `GET /data-center/tables`（租戶級，不在 VFS） |
+| 建立方式 | Builder 後台加入引用 | `POST /data-center/tables`（需 `datacenter.schema_write`）＋**登記引用**（Builder AI 建表、套用模板才自動登記） |
+| 怎麼盤點 | `GET /refs/apps/{app_id}`（**不是** `db.json`，那個恆為 `{}`） | 租戶有哪些：`GET /data-center/tables`（租戶級，不在 VFS）；這支 app 引用了哪些：`GET /refs/apps/{app_id}` |
 
 ### 預設表常見結構
 
@@ -926,6 +931,10 @@ Phase 1.5 實作計畫時：
 > **重要**：`available-tables` 僅列出可用表名，實際將表加入 App 的 Data Reference 需在 AI GO Builder 後台操作。
 > 加入後，該表的 schema 由 Runtime 在執行期注入；**VFS 裡的 `src/db.json` 實測恆為 `{}`，
 > 不能用來確認引用狀態**——一律查 `GET /api/v1/refs/apps/{app_id}`（見 `platform-behaviors.md` §6）。
+
+> **自建表也走同一組引用**：`/refs/apps/{app_id}` 不只給預設表。app 要讀寫的自建表同樣得登記
+> （事前用 `POST /api/v1/refs/apps/{app_id}`，`builder.access`；被擋下後才可在 Builder「資料與 API 權限」分頁的「待允許的資料表」補），
+> 登記後即時生效、不必重新發布。完整說明與建表路徑對照 → `data-center.md` §7「app 讀寫自建表要先登記引用」。
 
 ## 21. 架構設計理念
 
@@ -1735,7 +1744,7 @@ agent 不自行開、也不把「要不要常駐」丟給 owner 選。決策的�
 | 刪 | `DELETE …/records/{id}` | `DELETE /ext/…/records/{id}` | — | `DELETE /open/…/records/{id}` |
 | 預設表 proxy | `GET …/{table}`、`POST …/{table}/query`、`POST …/{table}`、`PATCH`／`DELETE …/{table}/{row_id}`（★ **單列 GET 不存在**，見下） | `/ext/proxy/{table}`（無 `app_id`） | `GET /pub/proxy/{slug}/{table}`、`POST …/query` | `/open/proxy/{table}` |
 | 跑 action | `POST /actions/apps/{app_id}/run/{name}` | `POST /ext/actions/run/{name}`（只讀已發布） | — | —（Hosted 沒有 action） |
-| 結構操作（建表／欄位） | `/data-center/tables…`（`system.admin`） | **無** | **無** | **無** |
+| 結構操作（建表／欄位） | `/data-center/tables…`（建改 `datacenter.schema_write`；刪除 `system.admin`） | **無** | **無** | **無** |
 | **身分與 ACL 的來源** | `__USER_ROLES__`／`__USER_PERMISSIONS__` 快照＋action 的 `ctx.user_permissions`／`ctx.user_id`（★ **不是** `/members`，見 `member-admin.md` §3.6） | app 脈絡的使用者，**沒有**平台角色（快照恆為空陣列） | 無身分 | **app 身分、沒有 user**——容器內打 `/api/v1/members*`、`/auth/me` 一律 401（`hosted-apps.md` §6） |
 
 ★ **預設表 proxy 面的兩條寫入契約**（2026-09-16 測試租戶實打，自己寫 client 或用本地腳本時會踩）：

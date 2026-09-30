@@ -29,13 +29,15 @@ AI GO **預先定義**的中小企業通用資料表（專案、客戶、銷售�
 ### 自建表（custom table）
 
 綁 **tenant** 的**真實 Postgres 表**。同一租戶下所有 custom app、以及租戶自己的資料中心 UI
-看到的是同一批表、同一份資料——**跨 app 天然共用**。
+共用同一批表、同一份資料——**跨 app 天然共用**；但每支 app 要碰哪幾張得先登記資料引用
+（`references/data-center.md` §7）。
 
 - 每張表與每個欄位有兩個名字：**顯示名**（可改，中文常見）與**實體名**（建立後永不可變，純 ASCII）。
   所有 API 一律用實體名指涉。**實體名由系統從顯示名生成，純中文顯示名會生出 `tbl_2`、`col_7`**
   ——命名規範（表 `biz_` 前綴、欄位英文 snake_case、兩步命名法）見 `dev-rules.md` 規則 18.5。
 - 系統欄位 `id` / `created_at` / `updated_at` 自動帶，不可刪、不計配額。
-- **改結構需 `system.admin`**；讀結構與記錄 CRUD 只需 `builder.access`。
+- **建改結構需 `datacenter.schema_write`**（`system.admin` 直通），刪表／刪欄限 `system.admin`；
+  讀結構 `builder.access` 或 `datacenter.schema_write`，記錄 CRUD `builder.access`。
 
 因為是租戶級共用，「建表前先盤點有沒有可重用的既有表」是紀律而非建議——
 同一張「客戶」表不該因為兩個 app 各建一次而分裂成兩份資料。
