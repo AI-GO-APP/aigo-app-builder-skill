@@ -1,3 +1,33 @@
+## 1.55.0
+
+### 對齊 prod v1.15.4：openapi 停供、Hosted 拿得到身分、records 運算子補齊
+
+平台 prod 由最新 `v*` tag 部署（2026-09-30 為 v1.15.4），main 只進 UAT。對照 v1.15.4 原始碼，skill 有幾處已與 prod 不符。
+
+**openapi.json 停供**（prod 與 UAT 都不再提供 `/api/v1/openapi.json`、`/docs`、`/redoc`）
+- `scripts/aigo_data.py`：`call --all` 改由回應本身判斷分頁（先看回應帶回的 `skip/limit`、`page/page_size`、`offset`；
+  只有 `{items,total}` 時用 page；裸 list 用 skip/limit），遇到重複頁就停；新增 `--paging auto|page|skip|offset|none` 覆寫。
+  `openapi` 子指令保留但改印停用說明（exit 2）。新增 `tests/test_data_pagination.py`。
+- `perm-check` 對照更正：`/members*` → `hr.member_manage`；`GET /members/roles` 只需登入；`/erp/analytic/*` → `accounting.*`；
+  `/erp/partner-banks*` → `system.partner_banks`。
+- 文件（SKILL.md、README、data-operations、troubleshooting、issue-reporting、pre-report-self-grill、dev-guide、platform-behaviors）
+  拿掉「以 openapi 為路由權威」「查 prod openapi 判部署落差」：路由事實以 references 為準；要確認路由存在就直接打
+  （404 `Not Found`＝沒有這個 method＋path；405 最可靠；422、業務 404 可能來自相鄰 `/{id}` 路由，不當證據）；部署落差＝prod 跑 tag、main 先上 UAT。舊的「以 prod openapi 核對」改標為歷史。
+
+**Internal Hosted App 拿得到登入者身分**
+- auth-proxy 注入 `X-Aigo-User-Id`／`-Tenant-Id`／`-App-Id`／`-Population`（client 自帶的會被剝掉；只在登入後的 internal 請求出現）；
+  角色與權限用 `GET /api/v1/open/members/{user_id}/context`（`AIGO_API_TOKEN`）查，受眾外回 404。
+- `hosted-apps.md` §6、`member-admin.md` §6、dev-guide §29、`troubleshooting.md`、`product-line-decision.md` 改寫，
+  拿掉只因「拿不到身分」而存在的繞路建議；§29 補 `/open/members` 前綴。
+
+**其他 prod 已上線的差異**
+- records 篩選運算子：text＝`eq`／`ne`／`in`／`not_in`／`is_null`／`contains`；number／date／datetime 另有 `gt`／`gte`／`lt`／`lte`；
+  json 只有 `is_null`（`data-center.md`、`troubleshooting.md`、dev-guide、`platform-behaviors.md`、`aigo_data_center.py` docstring）。
+- 租戶排程上限 50 → 100（過渡值，`event-triggers.md`）。
+- `scripts/aigo_runtime_verify.py`：`duration_ms` 為 null 不再 crash；回傳檔案的 action 不再誤判為沒有結果。
+- `hosted-apps.md` 檔頭的 prod 版本標記改為「prod＝最新 `v*` tag，main 只進 UAT」；`POLICY_GATE_MODE` 現況改為「v1.15.3、v1.15.4 都沒帶，等平台 1.16.0」。
+- `planning.md` 規劃陷阱、`SKILL.md` 參考文件索引同步 Hosted 身分說法。
+
 ## 1.54.0
 
 - 對接 AI-GO #1673：同步前查詢 app limits，以目標服務的值預檢合併後 VFS；移除腳本內的 VFS 鏡像常數。

@@ -99,8 +99,8 @@ queryAdvanced(table, {
 | 端點 | `GET /data-center/tables/{key}/records`（`ctx.db.query_table`／`queryTable`；Hosted 容器內加 `/open`） | `POST /proxy/{app}/{table}/query`（`queryAdvanced`；Hosted 容器內 `/open/proxy/{table}/query`） |
 | 過濾位置 | query string `filters=[…]` | body `filters: […]` |
 | 項目鍵名 | `field` / `op` / `value` | **`column`** / `op` / `value` |
-| 合法運算子 | `eq` `contains` `gte` `lte`（依欄位型別再限縮：text 只有 eq/contains） | `eq` `ne` `gt` `gte` `lt` `lte` `like` `ilike` **`in`** **`not_in`**（2026-09 起，value 必須是陣列） `is_null` `is_not_null` |
-| **`in`**／`not_in` | ❌ | ✅ |
+| 合法運算子 | `eq` `ne` `in` `not_in` `is_null`（json 除外）＋ text 的 `contains`／number・date・datetime 的 `gt` `gte` `lt` `lte`；json 只有 `is_null`（prod v1.15.4，全表見 `data-center.md` §7） | `eq` `ne` `gt` `gte` `lt` `lte` `like` `ilike` **`in`** **`not_in`**（2026-09 起，value 必須是陣列） `is_null` `is_not_null` |
+| **`in`**／`not_in` | ✅（value 陣列；json 除外） | ✅ |
 | OR | ❌ | ❌ |
 | 不合法運算子 | **422 列出合法集合** | 400「不支援的運算子」 |
 | 錯鍵名 | 422「需要 field/op/value 三個鍵」 | 400「不合法的欄位名稱: 」（欄位名是空字串） |
@@ -605,7 +605,7 @@ export function currentIdentity(): { userId: string; email: string; tenantId: st
 建表規格階段就要避開（→ `data-center.md` §1）。
 
 > ⚠️ 2026-09-01 實測 `GET /api/v1/apps/{app_id}/api-grants` 在 prod 回 404——**v1.13.0（2026-09-07）
-> 起 prod openapi 已有此端點**，本節的「準備動作」現在做得了。保留表名 409 當時實測尚未生效
+> 起 prod 已有此端點**（當時以 prod openapi 核對），本節的「準備動作」現在做得了。保留表名 409 當時實測尚未生效
 > （仍可建成，見 `data-center.md` §1），v1.13.0 後**未重測**，一律自律避開。
 
 **enforce 前的準備（寫 code 時就做，不要等）**：

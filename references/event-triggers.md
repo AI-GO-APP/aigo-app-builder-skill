@@ -228,7 +228,7 @@ manifest 全部 action `timeout_ms` 的最大值，夾在 30000～**120000**；�
 | 操作 | App 開發面端點（`/api/v1/builder/apps/{app_id}` 前綴） | 租戶營運面對應 |
 |---|---|---|
 | 列表／建立 | `GET` / `POST .../crons` | `GET` / `POST /api/v1/app-crons` |
-| 配額用量（★ 規劃時先查） | `GET .../crons/quota` → `{is_paid, app_used, app_limit, tenant_used, tenant_limit, min_interval_minutes}`（實打：付費 `app_limit: null`、`tenant_limit: 50`、`min_interval_minutes: 5`） | — |
+| 配額用量（★ 規劃時先查） | `GET .../crons/quota` → `{is_paid, app_used, app_limit, tenant_used, tenant_limit, min_interval_minutes}`（付費 `app_limit: null`、`min_interval_minutes: 5`；`tenant_limit` 早期實打 50，prod v1.15.4 為 **100**（`PAID_TIER_MAX_CRONS_PER_TENANT`，平台標為過渡值，會再調）——**以 quota 回傳為準**） | — |
 | 讀／改／刪 | `GET` / `PATCH` / `DELETE .../crons/{cron_id}` | 同形 `/api/v1/app-crons/{cron_id}` |
 | 啟停 | **`PATCH`** `.../crons/{cron_id}/toggle` | 同形 |
 | 立即執行一次 | `POST .../crons/{cron_id}/run-now` | 同形 |
@@ -278,7 +278,7 @@ app 不可見（不在 `access_role_ids` 內）時整組端點回 404「app 不�
 |---|---|---|
 | **最小間隔** | **60 分鐘** | **5 分鐘** |
 | 每 app 條數 | 2 | 不限 |
-| 每租戶條數 | 10 | 50 |
+| 每租戶條數 | 10 | 100（prod v1.15.4；過渡值，以 `crons/quota` 為準） |
 
 - **超限直接回 400，不會靜默截斷。** 規劃「每 10 分鐘對帳」前先確認租戶是付費檔，
   否則要改成每小時或請用戶升級。

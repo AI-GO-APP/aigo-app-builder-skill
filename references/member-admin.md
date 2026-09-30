@@ -18,7 +18,7 @@
 - 3. app 角色白名單 `access_role_ids`（兩條產品線）
 - 4. 邀請：批次建連結的固定流程
 - 5. 角色 CRUD 流程
-- 6. Hosted internal app 收到的身分：沒有
+- 6. Hosted internal app 收到的身分：四個注入 header ＋ context 查詢
 - 7. 既有系統的使用者搬遷
 - 8. 回應怎麼讀（2026-09-08 測試租戶擁有者帳號實打；★ 標記＝實測字串）
 - 9. 這條線不做的事
@@ -67,9 +67,9 @@
   對經銷商這類帳號**解不出→整列 deny→403 `policy_denied`**（enforce 後）。
   對外部人員的角色，規則只能用 `$user.id`／`$user.role_ids`，或另設 app 級規則放行；
   計畫裡要提醒租戶管理員這一點。
-- **Hosted internal app 內做不到依角色分功能**：proxy **不給容器任何身分**（§6，2026-09-09 實打），
-  連使用者 id 都沒有。角色分流只能在門口（`access_role_ids`）做；
-  要在畫面內依角色開關功能 → 該部分做成 Custom internal app（`__USER_PERMISSIONS__` 快照）。
+- **Hosted internal app 內依角色分功能**：容器從 `X-Aigo-User-Id` 認人，再用 app API key 打
+  `GET /api/v1/open/members/{user_id}/context` 取 `role_ids`／`permissions`（§6，prod v1.15.4 已有），
+  判斷放在 app 伺服端；門口仍用 `access_role_ids` 粗分。
 - **判斷授權用 permission 標籤，不用角色名**（角色可被改名，`dev-rules.md` 規則 23）。
 - **經銷商角色的 permissions 從空集合起步**：Custom internal app 的資料存取走 Server Action
   （app 憑證，`dev-rules.md` 規則 31），成員本身不需要模組權限就能用 app；只有 app 前端要直呼
@@ -224,26 +224,25 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
 - 權限字串以 `aigo_data.py me` 印出的清單為準，不手抄；拿不到的字串（不在呼叫者權限內）
   建角色會 403（§8）。
 
-## 6. Hosted internal app 收到的身分：沒有
+## 6. Hosted internal app 收到的身分：四個注入 header ＋ context 查詢
 
-**門口擋得住，門內認不出人。** auth-proxy 驗過登入後把請求轉給容器，但**不傳遞任何身分**——
-2026-09-09 測試租戶實打（`internal` ＋ `access_role_ids=[]`，容器把收到的 header 原樣印出）：
+**門口擋人，門內用 header 認人、用 context 查角色**（核自 prod tag v1.15.4；細節與可信前提見 `hosted-apps.md` §6）：
 
-- 容器只看到 `Host`／`Accept`／`Forwarded`／`X-Forwarded-*`／`X-Request-Id` 這類轉送 header，
-  **一個 `X-Aigo-*` 都沒有**；平台 cookie 也在進容器前被剝掉，所以 `Cookie` 同樣沒有
-- ⇒ app **連「這是哪一位使用者」都不知道**，更沒有 email／roles／permissions。
-  「app 內要『誰』可以、要『能做什麼』做不到」這個舊說法要整條退回：**兩個都做不到**
-- 容器內的 `AIGO_API_TOKEN` 是 **app 身分不是使用者身分**：打 `/api/v1/auth/me`、`/api/v1/members*`
-  一律 401；`/open/proxy` 打 `users`／`roles`／`user_role_rel`／`members` 一律 403（平台身分表，
-  引用面列不出來）。拿使用者 id 去查角色這條路**不存在**（也拿不到 id）
-- **已回報平台（2026-09-09）**，不必重複開單
+- auth-proxy 先剝掉 client 自帶的 `X-Aigo-*`／`X-User-*`／`X-Tenant-*`，再從驗過的 session 注入
+  `X-Aigo-User-Id`／`X-Aigo-Tenant-Id`／`X-Aigo-App-Id`／`X-Aigo-Population`（固定 `internal`）。
+  容器看到的值只可能來自平台，**可以當身分用**；平台 cookie 仍被剝，別拿 cookie 認人
+- email／角色／權限：`GET /api/v1/open/members/{user_id}/context`，`Authorization: Bearer $AIGO_API_TOKEN`
+  → `{user_id, email, role_ids, role_names, permissions}`，即時計算。不在這支 app 受眾內的人
+  （非 active、別租戶、不在 `access_role_ids` 放行角色內）一律 **404「成員不存在」**
+- `AIGO_API_TOKEN` 仍是 **app 身分**：`/api/v1/auth/me`、`/api/v1/members*` 一律 401；`/open/proxy` 打
+  `users`／`roles`／`user_role_rel`／`members` 一律 403（2026-09-09 實打）。查人只走上面那支 context
+- 2026-09-09 實打時 proxy 尚未開注入（容器一個 `X-Aigo-*` 都沒有），平台 2026-09-11 起開、隨 tag 上 prod；
+  仍收不到 → 先確認 app 是 `internal`、請求經平台 proxy
 
-⚠️ 1.35.0 以前本節列的四個注入 header（`X-Aigo-User-Id`／`-Tenant-Id`／`-App-Id`／`-Population`）
-是**錯的**——那屬於平台另一條尚未接線的資料面設計。
+**要在畫面內依角色開關功能**：伺服端依 context 的 `permissions`（不用角色名，`dev-rules.md` 規則 23）判斷，
+前端隱藏只是 UX。拆成多支 internal Hosted App 各掛不同 `access_role_ids`（§3）仍可行，但只在各角色本來
+就是不同產品時才值得。
 
-**要在畫面內依角色開關功能**：① 該部分做成 Custom internal app（runtime 有 `__USER_ROLES__`／
-`__USER_PERMISSIONS__` 快照）；② Custom App 當前端 ＋ Hosted 設 `public` 當後端、由 app 自驗簽章
-（`hosted-apps.md` §5.1）；③ 按角色拆成多支 internal Hosted App，各掛不同 `access_role_ids`（§3）。
 401 處置與 cookie 剝除見 `hosted-apps.md` §6。
 
 ## 7. 既有系統的使用者搬遷
@@ -268,8 +267,9 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
    「無法存取此應用：您的角色不在此應用的允許名單內」——app 根本還沒被叫到。
 2. **app 自己那道**：app 要先**拿到**使用者身分才能查自己的名單，身分怎麼來依產品線而定：
    - **Custom App internal**：`ctx.user_id`／`__USER_ROLES__`（§3.6）。
-   - **Hosted App**：平台**不注入任何身分**（§6）——必須走 Custom App 入口換票、由 Hosted 自驗簽章把信箱帶過去
-     （`hosted-apps.md` §5.1）。沒有換票就沒有第二道門，Hosted 端只有 app 身分。
+   - **Hosted App internal**：proxy 注入 `X-Aigo-User-Id`，email／角色用 `/open/members/{user_id}/context`
+     查（§6）。Hosted **public** 當 Custom 後端時沒有注入身分，照舊由 Custom 端換票、Hosted 自驗簽章把信箱帶過去
+     （`hosted-apps.md` §5.1）。
    - **external**：Custom App Auth 的使用者（`custom-app-dev-guide.md` §29）。
 
 第二道門查的是 app **自己的業務名單**（部門、主管、頭銜、啟用中）；**可見度與授權仍由平台決定**——

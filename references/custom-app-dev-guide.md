@@ -31,7 +31,7 @@
 - 25. 對外 API 呼叫與 Egress 閘道
 - 26. 建立與刪除 App（API，不必走 UI）
 - 27. 租戶資料存取規則（Auth gate）：平台側人軸執法（2026-09 起）
-- 28. 執行模式：冷啟動／常駐（`always_on`，租戶自選；v1.13.0 起，prod openapi 已實查）
+- 28. 執行模式：冷啟動／常駐（`always_on`，租戶自選；v1.13.0 起上 prod）
 - 29. 存取通道端點總表：internal／external／匿名／Hosted（★ 四條通道，四種憑證）
 
 ---
@@ -1289,7 +1289,7 @@ def execute(ctx):
 | 情境 | 做法 |
 |---|---|
 | 自建表 → 預設表（`bookings.user_id` → `customers`） | 撈完自建表列，對預設表 proxy 用 **`in`** 一次取回 |
-| 預設表 → 自建表 | records 面沒有 `in`：改自建表側 `eq` 逐筆，或**寫入時反正規化**到自建表 |
+| 預設表 → 自建表 | records 面用 **`in`** 一次取回（prod v1.15.4 已有；json 欄除外，`data-center.md` §7）；量大仍考慮**寫入時反正規化**到自建表 |
 | 自建表 ↔ 自建表 | **從過濾條件最強的一側出發**（kind／日期區間／`contains`），再逐筆點查另一側；量級限「單一使用者／單一目標」時可接受 |
 | 小表 | 整表撈回程序內 join；**一個請求範圍內**用 Loader（`Map<table, Promise<rows[]>>`）避免同表重撈。**不做跨請求快取**——Hosted App 可能兩個副本，無法互相失效，後台寫完立刻讀回會看到舊資料 |
 | 聚合（`count(*)`／`GROUP BY`） | 讀分頁信封的 `total`，每個分組一次請求；量大改物化。三支 `GROUP BY` 改寫後是每位成員 3 次 `total`（3N 請求）：數十可接受，破百就該在寫入端反正規化組織 id——**反正規化在這個平台不是最佳化，是必需** |
@@ -1588,7 +1588,7 @@ DELETE /api/v1/builder/apps/{app_id}   （builder.access；實測回 200，之�
 > app 不用也不該各自實作一套。
 
 **現況（2026-09-07）**：規則 API、explain、拒絕紀錄、Builder 分頁等**程式面已隨 v1.13.0 上 prod**
-（openapi 實查），但執法開關 `POLICY_GATE_MODE` **UAT＝on、prod＝off**（核自 k8s manifest）。
+（2026-09-07 當時以 prod openapi 核對），但執法開關 `POLICY_GATE_MODE` **UAT＝on、prod＝off**（核自 k8s manifest）。
 prod 切 on 前規則只會被記錄（audit）不會生效；切 on 後本節全部成立。**新開發的 app 現在就按本節寫**，切 on 時才不用回頭救。
 
 ### 27.1 規則長什麼樣、掛在哪
@@ -1654,7 +1654,7 @@ user_attrs=…)` 拿 `(allow, row_filter, columns)`，**row_filter 要自己接�
 模組會退回空清單＝「沒有任何角色」，只有 `entity_id="*"` 的規則列會命中——方向是更嚴不是誤放行，
 但表示 v0 模板現階段**做不到依角色放行**。要人軸控管請等 v1 切 on，不要再擴 v0。
 
-## 28. 執行模式：冷啟動／常駐（`always_on`，租戶自選；v1.13.0 起，prod openapi 已實查）
+## 28. 執行模式：冷啟動／常駐（`always_on`，租戶自選；v1.13.0 起上 prod）
 
 已發布 app 的 runner 預設 **scale-to-zero**：閒置後縮到 0，下一次呼叫 action 要等 pod 拉起
 （第一發明顯慢、甚至逾時）。租戶可把單支 app 切成**常駐**（隨時保留一個實例）：
@@ -1677,7 +1677,7 @@ PATCH /api/v1/builder/apps/{app_id}/runtime-settings   （builder.publish）
 - 草稿（draft runner）**固定冷啟動**，本設定只作用於已發布 runner
 - **縮到零時 pod 的 `/tmp`（emptyDir）與程序記憶體一起消失**——action 寫在本機的 `.json`／sqlite
   不是資料層，常駐也擋不住 publish 換 revision；業務資料與 app 狀態一律落表（§19「禁止項」）
-- **怎麼讀回現況**（2026-09-11 測試租戶實查 prod openapi＋實打）：Builder 線**只有 `PATCH`，沒有
+- **怎麼讀回現況**（2026-09-11 測試租戶實查，當時以 prod openapi 核對＋實打）：Builder 線**只有 `PATCH`，沒有
   `GET /runtime-settings`**（該路徑只存在於 Hosted 線）；`GET /builder/apps/{id}` 明細（`CustomAppResponse`）
   **也不含** `always_on`。唯一的讀回點是**列表** `GET /api/v1/builder/apps`——`CustomAppListItem`
   每筆帶 `always_on` 與 `has_messaging_trigger`。
@@ -1724,16 +1724,15 @@ agent 不自行開、也不把「要不要常駐」丟給 owner 選。決策的�
 
 ## 29. 存取通道端點總表：internal／external／匿名／Hosted（★ 四條通道，四種憑證）
 
-> 核自 `backend/app/main.py` 的 router 掛載與各 router 的 `Depends`（2026-09-09），並以 prod
-> `/api/v1/openapi.json` 逐條對照（`aigo_data.py openapi paths --prefix /api/v1/ext|/pub|/open`
-> 三組路徑與原始碼一致）。**同一種資料在四條通道各有一組前綴，憑證不能互換。**
+> 核自 `backend/app/main.py` 的 router 掛載與各 router 的 `Depends`（2026-09-09；當時另以 prod
+> openapi 逐條對照 `/ext`、`/pub`、`/open` 三組路徑與原始碼一致——平台後來已停供 openapi，本表即權威）。**同一種資料在四條通道各有一組前綴，憑證不能互換。**
 
 | 通道 | 誰在用 | 憑證 | 前綴 | 權限閘 |
 |---|---|---|---|---|
 | **internal** | internal Custom App 前端（登入者） | `__APP_TOKEN__`＝app-scoped JWT（代表登入者；`POST /app-scoped-token/{app_id}`／`app-runtime-session` 發） | `/api/v1/data-center`、`/proxy/{app_id}`、`/actions/apps/{app_id}`、`/storage`、`/approvals`（★ `/refs` 與平台管理面**不在** route catalog 內，今天打得到是 audit 放行，見下） | 登入者的權限（自建表記錄 CRUD 掛 `builder.access`，§7.5；預設表看 Data Reference 授權） |
 | **external** | external／self_built Custom App 前端（app 使用者） | `__APP_TOKEN__`＝`custom-app-auth` 發的使用者 token（claim 帶 `custom_app_id`） | `/api/v1/ext/{data-center,proxy,actions,storage,data,compile,preview-token,runtime-errors}`＋`/custom-app-auth/{slug}/*` | app 脈絡，不驗使用者權限；別種憑證一律 401「無效或已過期的 Token」（實打） |
 | **匿名** | 未登入訪客（只有 external／self_built 可開） | 無 | `/api/v1/pub/{data-center,proxy,data}/{slug}/…`（**唯讀**：只有 GET／`query`） | 表要 `is_public_readable`＋app 開旗標＋**平台核可**（§15.1）；120 次/分/IP |
-| **Hosted／self_built 後端** | Hosted App 容器、第三方自建應用 | `Authorization: Bearer <API key>`（容器內 `AIGO_API_TOKEN`；`X-API-Key` 相容） | `/api/v1/open/{data-center,proxy,data}` | app 身分（沒有 user）；預設表零授權起步，600 次/分/key（`hosted-apps.md` §5） |
+| **Hosted／self_built 後端** | Hosted App 容器、第三方自建應用 | `Authorization: Bearer <API key>`（容器內 `AIGO_API_TOKEN`；`X-API-Key` 相容） | `/api/v1/open/{data-center,proxy,data,members}`（`/open/members` 只有 `GET /{user_id}/context`，prod v1.15.4 起） | app 身分（API key 本身沒有 user；internal Hosted 的登入者由 proxy 注入 header 帶進來）；預設表零授權起步，600 次/分/key（`hosted-apps.md` §5） |
 
 同一張表的四條路徑（自建表記錄為例；預設表把 `data-center/tables/{key}/records` 換成 `proxy/{table}` 即可）：
 
@@ -1747,7 +1746,7 @@ agent 不自行開、也不把「要不要常駐」丟給 owner 選。決策的�
 | 預設表 proxy | `GET …/{table}`、`POST …/{table}/query`、`POST …/{table}`、`PATCH`／`DELETE …/{table}/{row_id}`（★ **單列 GET 不存在**，見下） | `/ext/proxy/{table}`（無 `app_id`） | `GET /pub/proxy/{slug}/{table}`、`POST …/query` | `/open/proxy/{table}` |
 | 跑 action | `POST /actions/apps/{app_id}/run/{name}` | `POST /ext/actions/run/{name}`（只讀已發布） | — | —（Hosted 沒有 action） |
 | 結構操作（建表／欄位） | `/data-center/tables…`（建改 `datacenter.schema_write`；刪除 `system.admin`） | **無** | **無** | **無** |
-| **身分與 ACL 的來源** | `__USER_ROLES__`／`__USER_PERMISSIONS__` 快照＋action 的 `ctx.user_permissions`／`ctx.user_id`（★ **不是** `/members`，見 `member-admin.md` §3.6） | app 脈絡的使用者，**沒有**平台角色（快照恆為空陣列） | 無身分 | **app 身分、沒有 user**——容器內打 `/api/v1/members*`、`/auth/me` 一律 401（`hosted-apps.md` §6） |
+| **身分與 ACL 的來源** | `__USER_ROLES__`／`__USER_PERMISSIONS__` 快照＋action 的 `ctx.user_permissions`／`ctx.user_id`（★ **不是** `/members`，見 `member-admin.md` §3.6） | app 脈絡的使用者，**沒有**平台角色（快照恆為空陣列） | 無身分 | internal Hosted：proxy 注入 `X-Aigo-User-Id`／`-Tenant-Id`／`-App-Id`／`-Population`（client 自帶的會被剝），角色／權限用 API key 打 `GET /open/members/{user_id}/context`；`/api/v1/members*`、`/auth/me` 仍一律 401。public Hosted／第三方後端沒有 user（`hosted-apps.md` §6） |
 
 ★ **預設表 proxy 面的兩條寫入契約**（2026-09-16 測試租戶實打，自己寫 client 或用本地腳本時會踩）：
 

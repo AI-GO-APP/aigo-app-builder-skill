@@ -5,12 +5,12 @@
 > **Phase 4.2 驗證閘門的等價物是 §3.4——部署後必過，未通過不得對外交付。**
 > 內容核對自平台原始碼與文件（2026-09-01），部分端點已實測（見下）。
 
-### ⚠️ 部署落差（prod 現況：**v1.13.0，2026-09-07 10:35Z 部署成功**）
+### ⚠️ 部署落差（prod＝最新 `v*` tag；main 只進 UAT）
 
-本檔以平台 monorepo `main` 為準。**2026-09-07 起 prod 與 main 只差一個觀測性修補**
-（v1.13.0 tag 落在 main 倒數第二個 commit；prod openapi 實查已含本檔所有端點）。
-下列 2026-09-01／09-02 的實測紀錄是**歷史**——當時缺的東西已隨 v1.13.0 補齊，留著是給
-「下一次 prod 又落後 main」時當判讀範本：
+- **prod 跑平台最新的 `v*` tag**（2026-09-30 核：v1.15.4），**平台 `main` 只部署到 UAT**——main 剛合併的功能
+  在下一個 tag 前**只有 UAT 有**；tag 不一定從 main 切，「prod 有沒有」看 tag 內容，不看合併日期
+- 歷史（2026-09-07 prod＝v1.13.0，prod openapi 實查已含本檔當時所有端點）：下列 09-01／09-02 缺的東西
+  已隨 v1.13.0 補齊，留作「下一次 prod 又落後 main」的判讀範本：
 
 - ✅ 可用：`GET /hosted-apps`（含 visibility 欄）、`GET .../deployments`、
   `GET|PUT .../runtime-settings`、`GET /deploy-tokens`
@@ -33,7 +33,7 @@
   §4）——`PUT` 的全量語意從四欄變**五欄**；租戶 app 數配額（舊 429「預設 5 支」）已整條移除（§10）
 - **靠旗標不靠版本的兩條**：租戶專屬節點 `TENANT_DEDICATED_NODES` 在 **UAT 與 prod 都是 `ops-only`**
   （租戶自助開機未開放，要平台替租戶開）⇒ §4.1 的 `resources` 在多數租戶會 403；
-  租戶資料存取規則 `POLICY_GATE_MODE` **prod＝off，但 main 上已改 on、等下一個 tag**（§5 末條）
+  租戶資料存取規則 `POLICY_GATE_MODE` **prod＝off（v1.15.4 manifest 仍 off），main 上已改 on、等之後的 tag**（§5 末條）
 - **判讀原則**：對著本檔宣稱的端點拿到 404 或回應缺欄位，**先懷疑部署落差**，
   不是文件錯也不是你打錯——隔幾天再試或問平台
 
@@ -460,7 +460,7 @@ action 以 `ctx.secrets` 讀取（Builder 沒有 runtime-settings 這支 GET，�
   遷入案的資料層改寫前把這條告訴租戶：對 app 身分要另設不帶 `$user.*` 的規則、或用 app 級規則放行；
   app 端改 code 無解 → `custom-app-dev-guide.md` §27
 - ⚠️ **`POLICY_GATE_MODE` 現況（2026-09-21）**：UAT 已 on；**prod manifest 於 2026-09-17 改 on（commit `00d4c86c`）
-  但尚未隨 `v*` tag 發版**——下一個 tag 上線即生效。走 Open Proxy 的 Hosted App 要在那之前把上一條處理掉。
+  但 v1.15.3、v1.15.4 都沒帶上（2026-09-30 核）**——要等主線下一次發版（預計平台 1.16.0）才生效。走 Open Proxy 的 Hosted App 要在那之前把上一條處理掉。
 
 ### 5.1 Hosted App 當 Custom App 的後端（混合方案的一種）
 
@@ -489,27 +489,45 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
   **400「角色不存在或不屬於此租戶：<id>」**
 - **有登入者就是 `internal`**——員工、外部經銷商、客戶都是租戶成員，用 `access_role_ids` 分流；
   `public` 只給沒有登入者的公開站，或當 Custom App 後端時（§5.1）
-- **容器收到的身分：一個都沒有**（2026-09-09 測試租戶實打）。部署一支只把收到的 header 原樣印出來的
-  app（`internal` ＋ `access_role_ids=[]`），以成員身分走完交遞後開啟：容器只看到 `Host`／`Accept`／
-  `Forwarded`／`K-Proxy-Request`／`X-Envoy-Original-Host`／`X-Forwarded-*`／`X-Request-Id` 這類轉送
-  header，**一個 `X-Aigo-*` 都沒有**，`Cookie` 也沒有。⇒ **app 分不出這次請求是哪一位使用者**，
-  更談不上 email／roles／permissions。
-  ⚠️ 1.35.0 以前本節寫「proxy 驗過後注入 `X-Aigo-User-Id`／`-Tenant-Id`／`-App-Id`／`-Population`
-  四個 header」是**錯的**——那是平台另一條**尚未接線**的資料面設計，不是 Hosted App 的現況；
-  照它寫 app 會拿到一片空白。
-- **`AIGO_API_TOKEN` 是 app 身分不是使用者身分**：容器內拿它打 `/api/v1/auth/me`、`/api/v1/members`、
-  `/api/v1/members/{id}/linked-roles`、`/api/v1/members/roles` 一律 **401** `Invalid authentication token`
-  （API Key 只在 `/api/v1/open/*` 有效）；open proxy 打 `users`／`roles`／`user_role_rel`／`members`
-  一律 **403**「App 未被授權存取表」（這四張是平台身分表，引用面根本列不出來）。
-  對照組 `/api/v1/open/data-center/tables` 200，證明憑證本身有效。**已回報平台（2026-09-09）**，不必重複開單
+- **容器收到的身分：auth-proxy 注入的四個 header**（核自 prod tag v1.15.4 `infra/auth-proxy/internal/core`、
+  `internal/hosted`；平台 2026-09-11 起開注入）。proxy 轉給容器前**先剝掉 client 自帶的所有
+  `X-Aigo-*`／`X-User-*`／`X-Tenant-*`**，再從**驗過簽章的 session** 注入：
+
+  | header | 值 |
+  |---|---|
+  | `X-Aigo-User-Id` | 登入者的平台 user id（UUID） |
+  | `X-Aigo-Tenant-Id` | 租戶 id |
+  | `X-Aigo-App-Id` | 這支 Hosted App 的 id（`/hosted-apps/{id}` 那個） |
+  | `X-Aigo-Population` | 固定 `internal` |
+
+  - **為什麼可信**：剝除與注入都在 proxy，而且先剝後注入——瀏覽器送來的同名 header 進不了容器，
+    容器看到的值只可能來自平台驗過的 session。前提是請求**真的經過 proxy**（平台網域／已綁的自訂網域）；
+    app 若另開別的入口，那條入口上的 `X-Aigo-*` 不受這個保證
+  - **只在 internal app 的已登入請求出現**（proxy 只注入驗過的 session，值為空的欄不注入）。`public` app
+    沒有平台注入的身分——所以 §5.1 的 public 後端不能靠 `X-Aigo-*` 認人，那條線照舊自驗簽章
+  - header 只到**伺服端**，瀏覽器 JS 讀不到；前端要顯示「我是誰」就由自己的後端回一支 `/me`
+  - 平台 cookie 仍在進容器前被剝掉，**別拿 cookie 認人**，認人只看 `X-Aigo-User-Id`
+  - 歷史：2026-09-09 測試租戶實打時 proxy 尚未開注入，容器一個 `X-Aigo-*` 都沒有；那是當時的現況，
+    不是設計。今天仍收不到 → 先確認 app 是 `internal`、請求走的是平台 proxy，再回報平台
+- **角色／權限：用 app 的 API key 查 `GET /api/v1/open/members/{user_id}/context`**（prod v1.15.4 已有；
+  `Authorization: Bearer $AIGO_API_TOKEN`，核自原始碼 `api/open_members.py`，未實打）：
+  - 回 `{user_id, email, role_ids, role_names, permissions}`，**每次即時計算**（改角色後下一次呼叫就反映）
+  - **404「成員不存在」**＝這個人不在這支 app 的受眾內：非 active、別租戶、app 不是 `internal`、
+    不在 `access_role_ids` 放行的角色裡；id 不是 UUID、或 API key 所屬的 app 沒連到這支 Hosted App 也同樣 404
+  - `{user_id}` 一律取自 `X-Aigo-User-Id`，**不收前端傳來的 id**；要快取就以 user_id 為 key、短時效，
+    跨副本各自快取（§7）
+- **`AIGO_API_TOKEN` 仍是 app 身分不是使用者身分**：查人只走上面那支 context，**不是**平台管理面——
+  容器內拿它打 `/api/v1/auth/me`、`/api/v1/members`、`/api/v1/members/{id}/linked-roles`、
+  `/api/v1/members/roles` 一律 **401** `Invalid authentication token`（API Key 只在 `/api/v1/open/*` 有效）；
+  open proxy 打 `users`／`roles`／`user_role_rel`／`members` 一律 **403**「App 未被授權存取表」
+  （平台身分表，引用面列不出來）。以上 2026-09-09 測試租戶實打
   - ⚠️ **這一條只適用 Hosted**（app 身分）。internal Custom App 的 app-scoped token 是**使用者**身分，
     打 `/api/v1/members` 今天會回 200——但那是 `APP_SCOPED_TOKEN_MODE=audit` 的放行，
     **不是可以用的能力**，而且一般員工沒有 `hr.member_manage` 會 403。
     兩條線的 ACL 都不從成員面拿，見 `member-admin.md` §3.6
-- ⇒ **角色分流只能在門口用 `access_role_ids`**（`member-admin.md` §6）。要在畫面內依角色開關功能，
-  三選一：① 該部分做成 Custom internal app（runtime 有 `__USER_ROLES__`／`__USER_PERMISSIONS__`）；
-  ② Custom App 當前端 ＋ Hosted 設 `public` 當後端、由 app 自驗簽章（§5.1）；
-  ③ 按角色拆成多支 internal Hosted App，各自掛不同 `access_role_ids`
+- ⇒ **角色分流兩層**：門口用 `access_role_ids` 粗分誰進得來（`member-admin.md` §6）；畫面內依 context 的
+  `role_ids`／`permissions` 開關功能，**判斷放在伺服端**（前端隱藏只是 UX，寫入 API 要再驗一次）。
+  「按角色拆成多支 app」不再是必要，只在各角色的介面本來就是不同產品時才拆
 - 邀請成員直達 internal app：`redirect_url` 用 `/hosted-app-handoff/{slug}`（`member-admin.md` §4）
 - internal app 的認證由平台 proxy 處理，**app 端幾乎不用做事**，只有一條要寫對：
   - HTML 導覽 → proxy 自己 302 去登入

@@ -200,9 +200,11 @@ def verify_server_action(base_url: str, token: str, app_id: str,
         data = resp.json()
         checks.append(("has_execution_id", bool(data.get("execution_id"))))
         checks.append(("status_success", data.get("status") == "success"))
-        checks.append(("has_result", data.get("result") is not None))
+        # 回傳檔案的 action：result=None、結果在 file（平台 schemas/action.py）
+        checks.append(("has_result",
+                       data.get("result") is not None or data.get("file") is not None))
         checks.append(("no_error", data.get("error") is None))
-        duration = data.get("duration_ms", 0)
+        duration = data.get("duration_ms") or 0  # 平台允許 null
         checks.append(("under_30s", duration < 30000))
     else:
         checks.append(("response_body", False))
