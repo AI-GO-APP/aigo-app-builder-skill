@@ -43,7 +43,7 @@
      存量功能維持原樣即可運作，**但不要往上加東西**，新資料需求一律開自建表
    - **builder.access 破口偵測**（★ internal app 必查，規則 31）：前端檔
      （排除 `src/api.ts` 本體）有 import `../api` 或呼叫 `queryTable`／`insertRow`
-     等自建表方法 → 一般員工執行期必 403，**標記為必改**並列出受影響檔案，
+     等自建表方法 → 一般員工執行期會 403（擋下模式＋已登記引用的租戶例外，仍標必改），**標記為必改**並列出受影響檔案，
      修復流程見 `references/data-center.md` §7.5（`aigo_review.py` 會自動標記）
    - **解析 actions/manifest.json 的 webhook 宣告**：列出所有 `"webhook": true` 的 action
      與 `receive_webhook`，這些是對外端點

@@ -193,7 +193,7 @@ def analyze_vfs(vfs_state: dict) -> dict:
 
 
 # 前端自建表 SDK 方法（src/api.ts）。這些呼叫以「登入者身分」打 /data-center/*，
-# 記錄 CRUD 掛 builder.access——internal app 的一般員工受眾執行期必 403（規則 31）。
+# 記錄 CRUD 掛 builder.access——internal app 的一般員工受眾執行期會 403（規則 31；擋下模式＋已登記引用的租戶例外，仍標必改）。
 DATA_CENTER_FRONTEND_METHODS = {
     "listTables", "queryTable", "listRows", "getRow",
     "insertRow", "updateRow", "deleteRow",
@@ -404,7 +404,7 @@ def format_review_report(app_info: dict, analysis: dict,
         lines.append("")
     elif dc_frontend or (legacy_fe_used and access_mode != "external"):
         lines.append("🚨 builder.access 破口：前端以登入者身分直打資料端點（必改）")
-        lines.append("  無 builder.access 的一般員工執行期必 403，且開發帳號測不出此問題。")
+        lines.append("  無 builder.access 的一般員工執行期會 403（擋下模式＋已登記引用的租戶例外，仍須改），且開發帳號測不出此問題。")
         lines.append("  修法：包 Server Action（ctx.db.*）＋前端 runAction，並在 action 內")
         lines.append("  補授權分流 → data-center.md §7.5、SKILL.md 規則 31")
         for hit in dc_frontend:

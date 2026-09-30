@@ -240,7 +240,8 @@
 31. **Internal app 前端禁止直呼自建表 SDK**（★ 強制，**開發時測不出來、上線就爆**）
     - 前端 `src/api.ts` 的 `listTables`／`queryTable`／`insertRow`／`updateRow`／
       `deleteRow` 是以**登入者身分**打 `/api/v1/data-center/*`，記錄 CRUD 一律要求
-      `builder.access`——internal app 的一般員工受眾沒有這個權限，**執行期必 403**
+      `builder.access`——internal app 的一般員工受眾沒有這個權限，**執行期會 403**
+      （例外：租戶已切擋下模式且 app 已登記該表引用時免檢——不改變本規則，理由見 `data-center.md` §7.5）
     - 開發與驗證帳號必有 `builder.access`，所以 Phase 4/5 怎麼測都是通的；
       2026-08-31 prod 盤點有 44 支 internal app 現行中招——照直覺寫就會踩
     - internal app 的自建表存取一律包成 Server Action（`ctx.db.*` 走 app 憑證，
