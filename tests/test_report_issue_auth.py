@@ -46,7 +46,7 @@ class AuthTestBase(unittest.TestCase):
     def setUp(self):
         patches = [
             patch.object(report_issue, '_api_base', return_value=API),
-            patch.object(report_issue, '_tenant_slug', return_value='acme'),
+            patch.object(report_issue, 'resolve_base_url', return_value='https://acme.ai-go.app'),
             patch.object(report_issue, 'load_env_file'),
             patch.object(report_issue, 'derive_credentials', return_value=dict(CREDS)),
         ]
@@ -60,7 +60,7 @@ class AuthTestBase(unittest.TestCase):
 class VerifiedAuthTest(AuthTestBase):
     def test_verified_success_sends_only_tenant_and_token(self):
         client = FakeClient({AIGO_URL: [response(200, {'access_token': 'tk', 'verified': True})]})
-        self.assertEqual(report_issue.authenticate(client, '.'), ('tk', 'acme'))
+        self.assertEqual(report_issue.authenticate(client, '.'), ('tk', 'acme', 'verified'))
         self.assertEqual(client.calls, [(AIGO_URL, {'tenant': 'acme', 'aigo_token': 'aigo-tok-1'})])
         report_issue.derive_credentials.assert_not_called()
 
@@ -71,7 +71,7 @@ class VerifiedAuthTest(AuthTestBase):
                     AIGO_URL: [response(status)],
                     LOGIN_URL: [response(200, {'access_token': 'legacy'})],
                 })
-                self.assertEqual(report_issue.authenticate(client, '.'), ('legacy', 'acme'))
+                self.assertEqual(report_issue.authenticate(client, '.'), ('legacy', 'acme', 'legacy'))
                 self.assertEqual(client.urls(), [AIGO_URL, LOGIN_URL])
                 self.assertEqual(client.calls[1][1]['password'], 'derived-digest')
 
@@ -81,7 +81,7 @@ class VerifiedAuthTest(AuthTestBase):
             response(401, {'error': 'aigo_token_invalid'}),
             response(200, {'access_token': 'tk2'}),
         ]})
-        self.assertEqual(report_issue.authenticate(client, '.'), ('tk2', 'acme'))
+        self.assertEqual(report_issue.authenticate(client, '.'), ('tk2', 'acme', 'verified'))
         self.assertEqual(self.get_token.call_args_list[1].kwargs, {'force': True})
         self.assertEqual(client.calls[1][1]['aigo_token'], 'aigo-new')
 
@@ -104,12 +104,12 @@ class VerifiedAuthTest(AuthTestBase):
                     AIGO_URL: [first],
                     LOGIN_URL: [response(200, {'access_token': 'legacy'})],
                 })
-                self.assertEqual(report_issue.authenticate(client, '.'), ('legacy', 'acme'))
+                self.assertEqual(report_issue.authenticate(client, '.'), ('legacy', 'acme', 'legacy'))
 
     def test_platform_unreachable_falls_back_to_legacy(self):
         self.get_token.side_effect = httpx.ConnectError('down')
         client = FakeClient({LOGIN_URL: [response(200, {'access_token': 'legacy'})]})
-        self.assertEqual(report_issue.authenticate(client, '.'), ('legacy', 'acme'))
+        self.assertEqual(report_issue.authenticate(client, '.'), ('legacy', 'acme', 'legacy'))
 
     def test_429_on_auth_exits_without_retry(self):
         client = FakeClient({AIGO_URL: [response(429, {'error': 'rate_limited', 'retry_after': 42})]})
@@ -125,6 +125,35 @@ class VerifiedAuthTest(AuthTestBase):
             report_issue.authenticate(client, '.')
         printed = ' '.join(str(a) for c in pr.call_args_list for a in c.args)
         self.assertNotIn('aigo-tok-1', printed)
+
+
+class GatingTest(AuthTestBase):
+    def _assert_legacy_only(self, client):
+        with patch('builtins.print'):
+            self.assertEqual(report_issue.authenticate(client, '.'), ('legacy', 'acme', 'legacy'))
+        self.assertEqual(client.urls(), [LOGIN_URL])
+        self.get_token.assert_not_called()
+
+    def test_non_production_tenant_hosts_skip_verified(self):
+        for base in ('https://acme.uat.ai-go.app', 'https://acme-uat.example.test',
+                     'http://localhost:8000', 'http://acme.ai-go.app', 'https://ai-go.app'):
+            with self.subTest(base=base), patch.object(report_issue, 'resolve_base_url', return_value=base):
+                self.get_token.reset_mock()
+                self._assert_legacy_only(FakeClient({LOGIN_URL: [response(200, {'access_token': 'legacy'})]}))
+
+    def test_plain_http_api_never_receives_token(self):
+        with patch.object(report_issue, '_api_base', return_value='http://ticket.example.test'):
+            client = FakeClient({'http://ticket.example.test/api/auth/login': [response(200, {'access_token': 'legacy'})]})
+            with patch('builtins.print'):
+                self.assertEqual(report_issue.authenticate(client, '.')[2], 'legacy')
+        self.get_token.assert_not_called()
+        self.assertNotIn('aigo_token', str(client.calls))
+
+    def test_http_localhost_api_allowed_for_testing(self):
+        for api in ('http://localhost:8787', 'http://127.0.0.1:8787'):
+            with self.subTest(api=api), patch.object(report_issue, '_api_base', return_value=api):
+                client = FakeClient({f'{api}/api/auth/aigo': [response(200, {'access_token': 'tk'})]})
+                self.assertEqual(report_issue.authenticate(client, '.'), ('tk', 'acme', 'verified'))
 
 
 class SubmitRateLimitTest(AuthTestBase):

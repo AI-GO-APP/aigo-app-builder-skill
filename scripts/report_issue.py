@@ -77,6 +77,33 @@ def _tenant_slug(project_path: str) -> str:
     return host.split(".")[0] or "unknown"
 
 
+_LOCAL_HOSTS = ("localhost", "127.0.0.1")
+
+
+def _verified_tenant(project_path: str) -> str:
+    """
+    生效的租戶網址恰為 `https://<slug>.ai-go.app` 時回 slug，否則回空字串。
+
+    回報系統只向正式平台驗 token：UAT／本機／其他網域的 token 送過去必定 401，
+    反而把回報整個擋掉，所以這些環境直接走舊做法。
+    """
+    parsed = urlparse(resolve_base_url(project_path))
+    host = (parsed.hostname or "").lower()
+    suffix = "." + aigo_auth.AIGO_BASE_DOMAIN
+    if parsed.scheme != "https" or not host.endswith(suffix):
+        return ""
+    slug = host[: -len(suffix)]
+    return slug if slug and "." not in slug else ""
+
+
+def _api_safe_for_token() -> bool:
+    """AI GO token 只經 HTTPS 送出；http 僅允許本機（測試用）。"""
+    parsed = urlparse(_api_base())
+    if parsed.scheme == "https":
+        return True
+    return parsed.scheme == "http" and (parsed.hostname or "") in _LOCAL_HOSTS
+
+
 def derive_credentials(project_path: str = ".") -> dict:
     """
     由 AIGO_EMAIL + AIGO_PASSWORD + 租戶 slug 衍生回報帳號。
@@ -230,22 +257,38 @@ def _verified_authenticate(client: httpx.Client, project_path: str, tenant: str)
     )
 
 
-def authenticate(client: httpx.Client, project_path: str = ".") -> tuple[str, str]:
-    """
-    取得回報系統 token，回傳 (token, tenant_slug)。
+MODE_VERIFIED = "verified"
+MODE_LEGACY = "legacy"
 
-    優先 AI GO 驗證登入（見 _verified_authenticate）；回報系統未支援（404/405）
+
+def authenticate(client: httpx.Client, project_path: str = ".") -> tuple[str, str, str]:
+    """
+    取得回報系統 token，回傳 (token, tenant_slug, mode)；mode 為 MODE_VERIFIED／MODE_LEGACY。
+
+    優先 AI GO 驗證登入（見 _verified_authenticate），前提是租戶網址恰為
+    `https://<slug>.ai-go.app` 且回報系統網址為 HTTPS；回報系統未支援（404/405）
     或暫時失效（5xx／逾時／平台連不到）才退回本地衍生帳號登入。
     AI GO token 無效（重登一次仍 401）直接報錯，不默默降級。
     """
     load_env_file(project_path)
-    tenant = _tenant_slug(project_path)
-    try:
-        return _verified_authenticate(client, project_path, tenant), tenant
-    except _Unsupported as e:
-        print(f"ℹ️  {e}，改用舊版衍生帳號登入")
+    tenant = _verified_tenant(project_path)
+    if not tenant:
+        print("ℹ️  租戶網址不是正式平台（https://<租戶>.ai-go.app），改用舊版衍生帳號登入")
+    elif not _api_safe_for_token():
+        print("ℹ️  回報系統網址不是 HTTPS，不送 AI GO token，改用舊版衍生帳號登入")
+    else:
+        try:
+            return _verified_authenticate(client, project_path, tenant), tenant, MODE_VERIFIED
+        except _Unsupported as e:
+            print(f"ℹ️  {e}，改用舊版衍生帳號登入")
     creds = derive_credentials(project_path)
-    return _legacy_authenticate(client, creds), creds["tenant"]
+    return _legacy_authenticate(client, creds), creds["tenant"], MODE_LEGACY
+
+
+ACCOUNT_SPLIT_HINT = (
+    "   ℹ️  驗證登入與舊版衍生帳號是兩個不同的回報帳號，各自只看得到自己名下的回報；\n"
+    "      另一個帳號送過的回報仍在開發團隊那邊，不會消失（見 references/issue-reporting.md「機制與隱私」）。"
+)
 
 
 # === 指令 ===
@@ -508,7 +551,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
     title = args.title.strip()[:80]
     content = body[:4000]
     with httpx.Client(timeout=60) as client:
-        token, tenant = authenticate(client, args.project)
+        token, tenant, _ = authenticate(client, args.project)
         # 開單前查既有卡（第一階段只記錄，見 _preflight）
         pf = _preflight(client, token, title, content, tenant)
         preflight_id = (pf or {}).get("preflight_id") or ""
@@ -545,7 +588,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
 
 def cmd_list(args: argparse.Namespace) -> int:
     with httpx.Client(timeout=30) as client:
-        token, _ = authenticate(client, args.project)
+        token, _, mode = authenticate(client, args.project)
         resp = client.get(
             f"{_api_base()}/api/tickets",
             headers={"Authorization": f"Bearer {token}"},
@@ -557,15 +600,18 @@ def cmd_list(args: argparse.Namespace) -> int:
     tickets = resp.json().get("tickets", [])
     if not tickets:
         print("（尚無回報紀錄）")
+        print(ACCOUNT_SPLIT_HINT)
         return 0
     for t in tickets:
         print(f"[{t['status']:>13}] {t['id'][:8]}…  {t['title']}")
+    if mode == MODE_LEGACY:
+        print(ACCOUNT_SPLIT_HINT)
     return 0
 
 
 def cmd_show(args: argparse.Namespace) -> int:
     with httpx.Client(timeout=30) as client:
-        token, _ = authenticate(client, args.project)
+        token, _, _ = authenticate(client, args.project)
         resp = client.get(
             f"{_api_base()}/api/tickets/{args.ticket_id}",
             headers={"Authorization": f"Bearer {token}"},
@@ -573,6 +619,7 @@ def cmd_show(args: argparse.Namespace) -> int:
     _check_rate_limit(resp, "讀取回報")
     if resp.status_code == 404:
         print("❌ 找不到這筆回報（id 錯誤，或不屬於目前的回報帳號）")
+        print(ACCOUNT_SPLIT_HINT)
         return 1
     if resp.status_code != 200:
         print(f"❌ 讀取失敗（HTTP {resp.status_code}）")
