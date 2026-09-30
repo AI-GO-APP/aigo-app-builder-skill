@@ -254,7 +254,7 @@ curl -fsSL https://raw.githubusercontent.com/AI-GO-APP/aigo-cli-releases/main/in
 
 裝到 `~/.local/bin`（不在 PATH 就自己加）。binary-only 發佈，原始碼私有。
 
-**★ 版本閘門（任何 `aigo` 指令之前先跑；1.48.0）**：
+**★ 版本閘門（任何 `aigo` 指令之前先跑；1.56.0）**：
 
 ```bash
 python3 scripts/aigo_cli_check.py      # 零相依；--json 給機器讀
@@ -268,8 +268,8 @@ python3 scripts/aigo_cli_check.py      # 零相依；--json 給機器讀
 - **fail-open**：抓不到 GitHub 最新版（離線、逾時、rate limit）只是「最新版未知」，不擋部署；
   只有「找不到 `aigo`」與「版本 < 0.5.0」才回非零，且那兩個判定不靠網路
 - **落後最新版但 ≥ 0.5.0 只提示**，要不要更新由用戶決定
-- **⚠️ 更新一律重跑上面那行 installer，不要 `aigo update`**：0.4.0 與 0.5.0 的 `aigo update`
-  抓的是一個私有 repo 的 install.sh，一般使用者沒權限一律
+- **⚠️ 更新一律重跑上面那行 installer，不要 `aigo update`**：到 0.6.0 為止所有版本的 `aigo update`
+  都抓一個私有 repo 的 install.sh，一般使用者沒權限一律
   `gh: Not Found (HTTP 404)`／`install script failed (exit 127)`（2026-09-26 實測）。
   重裝後再跑一次閘門確認 PATH 上選到的是新版（installer 裝到 `~/.local/bin`，
   可用 `AIGO_BIN_DIR`／`AIGO_VERSION` 指定）

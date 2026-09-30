@@ -16,7 +16,7 @@ aigo_cli_check.py — `aigo` CLI 相容性檢查（瀏覽器登入最低版本 �
 - **fail-open**：抓不到最新版（離線、逾時、rate limit、格式異常）＝「最新版未知」，
   不是「禁止部署」。只有「找不到 aigo」與「版本低於最低版」才回非零，且那兩個判定不靠網路。
 - **有界**：`aigo --version` 子行程與 HTTP 各自有 timeout，掛住的 binary 不會卡住 agent。
-- **不要建議 `aigo update`**：0.4.0 與 0.5.0 的 `aigo update` 抓的是一個私有 repo
+- **不要建議 `aigo update`**：到 0.6.0 為止所有版本的 `aigo update` 都抓一個私有 repo
   的 install.sh，沒有該 repo 權限（一般使用者都沒有）一律
   `gh: Not Found (HTTP 404)`／exit 127（2026-09-26 實測）。更新一律重跑公開 installer。
 
@@ -192,7 +192,7 @@ def latest_version() -> str | None:
             if resp.status != 200:
                 return None
             body = resp.read().decode("utf-8", errors="replace")
-    except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+    except Exception:  # fail-open：任何網路／解析錯誤（含 http.client.IncompleteRead）都只算「最新版未知」
         return None
     return parse_latest_tag(body)
 

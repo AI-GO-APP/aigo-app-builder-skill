@@ -15,14 +15,14 @@ agent 只能反覆要求「請完成登入」，每次部署都卡在同一處�
   找不到／讀不出版本／< 0.5.0 才回非零。附 `tests/test_aigo_cli_check.py`（unittest，19 例）。
 - `hosted-apps.md` §3.3：版本閘門段（任何 `aigo` 指令前先跑）；0.5.0 的登入契約
   （`--workspace`／`AIGO_WORKSPACE`，非互動沒給直接報錯，只影響登入頁不寫 profile）；
-  **⚠️ 不要 `aigo update`**——0.4.0／0.5.0 的 update 抓的是一個私有 repo，一般使用者必
+  **⚠️ 不要 `aigo update`**——到 0.6.0 為止所有版本的 update 都抓一個私有 repo，一般使用者必
   `gh: Not Found (HTTP 404)`（實測），更新一律重跑公開 installer。
 - `hosted-apps.md` §3.1：CLI 兩條起手路徑——既有 app 只部署用 Deploy Token；建新 app／
   session-only 由用戶自己 `aigo login --workspace`。「優先 Deploy Token」不能變成建 app 的死路。
 - `SKILL.md`：Phase 1 加 Hosted 的 CLI 一行；驗證快速參照的 Hosted 線加「任何 `aigo` 指令前 →
   版本閘門」；錯誤處理加「CLI 登入 401 先查版本與 host」。
 - `troubleshooting.md`：新增「`aigo login` 正確帳密仍 401」（三步：版本 → 開到的 host →
-  成員／帳密；API 端看 `X-Auth-Error-Code`）與「`aigo update` 404」兩列；原本籠統的
+  成員／帳密；API 端看 `X-Auth-Error-Code` 的 `workspace_required`／`workspace_not_found`）與「`aigo update` 404」兩列；原本籠統的
   「401＝token 過期」收窄為 API 呼叫。
 
 沒做的：不自動從 `base_url` 推 `AIGO_WORKSPACE`（空值、繼承到不相干環境變數的邊角太多，
