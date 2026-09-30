@@ -174,6 +174,11 @@
 
 - 頁面／路由、後端 API endpoints、背景排程、對外 webhook 接收
 - 檔案儲存、第三方 API 呼叫、環境變數與金鑰
+  - ★ **環境變數要逐顆盤，不是寫一句「env 要設」**：從程式碼、`.env.example`、**原託管平台的
+    env 設定頁**、本機排程四個來源盤出全部 key，做成對帳表，遷入後逐顆核對 AI GO 上有沒有設；
+    沒設的列給用戶、提醒負責人設定——做法與常見漏項見 `hosted-apps.md` §4「遷入既有系統時要重新
+    提供的 env 清單」（Custom App 線同樣要盤，後端密鑰落在 Builder「服務」tab／`ctx.secrets`，前端設定另列落點——見該節「Custom App 線」段）。缺的 env 通常不會讓主流程壞，
+    而是讓某個功能或排程每天默默失敗
 - **使用者／認證表**（★ 特殊處理，不進 §2.4 的表映射流程）
 - DB 層邏輯（trigger / view / RLS / stored procedure / edge functions / realtime）
 
