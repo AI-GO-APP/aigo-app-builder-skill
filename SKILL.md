@@ -131,6 +131,8 @@ uv run --project scripts python scripts/aigo_auth.py app add <alias> --id <uuid>
   ★ **access_mode 由模板決定、建立後不可改**，且**建 app 只在 Phase 1.5 計畫確認後**
   （`starter-internal` 是預設；`starter-external` 只在分配表明寫時用）→ `custom-app-dev-guide.md` §26
 - `config.json` 欄位、`base_url` 的三層來源與優先序、登入 401 的排查 → `references/environment.md`
+- **Hosted App 用 `aigo` CLI 時**：先過 `hosted-apps.md` §3.3 版本閘門（`scripts/aigo_cli_check.py`）；
+  既有 app 只部署 → 用戶放 Deploy Token；建新 app／session-only → 用戶自己 `aigo login --workspace`（§3.1）
 ## Phase 1.25：多系統遷入盤點（條件觸發）
 
 > **觸發條件**：用戶有 **2 個以上外部系統**（各自帶 Supabase / Google Sheet / MySQL
@@ -417,6 +419,7 @@ if (file) downloadFile(file);
   + UAT 結論對帳（`dev-rules.md` 規則 33）：計畫寫「有」的，`uat-environment.md` §4 驗證表要全過；寫「無」的，理由與風險要在交付說明裡
 
 Hosted App 線（不走 Phase 2–4）：
+  任何 `aigo` 指令前 → ✅ hosted-apps.md §3.3 版本閘門（`aigo_cli_check.py` 非零＝瀏覽器登入不可用，先重裝；找不到 `aigo` 時連 token 部署也不行）
   deploy/redeploy → ✅ hosted-apps.md §3.4 部署後驗證閘門（含讀回 `always_on`＝§3.0 決策；未通過不得對外交付）
 
 資料操作線（不開發 app）：
@@ -432,7 +435,8 @@ Hosted App 線（不走 Phase 2–4）：
 `reason`／`rule_id` 是租戶資料存取規則 → dev-guide §27）｜**409** 配額或衝突｜**422** 輸入不合法｜
 **400** 業務規則拒絕｜**503 「app runner 暫時不可用」** 三種成因同形：先問有沒有 publish
 （`status: draft` 重試不會好）→ 剛發布的冷啟動（等 `Retry-After`）→ body 帶 `quota_hint` 是租戶
-運算配額（**不是 code 問題**，把原文轉給用戶）。
+運算配額（**不是 code 問題**，把原文轉給用戶）｜**`aigo login` 瀏覽器登入 401「帳號或密碼錯誤」**
+先跑 `aigo_cli_check.py` 看版本，再看登入頁網址是不是租戶子網域，最後才查帳密（`troubleshooting.md`）。
 
 **★ Action 對外呼叫失敗時別急著改 code**：先完整讀出 status 與 error message。
 timeout／連不出去＝raw `httpx` 直連（改 `ctx.http.call`）或 slug 沒有同名外部服務／未授權；

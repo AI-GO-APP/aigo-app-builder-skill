@@ -185,6 +185,13 @@ OOM 只在整台用盡時發生，上面「4 GiB 的 60–65%」是舊引擎的�
   建立當下 app 還不存在——讓它能建，這把鑰匙就同時是「開新門」的鑰匙。
   Deploy Token 與 App 憑證打 `POST /` 回固定 403 訊息；
   帳號需 `hosted_apps.deploy` 權限，登入走租戶子網域（`dev-rules.md` 規則 29）
+- **CLI 的兩條起手路徑（別把「優先 Deploy Token」走成死路）**：
+  - **既有 app、只做部署面** → 用戶把該 app 的 Deploy Token 放進工作區 `.aigo/.env`
+    （§3.3 的 `AIGO_DEPLOY_TOKEN__<ALIAS>`），agent 用 `aigo_auth.py run <alias> -- aigo …`；
+    **不需要瀏覽器登入，CLI 版本也不卡**
+  - **建新 app／session-only 操作** → 一定要登入 session：由**用戶自己**跑
+    `aigo login --workspace <租戶名>`（CLI ≥ 0.5.0，見 §3.3 版本閘門），或走既有的
+    `aigo_auth.py login`＋REST（§3.2）。agent 不代跑瀏覽器登入、不代填帳密
 
 ### 3.2 部署流程（API）
 
@@ -247,12 +254,36 @@ curl -fsSL https://raw.githubusercontent.com/AI-GO-APP/aigo-cli-releases/main/in
 
 裝到 `~/.local/bin`（不在 PATH 就自己加）。binary-only 發佈，原始碼私有。
 
+**★ 版本閘門（任何 `aigo` 指令之前先跑；1.56.0）**：
+
+```bash
+python3 scripts/aigo_cli_check.py      # 零相依；--json 給機器讀
+```
+
+- **瀏覽器登入（`aigo login` 不帶 `--token`）需要 CLI ≥ 0.5.0**。0.5.0 之前寫死開 apex
+  `https://ai-go.app/auth/cli`，而 apex 登入自 2026-08-05 起一律 401「帳號或密碼錯誤」
+  （與密碼錯**完全同形**，頁面照樣渲染、看起來像能登入）——舊版怎麼登都失敗，**不要往
+  密碼方向查**（2026-09-26 實際踩到：agent 反覆要求「請完成登入」）。腳本回非零＝
+  瀏覽器登入不可用，先請用戶重裝再繼續；**Deploy Token 路徑不受影響**，用 token 的部署可先做
+- **fail-open**：抓不到 GitHub 最新版（離線、逾時、rate limit）只是「最新版未知」，不擋部署；
+  只有「找不到 `aigo`」與「版本 < 0.5.0」才回非零，且那兩個判定不靠網路
+- **落後最新版但 ≥ 0.5.0 只提示**，要不要更新由用戶決定
+- **⚠️ 更新一律重跑上面那行 installer，不要 `aigo update`**：到 0.6.0 為止所有版本的 `aigo update`
+  都抓一個私有 repo 的 install.sh，一般使用者沒權限一律
+  `gh: Not Found (HTTP 404)`／`install script failed (exit 127)`（2026-09-26 實測）。
+  重裝後再跑一次閘門確認 PATH 上選到的是新版（installer 裝到 `~/.local/bin`，
+  可用 `AIGO_BIN_DIR`／`AIGO_VERSION` 指定）
+
 **★ 指令面以 `aigo --help` 為權威，本檔不複製**——CLI 獨立發版，
 快照必過期。agent 用之前先跑 `--help`。以下只寫 `--help` 講不了的穩定契約：
 
 - **鑑權優先序**：env `AIGO_DEPLOY_TOKEN` ＞ `aigo login --token` 存的 profile
   ＞ 瀏覽器 session。Deploy Token 從詳情頁「設定」tab 發行（raw 只給一次）；
   token 值用 stdin 餵 `aigo login --token`，別放指令列參數（進 shell history）
+- **瀏覽器登入要帶 workspace（0.5.0 起）**：`aigo login --workspace <租戶名>` 開
+  `https://<租戶名>.ai-go.app`（UAT 加 `--uat`）；來源優先序 `--workspace` ＞ env `AIGO_WORKSPACE`
+  ＞ 互動詢問，**非互動環境沒給會直接報錯**。workspace 只決定登入頁網址，不寫進 profile；
+  CLI profile 仍只分 prod／uat。這一步由用戶自己跑（§3.1 兩條起手路徑）
 - **多 app／多租戶裝置的建議做法（1.22.0）**：把 token 放工作區 `.aigo/.env` 的
   `AIGO_DEPLOY_TOKEN__<ALIAS 大寫>`，用 `aigo_auth.py run <alias> -- aigo hosted deploy …`
   執行——它會匯出成 `AIGO_DEPLOY_TOKEN`（優先序最高），CLI 的全域 profile 不會互相蓋；

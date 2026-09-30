@@ -1,3 +1,33 @@
+## 1.56.0
+
+### Hosted App 的 `aigo` CLI 加版本閘門——瀏覽器登入需 ≥ 0.5.0
+
+2026-09-26 實際踩到：CLI 0.4.0 的 `aigo login` 開的是 apex `https://ai-go.app/auth/cli`，
+而平台自 2026-08-05 起 apex 登入一律 401「帳號或密碼錯誤」（與密碼錯完全同形、頁面照樣渲染），
+agent 只能反覆要求「請完成登入」，每次部署都卡在同一處。skill 先前對 CLI 版本零認知。
+
+**skill 本身沒有相容性斷裂**（停在舊版 skill 不會讓平台呼叫失敗），斷的是舊版 CLI：拿 < 0.5.0 走
+瀏覽器登入永遠失敗，且失敗訊息指向密碼。Deploy Token 路徑（`aigo login --token`／
+`AIGO_DEPLOY_TOKEN`）不受影響。
+
+- 新增 `scripts/aigo_cli_check.py`（零相依）：找 `aigo`（PATH → `~/.local/bin`）、讀版本、
+  比最低版 0.5.0 與 GitHub 最新 release。**fail-open**：抓不到最新版只是「未知」不擋；只有
+  找不到／讀不出版本／< 0.5.0 才回非零。附 `tests/test_aigo_cli_check.py`（unittest，19 例）。
+- `hosted-apps.md` §3.3：版本閘門段（任何 `aigo` 指令前先跑）；0.5.0 的登入契約
+  （`--workspace`／`AIGO_WORKSPACE`，非互動沒給直接報錯，只影響登入頁不寫 profile）；
+  **⚠️ 不要 `aigo update`**——到 0.6.0 為止所有版本的 update 都抓一個私有 repo，一般使用者必
+  `gh: Not Found (HTTP 404)`（實測），更新一律重跑公開 installer。
+- `hosted-apps.md` §3.1：CLI 兩條起手路徑——既有 app 只部署用 Deploy Token；建新 app／
+  session-only 由用戶自己 `aigo login --workspace`。「優先 Deploy Token」不能變成建 app 的死路。
+- `SKILL.md`：Phase 1 加 Hosted 的 CLI 一行；驗證快速參照的 Hosted 線加「任何 `aigo` 指令前 →
+  版本閘門」；錯誤處理加「CLI 登入 401 先查版本與 host」。
+- `troubleshooting.md`：新增「`aigo login` 正確帳密仍 401」（三步：版本 → 開到的 host →
+  成員／帳密；API 端看 `X-Auth-Error-Code` 的 `workspace_required`／`workspace_not_found`）與「`aigo update` 404」兩列；原本籠統的
+  「401＝token 過期」收窄為 API 呼叫。
+
+沒做的：不自動從 `base_url` 推 `AIGO_WORKSPACE`（空值、繼承到不相干環境變數的邊角太多，
+由用戶帶 `--workspace`）；不改 `aigo_auth.py run` 的執行邊界。
+
 ## 1.55.0
 
 ### 對齊 prod v1.15.4：openapi 停供、Hosted 拿得到身分、records 運算子補齊
