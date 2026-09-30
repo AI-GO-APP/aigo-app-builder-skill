@@ -115,7 +115,7 @@ Custom 不夠就**搭** Hosted，不是整個換線：
 ## 6. 不可逆與硬前提（判斷前必讀）
 
 - Custom App 的 `access_mode` 由模板決定、**建立後不可改**（dev-guide §26.1）——
-  所以 **app 要等計畫確認後才建**（SKILL.md Phase 1.5 計畫閘門第 5 條：照 app 分配表建）
+  所以 **app 要等計畫確認後才建**（SKILL.md Phase 1.5 計畫閘門第 7 條：照 app 分配表建）
 - **`internal` 不能開匿名存取**（回 400，`CONTEXT.md`）——「內部工具但想給訪客看一頁」
   要在此刻攤開：那一頁拆成 Hosted public 靜態頁，或放棄匿名；拆不成才落到 §4 的例外列
 - **external 開了匿名還要平台核可**（dev-guide §15.1）：核可前匿名訪客拿 404，

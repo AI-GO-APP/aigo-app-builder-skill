@@ -1419,25 +1419,37 @@ def execute(ctx):
 > ⚠️ 授權**當下**會擋停用中的服務，但**之後把服務停用並不會回收授權清單裡的 id**。
 > 所以「已授權 ∧ 已停用」是可達狀態——只看「有沒有在授權清單裡」會誤判成通過，
 > 發布卻回 409 `service_inactive`。外部服務是租戶共用池，別人停用它你不會收到通知。
-> 遇到就請用戶到 Builder 重新啟用，**不要再建一個同名的**（slug 唯一）。→ `platform-behaviors.md` §13.5
+> 遇到就經用戶確認後重新啟用（`PATCH …/egress-services/{service_id}` `{"is_active": true}`；停用可能是別的 App
+> 擁有者刻意做的，先問），**不要再建一個同名的**（slug 唯一）。→ `platform-behaviors.md` §13.5
 
 設定位置：**Builder（`/builder/{app_id}`）的「外部服務」tab**，同一處做租戶級建立／編輯與本 App 授權，
 新建預設順便授權本 App。（舊入口 `/dashboard/settings/integrations` 已移除，ADR 0011。）
 
-> ★ **人工設定政策**：在 AI 開發流程中，外部服務的建立／修改／啟停／刪除與 App 授權，以及金鑰
-> （`ctx.secrets`）的新增／更新／刪除，**由使用者或具權限的管理員在 Builder 手動完成**。這是刻意的
-> 安全設計——讓人理解並決定連線目的地、用途與可能送出的資料，不讓 AI 寫下使用者看不懂的設定、
-> 或把資料送出站外。AI 可整理設定需求（slug、base_url、用途、資料流向、key_name）、做唯讀檢查
-> （`GET /builder/apps/{id}/available-egress-services`、發布預檢 `egress_preflight()`），但**不得透過
-> API、腳本或代操作 UI 完成上述設定**；持有可用 token 不代表允許代設。平台保留受權限控管的寫入 API
-> 供人員自行執行的 provision／維運腳本用（`uat-environment.md` 附錄 A），AI 開發流程中不呼叫。
-> 遇到設定缺口＝「等待人工設定」，不是平台 bug（→ §25.3 第 6 點、`issue-reporting.md`）。
+> ★ **AI 代設，先確認再動手**：外部服務的建立／修改／啟停與 App 授權、金鑰（`ctx.secrets`）的新增／更新，
+> **AI 可以直接用 API 完成**（端點見下方與 `uat-environment.md` 附錄 A），但每一次寫入前都要過這道確認：
+>
+> 1. **用白話說明**（非技術語言，一次講完）：要連到**哪個網域**（base_url）、**會送出哪些資料**
+>    （哪些欄位、有沒有個資或客戶資料）、**哪支 action／哪個功能**會用、這支外部服務是**租戶共用池**
+>    （同租戶其他 App 擁有者看得到、也能改）；寫金鑰時說明 `key_name` 與用途
+> 2. **用戶明確同意才寫**；沒回覆、回覆含糊或只同意其中幾支 → 只做同意的那幾支，其餘不動
+> 3. **金鑰的值不經過對話**：請用戶自己填進本機檔（例：`<工作區>/.aigo/secrets.env`，權限 600，
+>    `.aigo/` 已在 `.gitignore`），腳本讀檔後直接送 API，**不印出、不寫進 log／repo／指令列**；
+>    用戶也可以選擇自己到 Builder「服務」tab 貼上。不向用戶要金鑰值、不代為產生第三方的金鑰
+> 4. 寫完回讀驗證（`available-egress-services` 看 `is_active` 與授權清單、`GET /actions/apps/{id}/secrets`
+>    看 `key_name`，不讀值），再重試發布或呼叫
+>
+> 刪除外部服務（租戶共用池，別的 App 可能在用）與刪除金鑰要另外逐項確認。
+> 設定缺口不是平台 bug（→ §25.3 第 6 點、`issue-reporting.md`）——經確認後補上即可。
 
 > 一律用**相對路徑**指引用戶，不要寫死主機名稱——子網域日後可能變動。
 > 用戶自己登入的後台網域是什麼就接在前面。
 
-- 建立／編輯權限：`builder.access` 且（本 App 擁有者或 `system.admin`）。
-  權限不足時請租戶管理員代設，開發者自己繞不過去。
+- 權限（v1.15.4 核對）：**建立**（`POST /builder/apps/{id}/egress-services`，預設授權本 App）與**改授權清單**
+  （`PUT /builder/apps/{id}/authorized-egress-services`）＝`builder.access` 且（本 App 擁有者或 `system.admin`）；
+  **編輯／停用／刪除**（`PATCH`／`DELETE /builder/apps/{id}/egress-services/{service_id}`）＝`builder.access` 且
+  （同租戶任一 App 的擁有者或 `system.admin`）；**金鑰**（`/actions/apps/{id}/secrets`）＝`builder.access`
+  且看得到這支 app。租戶級 `/api/v1/egress-services` 掛 `system.admin`，不在本 skill 的路徑上。
+  403 → 帳號權限不足，請租戶管理員操作（確認流程照舊），開發者自己繞不過去。
 - 外部服務是**租戶共用池**、無服務擁有者：任一 App 擁有者或 admin 可改／刪／停用，
   其他 App 各自授權使用。
 
@@ -1449,7 +1461,7 @@ def execute(ctx):
 |------|------|------|
 | timeout（約 20 秒） | raw `httpx`/`requests` 直連——default-deny egress，連線被黑洞 | 改寫成 `ctx.http.call` |
 | timeout，且**確實走 `ctx.http.call`** | 是閘道的 `timeout_ms`（預設 10000／上限 30000），不是 manifest，也不是直連 | 見 §25.4——先確認該外部服務的 `timeout_ms` 設成多少 |
-| `ctx.http.call` 連不出去／錯誤指向 egress | slug 沒有同名外部服務（`egress_service_not_found`）、服務**被停用**（`egress_service_inactive`），或服務未授權給本 App（`egress_not_authorized`） | 引導用戶到 Builder「外部服務」tab 建立（base_url）／重新啟用，並授權本 App（**人工完成，AI 不代設**，§25.2） |
+| `ctx.http.call` 連不出去／錯誤指向 egress | slug 沒有同名外部服務（`egress_service_not_found`）、服務**被停用**（`egress_service_inactive`），或服務未授權給本 App（`egress_not_authorized`） | 經用戶確認後建立外部服務（base_url）／重新啟用，並授權本 App（§25.2 確認流程） |
 | 401 | 外部 API 拒絕請求帶的憑證——閘道不注入也不剝除，`Authorization` 是 action 自己組的 | 檢查 action 是否有帶 `Authorization` header、`ctx.secrets` 的金鑰是否正確 |
 
 給 AI Agent 的處理準則：
@@ -1457,19 +1469,17 @@ def execute(ctx):
 1. Action 對外呼叫失敗時，**先把回傳的 error message 完整讀出來**，
    不要立刻假設是程式碼寫錯。
 2. 若訊息指向 Egress／權限，**停止改 code**——這是設定問題，改幾次都一樣。
-3. 把原始 error message 轉給用戶，並引導到 Builder（`/builder/{app_id}`）的
-   「外部服務」tab，由用戶以同名 slug 建立／修正外部服務並授權本 App
-   （**人工完成，AI 不代設**——§25.2 人工設定政策）；
-   權限不足（非本 App 擁有者且非 admin）→ 請管理員代設。
+3. 把原始 error message 轉給用戶，照 §25.2 說明目的地與會送出的資料，**用戶同意後由 AI** 以同名 slug
+   建立／修正外部服務並授權本 App（用戶也可以選擇自己到 Builder「外部服務」tab 做）；
+   權限不足（非本 App 擁有者且非 `system.admin`）→ 請租戶管理員操作。
 4. **401 是 app 側問題不是平台設定**：回頭檢查 action 組的 header 與
    `ctx.secrets` 金鑰，別再往外部服務設定找。
 5. 確認設定生效後才重試。
-6. **這是「等待人工設定」，不是 bug**：外部服務未建立／停用／未授權、金鑰缺少
-   （發布 409 `EGRESS_NOT_READY` 的四種 `gaps[].kind`，或呼叫期的 `egress_service_not_found`／`egress_service_inactive`／`egress_not_authorized`）都是刻意的
-   安全設計——簡短說明這是刻意的安全設計、請用戶到 Builder 的外部服務頁／服務頁手動設定，
-   列出具體缺項、停止相關重試。**不要回報成平台問題**，也不要為了自審重現去打設定寫入 API。
-   只有人工在 Builder 操作本身失敗、或設定完成後回讀／發布結果與設定矛盾，才依
-   `pre-report-self-grill.md` 正常判定；不得僅因錯誤含 egress／secrets 就排除真正異常。
+6. **這是設定缺口，不是 bug**：外部服務未建立／停用／未授權、金鑰缺少
+   （發布 409 `EGRESS_NOT_READY` 的四種 `gaps[].kind`，或呼叫期的 `egress_service_not_found`／`egress_service_inactive`／`egress_not_authorized`）
+   ——列出具體缺項、停止改 code 與相關重試，走 §25.2 確認流程補上（停用的重新啟用，不要重建同名的），
+   補完再驗證。**不要回報成平台問題**。只有設定寫入本身異常失敗（5xx、非權限的 4xx）、或設定完成後
+   回讀／發布結果與設定矛盾，才依 `pre-report-self-grill.md` 正常判定；不得僅因錯誤含 egress／secrets 就排除真正異常。
 
 ### 25.4 閘道的四道上限（★ 2026-09-09 prod 實打＋平台原始碼核對）
 
@@ -1486,10 +1496,11 @@ def execute(ctx):
 
 - ⚠️ **30000 是「上限」不是「你會拿到的值」**：外部服務建立時沒明給 `timeout_ms`，
   落庫預設是 **10000**（2026-09-09 測試租戶實打建立確認）——這種服務在**約 10 秒**就被切，
-  不是 30 秒。排查時先請用戶到 Builder「外部服務」看那支服務的 `timeout_ms` 實際是多少，
+  不是 30 秒。排查時先確認那支服務的 `timeout_ms` 實際是多少（`available-egress-services` 不回這欄——請用戶到 Builder「外部服務」看），
   錯誤訊息括號裡的毫秒數也會照實印。
 - `timeout_ms` **調不高**：`PATCH` 60000 與 120000 皆回 **422**
-  「`timeout_ms` 必須是 1～30000 之間的正整數（毫秒）」。要拿滿 30 秒，請用戶在 Builder「外部服務」把該服務的 `timeout_ms` 調到 30000（人工設定政策，§25.2）。
+  「`timeout_ms` 必須是 1～30000 之間的正整數（毫秒）」。要拿滿 30 秒，把該服務的 `timeout_ms` 調到 30000（`PATCH /builder/apps/{id}/egress-services/{service_id}`，
+  §25.2 確認流程：它是租戶共用池，其他 App 也會一起變）。
 - `ctx.http.call` **沒有** per-call timeout 參數：傳 `timeout=90` 回
   `TypeError: HttpModule.call() got an unexpected keyword argument 'timeout'`。
   單次對外呼叫的逾時只由 EgressService 的 `timeout_ms` 決定，action 端覆寫不了。
@@ -1511,9 +1522,9 @@ def execute(ctx):
 
 ### 25.5 規劃階段就要處理
 
-Phase 1.5 實作計畫裡就該**列出所有要打出去的外部服務（egress slug + base_url）**，
-讓用戶在寫 code 前先去建立外部服務並授權本 App，同時把各 API 的金鑰存進
-`ctx.secrets`——等到部署後才發現連不出去，等於整段開發白做。
+Phase 1.5 實作計畫裡就該**列出所有要打出去的外部服務（egress slug + base_url + 會送出的資料）**，
+計畫確認時就把 §25.2 的說明一併給用戶看；同意後在寫 code 前由 AI 建立外部服務並授權本 App、
+請用戶把金鑰值填進本機檔再由 AI 寫進 `ctx.secrets`——等到部署後才發現連不出去，等於整段開發白做。
 
 ## 26. 建立與刪除 App（API，不必走 UI）
 
@@ -1551,8 +1562,10 @@ POST /api/v1/builder/apps          （權限：builder.access）
   模板必填所以恆被模板蓋掉。建立後不可改模式，選錯要砍掉重建
 - **模板 slug 由 Phase 1.5 計畫的 app 分配表指定，不在建立時臨場判**：新建情景要先過
   §1.0 需求盤點的「誰在用」與產品線判斷；計畫未經用戶確認前不建 app
-- 模板商城的其他模板（實測 116 個）也可用其 slug 建立；
-  清單：`GET /api/v1/templates`（唯讀）
+- **只用這兩支建 app**。模板商城的其他（業務）模板**不用其 slug 建 app**——那條路會照模板預設繫結
+  全套 provision（灌碼、建自建表、建引用），之後要改繫結只能事後清。業務模板是**素材**：
+  `GET /api/v1/templates` 盤點、`GET /api/v1/templates/{slug}/preview` 取碼，抄回本地改造、自行 provision
+  （`template-workflow.md`）
 - `self_built` 是 access_mode 的第三值，但它屬於 Hosted App 隨附整合，
   **不是** builder 起手式的選項，不要手動指定
 
@@ -1568,8 +1581,10 @@ POST /api/v1/builder/apps          （權限：builder.access）
   兩個都要刪**（只刪 action 仍擋；README、`actions/manifest.json` 的殘留不影響閘門）。刪遠端檔用
   `DELETE /builder/apps/{id}/source/files` 帶 `paths` 與 `expected_version`（缺就 400）——`aigo_sync.py` 的
   `sync_to_cloud()` 只 PATCH 不會刪，本機清掉遠端還在，要用 `delete_remote_files()`。閘門規則與參數見 §8
-- 模板會一併 seed 模板定義的自訂表與 Data Reference 引用（起手式兩款不帶）
-- 金鑰**刻意不在建立時收**——建立後由使用者在 Builder「服務」tab **手動**設定：這是人工確認用途與憑證使用的安全步驟，**AI 不代為寫入**（§25.2 人工設定政策）。人工維運用的寫入 API 見 `uat-environment.md` 附錄 A
+- ⚠️ **用業務模板 slug 建 app 會當場 seed 模板定義的自建表與 Data Reference 引用**（起手式兩款不帶）——
+  表照模板預設繫結建好，改繫結要事後清，而清自建表有副作用。這正是本 skill 只用 starter 建殼的理由（§26.1）；
+  已經這樣建了的 app，先盤 `GET /data-center/tables` 與 `GET /refs/apps/{id}` 再決定清不清，清之前逐張確認
+- 金鑰**不在建立時收**——建立後照 §25.2 確認流程寫入（值由用戶填本機檔或自己貼到 Builder「服務」tab）。寫入 API 見 `uat-environment.md` 附錄 A
 - 複製既有 app：`POST /apps/{app_id}/duplicate` → 201
 
 ### 26.3 刪除
