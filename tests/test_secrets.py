@@ -28,6 +28,28 @@ def secret_file(d, mode=0o600, content=VALUE + '\n', name='k.env'):
 
 
 class SecretFileTest(unittest.TestCase):
+    @unittest.skipIf(os.name == 'nt', 'posix only')
+    def test_rejects_symlink(self):
+        with tempfile.TemporaryDirectory() as d:
+            real = secret_file(d, name='real.env')
+            link = Path(d) / 'link.env'
+            os.symlink(real, link)
+            with self.assertRaises(s.SecretFileError):
+                s.read_secret_file(link)
+
+    @unittest.skipIf(os.name == 'nt', 'posix only')
+    def test_non_utf8_error_has_no_value_bytes(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / 'bad.env'
+            p.write_bytes(b'sk-\xff\xfeSECRET')
+            os.chmod(p, 0o600)
+            with self.assertRaises(s.SecretFileError) as cm:
+                s.read_secret_file(p)
+            msg = str(cm.exception)
+            self.assertNotIn('SECRET', msg)
+            self.assertNotIn('xff', msg)
+            self.assertIsNone(cm.exception.__cause__)
+
     def test_requires_mode_600(self):
         with tempfile.TemporaryDirectory() as d:
             for mode in (0o644, 0o640, 0o400, 0o700):

@@ -36,16 +36,32 @@ def read_secret_file(path: str | os.PathLike) -> str:
     錯誤訊息不含檔案內容。
     """
     p = Path(path)
+    if os.name == "nt":
+        raise SecretFileError("Windows 無法設定 600 權限；請用戶直接在 Builder「服務」分頁貼上金鑰值")
+    # O_NOFOLLOW：不跟隨 symlink；權限檢查與讀取用同一個 fd，避免檢查後被換檔（TOCTOU）
     try:
-        st = p.stat()
+        fd = os.open(p, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     except FileNotFoundError:
         raise SecretFileError(f"找不到金鑰檔：{p}")
-    if not stat.S_ISREG(st.st_mode):
-        raise SecretFileError(f"金鑰檔必須是一般檔案：{p}")
-    mode = stat.S_IMODE(st.st_mode)
-    if mode != 0o600:
-        raise SecretFileError(f"金鑰檔權限是 {mode:o}，必須是 600（chmod 600 {p}）")
-    value = p.read_text(encoding="utf-8").rstrip("\r\n")
+    except OSError:
+        raise SecretFileError(f"金鑰檔打不開（不可以是 symlink）：{p}")
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise SecretFileError(f"金鑰檔必須是一般檔案：{p}")
+        mode = stat.S_IMODE(st.st_mode)
+        if mode != 0o600:
+            raise SecretFileError(f"金鑰檔權限是 {mode:o}，必須是 600（chmod 600 {p}）")
+        with os.fdopen(fd, "rb") as f:
+            fd = -1
+            raw = f.read()
+    finally:
+        if fd != -1:
+            os.close(fd)
+    try:
+        value = raw.decode("utf-8").rstrip("\r\n")
+    except UnicodeDecodeError:
+        raise SecretFileError(f"金鑰檔不是 UTF-8 文字：{p}") from None
     if not value:
         raise SecretFileError(f"金鑰檔是空的：{p}")
     return value

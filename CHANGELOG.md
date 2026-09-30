@@ -22,7 +22,7 @@
 - 前提是**先確認再動手**：建立或授權外部服務、寫入金鑰之前，AI 先用白話列出目的網域、送出的資料、哪支 action 用、
   外部服務是整個租戶共用的；這張表**單獨確認**，不併在計畫同意裡；網域或送出的資料一變就重新確認；刪除另外確認。
 - 金鑰的值不出現在對話：新增 `scripts/aigo_secrets.py`（`list` 只列名稱；`set --from-file` 只讀權限 600 的檔案、只走 https、
-  值只放在請求本文；`delete` 要 `--confirm`；**沒有讀取值的指令**）。
+  值只放在請求本文；`delete` 要 `--confirm`；**沒有讀取值的指令**；不跟隨 symlink、權限檢查與讀取用同一個 fd；Windows 無法設 600，請用戶在 Builder 貼上）。
 - `EGRESS_NOT_READY` 等設定缺口仍然不當平台 bug 回報——改由 AI 在確認後自行補上。
 - 改寫 SKILL.md Action 規則 5 與錯誤處理、dev-guide §25.2–§25.5、`uat-environment.md` §3 與附錄 A、`pre-report-self-grill.md`
   Q4.5b／Q6.1、`issue-reporting.md`、`troubleshooting.md`、`platform-behaviors.md`、`hosted-apps.md`、`aigo_publish.py` 提示。
