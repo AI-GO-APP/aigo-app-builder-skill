@@ -119,7 +119,7 @@ app 身分列出來的表可能只是子集。這與已退場的 CustomObject（
 
 > ⚠️ **這張權限表就是執行期的權限表，不只是後台的。** internal app 的前端 SDK
 > 以**登入者身分**打同一組端點，所以「記錄 CRUD 需 `builder.access`」意味著：
-> **沒有開發權限的一般員工，在 app 畫面上做任何自建表讀寫都會 403**。
+> **沒有開發權限的一般員工，在 app 畫面上做自建表讀寫會 403**（唯一例外：租戶已切到擋下模式、且 app 已登記該表引用，見 §7.5）。
 > 這是 internal app 最容易踩、且開發階段測不出來的破口——完整機制與修復流程見 §7.5。
 
 ### Agent 的建表流程（★ 強制）
@@ -295,7 +295,7 @@ records 平面的三個契約（自己寫 client 時最常踩；2026-09-02 實�
 > ⚠️ **先確認適用範圍再用（§7.5）**：前端 SDK 只適用受眾全員持有 `builder.access` 的開發工具型 app
 > （以及判進 external 的例外 app，SDK 自動分流 `/ext/data-center`）。
 > **internal app 的自建表存取一律包成 Server Action（`ctx.db.*`）**，
-> 前端走 `runAction`——直呼下面這些方法，一般員工執行期必 403。
+> 前端走 `runAction`——直呼下面這些方法，一般員工執行期會 403（§7.5 的例外不改變這條規則）。
 
 ```typescript
 import { listTables, queryTable, insertRow, updateRow, deleteRow } from "../api";
@@ -387,7 +387,7 @@ action 之前；**重用既有自建表**時也一樣——先 `GET /refs/apps/{
 
 | 通道 | 身分 | `builder.access` 閘 |
 |---|---|---|
-| 前端 SDK（internal，`/data-center/*`） | **登入使用者** | **有**——記錄 CRUD 全掛（router 層，源碼核對 2026-08-31） |
+| 前端 SDK（internal，`/data-center/*`） | **登入使用者** | **有**——記錄 CRUD 全掛（router 層，源碼核對 2026-08-31）；唯一例外：租戶已切到擋下模式、且 app 已登記該表引用（見下方「例外」） |
 | 前端 SDK（external，`/ext/data-center/*`） | app 憑證脈絡 | 無 |
 | Server Action（`ctx.db.*`，`/internal/ctx/invoke`） | app 憑證（invocation token） | 無——走 allowlist + scope gate，不驗使用者權限 |
 
@@ -400,6 +400,24 @@ runner 沒有使用者身分，那些端點吃 `get_current_user`，一律 **401
 後果：internal app 的受眾大多是**沒有** `builder.access` 的一般員工，
 前端直呼 `queryTable`／`insertRow` 等方法時，他們拿到的是 403——
 症狀是「畫面資料載不出來／按鈕按了沒反應」，network 面板可見 `/data-center/...` 403。
+
+**例外：什麼時候不會 403**（2026-09-15 起）——三個條件**同時**成立，**記錄 CRUD**（查／增／改／刪）免檢 `builder.access`：
+（只限記錄端點。`listTables()`／讀單表結構仍要 `builder.access` 或 `datacenter.schema_write`，圖片上傳與取 URL 仍要 `builder.access`——例外成立時這些照樣 403）
+
+1. 請求帶 app 前端的 app-scoped token（`__APP_TOKEN__`，internal app 前端 SDK 就是這樣打的）
+2. 該租戶的 app 範圍閘已切到**擋下模式**（全域預設只記錄不擋，個別租戶以覆寫逐一切換）
+3. 這支 app **已登記**這張自建表的資料引用（§7「app 讀寫自建表要先登記引用」）
+
+任一不成立就回到 `builder.access` 檢查，一般員工照樣 403。
+
+**例外成立也不改變正確寫法**——internal app 仍一律包 Server Action，理由：
+
+- **跨租戶不一致**：同一支 app 在沒切換的租戶、或引用被移除時，一般員工立刻 403。
+  在切換過的租戶測到「員工讀得到」不代表寫對了
+- **沒有逐人授權**：例外成立時，看得到這支 app 的人都能從前端直接讀寫這張表
+  （範圍只受引用宣告的欄位與動作、以及租戶資料存取規則限制）。要分「誰能改、誰只能看」只能在 action 內用
+  `ctx.user_permissions` 分流（核心規則 23）——這正是下方修復流程第 3 步要補的閘
+- Review 仍把前端直呼標成**必改**（`review-workflow.md`、`aigo_review.py`）
 
 **為什麼開發時測不出來**：開發與驗證用的帳號必有 `builder.access`
 （不然連 Builder 都進不去），所以 FDE 自己怎麼點都是通的。
