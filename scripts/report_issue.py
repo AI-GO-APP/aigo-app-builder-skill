@@ -3,7 +3,10 @@ report_issue.py — 平台問題回報（直達 AI GO 開發團隊的 Scrum Boar
 
 在 AI IDE 內直接回報平台問題，不開任何 UI、不經 AI GO 平台。
 憑證重用 builder 既有的 `~/.aigo/.env`（AIGO_EMAIL / AIGO_PASSWORD）：
-回報帳號在**本地**衍生——AI GO 密碼不離開本機、不傳給回報系統。
+- 優先走「AI GO 驗證登入」：只把 AI GO access token（HTTPS）交給回報系統，
+  由回報系統向平台確認身分；AI GO 密碼不離開本機。
+- 回報系統尚未支援（舊部署 404/405）或暫時連不到平台（502/逾時）時，
+  退回舊做法：回報帳號在**本地**衍生，同樣不送出 AI GO 密碼。
 
 用法：
     uv run python scripts/report_issue.py submit "一句話標題" \
@@ -46,6 +49,7 @@ from urllib.parse import urlparse
 import httpx
 
 sys.path.insert(0, os.path.dirname(__file__))
+import aigo_auth  # noqa: E402
 from aigo_auth import load_env_file, resolve_base_url  # noqa: E402
 
 # 回報系統（獨立部署的 ticket widget，與 AI GO 平台無關；平台掛掉時仍可回報）
@@ -106,26 +110,52 @@ def derive_credentials(project_path: str = ".") -> dict:
     }
 
 
+class RateLimited(RuntimeError):
+    """回報系統回 429：印出要等多久，不自動重試（避免越打越久）。"""
+
+
+def _retry_after(resp: httpx.Response) -> int:
+    try:
+        value = (resp.json() or {}).get("retry_after")
+    except ValueError:
+        value = None
+    value = value or resp.headers.get("Retry-After") or 60
+    try:
+        return max(1, int(float(value)))
+    except (TypeError, ValueError):
+        return 60
+
+
+def _check_rate_limit(resp: httpx.Response, what: str) -> None:
+    """429 → 拋 RateLimited（main 印出訊息、退出碼 1）。"""
+    if resp.status_code == 429:
+        raise RateLimited(
+            f"⏳ {what}被回報系統限流（HTTP 429）：請約 {_retry_after(resp)} 秒後再試。\n"
+            "   腳本不自動重試；不要連續重送同一則回報。"
+        )
+
+
 def _post(client: httpx.Client, url: str, payload: dict, token: str = "") -> httpx.Response:
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    resp = client.post(url, json=payload, headers=headers)
-    if resp.status_code == 429:
-        # 認證端點每 IP 每分鐘 30 次；等它說的秒數重試一次
-        wait = int((resp.json().get("retry_after") or 60)) + 1
-        print(f"⏳ 連線頻率限制，{wait} 秒後重試…")
-        time.sleep(wait)
-        resp = client.post(url, json=payload, headers=headers)
-    return resp
+    return client.post(url, json=payload, headers=headers)
 
 
-def authenticate(client: httpx.Client, creds: dict) -> str:
-    """登入；帳號不存在就自動註冊。回傳 access token。"""
+def _error_code(resp: httpx.Response) -> str:
+    try:
+        return str((resp.json() or {}).get("error") or "")
+    except ValueError:
+        return ""
+
+
+def _legacy_authenticate(client: httpx.Client, creds: dict) -> str:
+    """舊做法：以本地衍生帳號登入；帳號不存在就自動註冊。回傳 access token。"""
     api = _api_base()
     login = _post(client, f"{api}/api/auth/login", {
         "email": creds["email"],
         "password": creds["password"],
         "contact_email": creds["contact_email"],
     })
+    _check_rate_limit(login, "登入")
     if login.status_code == 200:
         return login.json()["access_token"]
     if login.status_code != 401:
@@ -137,9 +167,85 @@ def authenticate(client: httpx.Client, creds: dict) -> str:
         "display_name": creds["display_name"],
         "contact_email": creds["contact_email"],
     })
+    _check_rate_limit(reg, "建立回報帳號")
     if reg.status_code == 200:
         return reg.json()["access_token"]
     raise RuntimeError(f"❌ 回報帳號建立失敗（HTTP {reg.status_code}）：{reg.text[:200]}")
+
+
+AIGO_RELOGIN_HINT = (
+    "   請重新登入 AI GO 後再回報：\n"
+    "     uv run --project scripts python scripts/aigo_auth.py login\n"
+    "   （憑證本身有誤請先跑 aigo_auth.py setup 修正 ~/.aigo/.env）"
+)
+
+
+class _Unsupported(Exception):
+    """驗證登入走不通、但可以退回舊做法（附一句原因）。"""
+
+
+def _aigo_login(client: httpx.Client, tenant: str, aigo_token: str) -> httpx.Response:
+    try:
+        return _post(client, f"{_api_base()}/api/auth/aigo",
+                     {"tenant": tenant, "aigo_token": aigo_token})
+    except (httpx.TimeoutException, httpx.TransportError) as e:
+        raise _Unsupported(f"連不到回報系統的驗證登入（{type(e).__name__}）") from e
+
+
+def _verified_authenticate(client: httpx.Client, project_path: str, tenant: str) -> str:
+    """
+    AI GO 驗證登入：只送租戶 slug＋AI GO access token，回報系統向平台確認身分。
+    回傳回報系統 token；需退回舊做法時拋 _Unsupported；其餘拋 RuntimeError。
+    """
+    try:
+        aigo_token = aigo_auth.get_token(project_path)
+    except httpx.HTTPStatusError as e:
+        raise RuntimeError(
+            f"❌ AI GO 登入失敗（HTTP {e.response.status_code}），無法驗證回報身分。\n" + AIGO_RELOGIN_HINT
+        ) from e
+    except httpx.HTTPError as e:
+        # 平台連不到：回報系統本來就獨立於平台，退回舊做法照樣能報
+        raise _Unsupported(f"連不到 AI GO 平台取 token（{type(e).__name__}）") from e
+
+    resp = _aigo_login(client, tenant, aigo_token)
+    if resp.status_code == 401 and _error_code(resp) == "aigo_token_invalid":
+        # token 可能剛被撤銷或過期：強制重新登入 AI GO 一次再試一次
+        try:
+            aigo_token = aigo_auth.get_token(project_path, force=True)
+        except httpx.HTTPError as e:
+            raise RuntimeError("❌ AI GO 重新登入失敗，無法驗證回報身分。\n" + AIGO_RELOGIN_HINT) from e
+        resp = _aigo_login(client, tenant, aigo_token)
+        if resp.status_code == 401:
+            raise RuntimeError("❌ 回報系統不接受你的 AI GO 登入（aigo_token_invalid）。\n" + AIGO_RELOGIN_HINT)
+
+    _check_rate_limit(resp, "驗證登入")
+    if resp.status_code == 200:
+        return resp.json()["access_token"]
+    if resp.status_code in (404, 405):
+        raise _Unsupported("回報系統尚未支援 AI GO 驗證登入")
+    if resp.status_code >= 500:
+        raise _Unsupported(f"回報系統暫時無法向平台確認身分（HTTP {resp.status_code} {_error_code(resp)}）".rstrip())
+    raise RuntimeError(
+        f"❌ 回報系統驗證登入失敗（HTTP {resp.status_code} {_error_code(resp) or resp.text[:120]}）"
+    )
+
+
+def authenticate(client: httpx.Client, project_path: str = ".") -> tuple[str, str]:
+    """
+    取得回報系統 token，回傳 (token, tenant_slug)。
+
+    優先 AI GO 驗證登入（見 _verified_authenticate）；回報系統未支援（404/405）
+    或暫時失效（5xx／逾時／平台連不到）才退回本地衍生帳號登入。
+    AI GO token 無效（重登一次仍 401）直接報錯，不默默降級。
+    """
+    load_env_file(project_path)
+    tenant = _tenant_slug(project_path)
+    try:
+        return _verified_authenticate(client, project_path, tenant), tenant
+    except _Unsupported as e:
+        print(f"ℹ️  {e}，改用舊版衍生帳號登入")
+    creds = derive_credentials(project_path)
+    return _legacy_authenticate(client, creds), creds["tenant"]
 
 
 # === 指令 ===
@@ -324,6 +430,9 @@ def _preflight(client: httpx.Client, token: str, title: str, body: str, tenant: 
     except httpx.HTTPError as e:
         print(f"ℹ️  開單前查卡略過（連線問題：{e}）")
         return None
+    if resp.status_code == 429:
+        print(f"⏳ 開單前查卡被限流（HTTP 429，約 {_retry_after(resp)} 秒後解除），略過查卡")
+        return None
     if resp.status_code != 200:
         print(f"ℹ️  開單前查卡略過（HTTP {resp.status_code}）")
         return None
@@ -371,6 +480,7 @@ def _upload_images(client: httpx.Client, token: str, paths: list) -> list:
             content=data,
             headers={"Authorization": f"Bearer {token}", "Content-Type": ctype},
         )
+        _check_rate_limit(resp, f"截圖上傳（{p.name}）")
         if resp.status_code != 201:
             raise RuntimeError(f"❌ 截圖上傳失敗（HTTP {resp.status_code}）：{resp.text[:200]}")
         keys.append(resp.json()["key"])
@@ -395,20 +505,19 @@ def cmd_submit(args: argparse.Namespace) -> int:
     _check_user_confirmed(args)
     body = f"{body}\n\n## {USER_CONFIRM_HEADING}\n{USER_CONFIRM_LINE}"
 
-    creds = derive_credentials(args.project)
     title = args.title.strip()[:80]
     content = body[:4000]
     with httpx.Client(timeout=60) as client:
-        token = authenticate(client, creds)
+        token, tenant = authenticate(client, args.project)
         # 開單前查既有卡（第一階段只記錄，見 _preflight）
-        pf = _preflight(client, token, title, content, creds["tenant"])
+        pf = _preflight(client, token, title, content, tenant)
         preflight_id = (pf or {}).get("preflight_id") or ""
         attachments = _upload_images(client, token, args.image or [])
         payload = {
             "title": title,
             "content": content,
             "source": "agent",
-            "site_key": creds["tenant"],
+            "site_key": tenant,
             "client_msg_id": str(uuid.uuid4()),
             "attachments": attachments,
         }
@@ -421,26 +530,27 @@ def cmd_submit(args: argparse.Namespace) -> int:
             print(f"ℹ️  伺服器不接受 preflight_id（HTTP {resp.status_code}），改不帶它送出")
             payload["client_msg_id"] = str(uuid.uuid4())
             resp = _post(client, f"{_api_base()}/api/tickets", payload, token)
+        _check_rate_limit(resp, "送出回報")
         if resp.status_code == 201 and preflight_id:
             _report_outcome(client, token, preflight_id, "submitted")
     if resp.status_code != 201:
         print(f"❌ 回報失敗（HTTP {resp.status_code}）：{resp.text[:200]}")
         return 1
     data = resp.json()
-    print(f"✅ 已回報（{creds['tenant']}）：{args.title.strip()[:80]}")
+    print(f"✅ 已回報（{tenant}）：{args.title.strip()[:80]}")
     print(f"   ticket_id: {data['ticket_id']}")
     print(f"   目前狀態: {data['status']}（追蹤：report_issue.py show {data['ticket_id']}）")
     return 0
 
 
 def cmd_list(args: argparse.Namespace) -> int:
-    creds = derive_credentials(args.project)
     with httpx.Client(timeout=30) as client:
-        token = authenticate(client, creds)
+        token, _ = authenticate(client, args.project)
         resp = client.get(
             f"{_api_base()}/api/tickets",
             headers={"Authorization": f"Bearer {token}"},
         )
+    _check_rate_limit(resp, "讀取回報")
     if resp.status_code != 200:
         print(f"❌ 讀取失敗（HTTP {resp.status_code}）")
         return 1
@@ -454,13 +564,13 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 
 def cmd_show(args: argparse.Namespace) -> int:
-    creds = derive_credentials(args.project)
     with httpx.Client(timeout=30) as client:
-        token = authenticate(client, creds)
+        token, _ = authenticate(client, args.project)
         resp = client.get(
             f"{_api_base()}/api/tickets/{args.ticket_id}",
             headers={"Authorization": f"Bearer {token}"},
         )
+    _check_rate_limit(resp, "讀取回報")
     if resp.status_code == 404:
         print("❌ 找不到這筆回報（id 錯誤，或不屬於目前的回報帳號）")
         return 1
