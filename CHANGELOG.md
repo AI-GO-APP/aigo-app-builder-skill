@@ -1,3 +1,26 @@
+## 1.58.0
+
+### Hosted App 的平台 Storage API：`/open/storage/*`（平台 v1.16.0 起；修 #107）
+
+skill 一直寫「Hosted App 完全沒有平台 storage 介面」（1.19.0 起，當時已回報平台）。平台 v1.16.0 補上了：
+Hosted App 用容器內的 `AIGO_API_TOKEN` 打 `/api/v1/open/storage/*` 六條端點上傳／取網址／列出／刪除
+「App 檔案」（拿到 `file_id`），也能打 `/open/ai-hub/*` 呼叫平台 AI。舊句會讓 builder 把遷入案的檔案層
+導向錯的處理方式。**1.19.0 那筆「已回報平台」平台已補上。**
+
+2026-10-02 在測試租戶部署一次性探針 Hosted App，零 scope 與開了 storage scope 各跑一輪，六條端點的
+正常路徑與錯誤路徑全部實打（測完檔案與 app 都已刪除）。
+
+- `references/hosted-apps.md` 新增 **§5.2 平台 App 檔案與平台 AI**：授權三開關（`storage.read`／
+  `storage.write`／`ai.hub.invoke`，授予即發布）、端點表附實打結果、實打才知道的坑——
+  `upload` 回 200 不是 201、`url` 回的 `expires_in` 小於 3600、presign 的 `Content-Length` 有簽進簽章、
+  `list` 會列出 `pending`／`cancelled`、四種 404 同形、刪 Hosted App 不會清檔（原始碼核對）；
+  **prod 的 scope 閘目前不擋**（零 scope 全部 200），仍要求先開開關；以及在容器內驗證的方法
+- `hosted-apps.md` §7 持久化表加「平台 App 檔案」一列；§7.1 補檔案／附件遷入（存 `file_id`、在容器內搬）；
+  檔頭部署落差改為 prod＝v1.16.0，`POLICY_GATE_MODE` 改為 v1.16.0 的 prod manifest 已是 on
+- `custom-app-dev-guide.md` §12.1 刪掉「Hosted 完全沒有 storage」，改指 §5.2；§29 通道表的 Hosted 列補 `storage`／`ai-hub`
+- `dev-rules.md` 規則 32、`migration-workflow.md` §2.1、`resources/project_deconstruction_template.md`：
+  寫明 Hosted 線的 Storage API 就是 `/open/storage/*`，檔案層和資料層一樣是必做的改寫工項
+
 ## 1.57.0
 
 ### 平台問題回報改用 AI GO 身分驗證登入（回報後端支援後生效）

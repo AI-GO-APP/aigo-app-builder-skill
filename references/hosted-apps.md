@@ -7,7 +7,7 @@
 
 ### ⚠️ 部署落差（prod＝最新 `v*` tag；main 只進 UAT）
 
-- **prod 跑平台最新的 `v*` tag**（2026-09-30 核：v1.15.4），**平台 `main` 只部署到 UAT**——main 剛合併的功能
+- **prod 跑平台最新的 `v*` tag**（2026-10-02 核：v1.16.0——該 tag 才有的 `/open/storage/*` 當天 prod 實打可用，§5.2），**平台 `main` 只部署到 UAT**——main 剛合併的功能
   在下一個 tag 前**只有 UAT 有**；tag 不一定從 main 切，「prod 有沒有」看 tag 內容，不看合併日期
 - 歷史（2026-09-07 prod＝v1.13.0，prod openapi 實查已含本檔當時所有端點）：下列 09-01／09-02 缺的東西
   已隨 v1.13.0 補齊，留作「下一次 prod 又落後 main」的判讀範本：
@@ -33,7 +33,7 @@
   §4）——`PUT` 的全量語意從四欄變**五欄**；租戶 app 數配額（舊 429「預設 5 支」）已整條移除（§10）
 - **靠旗標不靠版本的兩條**：租戶專屬節點 `TENANT_DEDICATED_NODES` 在 **UAT 與 prod 都是 `ops-only`**
   （租戶自助開機未開放，要平台替租戶開）⇒ §4.1 的 `resources` 在多數租戶會 403；
-  租戶資料存取規則 `POLICY_GATE_MODE` **prod＝off（v1.15.4 manifest 仍 off），main 上已改 on、等之後的 tag**（§5 末條）
+  租戶資料存取規則 `POLICY_GATE_MODE` **v1.16.0 的 prod manifest 已是 on**（2026-10-02 核 tag；v1.15.4 以前是 off）（§5 末條）
 - **判讀原則**：對著本檔宣稱的端點拿到 404 或回應缺欄位，**先懷疑部署落差**，
   不是文件錯也不是你打錯——隔幾天再試或問平台
 
@@ -43,7 +43,7 @@
 - 2. 應用形狀硬規則（★ 失敗率最高的來源，動手前逐條核）
 - 3. 部署
 - 4. 環境變數（詳情頁「環境變數」tab；`PUT /{id}/runtime-settings`）
-- 5. 取平台資料（隨附整合 + Open Proxy）
+- 5. 取平台資料（隨附整合 + Open Proxy）——5.2 平台 App 檔案與平台 AI
 - 6. 可見度與 internal app 的 401 處置
 - 7. 持久化語意（★ 資料放哪裡才不會消失）
 - 8. 日誌與除錯
@@ -490,8 +490,9 @@ action 以 `ctx.secrets` 讀取（Builder 沒有 runtime-settings 這支 GET，�
   （D28），所以租戶一開「依員工過濾」類規則，hosted app 的 Open Proxy 讀取會直接 403 而不是少列。
   遷入案的資料層改寫前把這條告訴租戶：對 app 身分要另設不帶 `$user.*` 的規則、或用 app 級規則放行；
   app 端改 code 無解 → `custom-app-dev-guide.md` §27
-- ⚠️ **`POLICY_GATE_MODE` 現況（2026-09-21）**：UAT 已 on；**prod manifest 於 2026-09-17 改 on（commit `00d4c86c`）
-  但 v1.15.3、v1.15.4 都沒帶上（2026-09-30 核）**——要等主線下一次發版（預計平台 1.16.0）才生效。走 Open Proxy 的 Hosted App 要在那之前把上一條處理掉。
+- ⚠️ **`POLICY_GATE_MODE` 現況（2026-10-02）**：UAT 已 on；**prod manifest 於 2026-09-17 改 on（commit `00d4c86c`），
+  v1.15.3、v1.15.4 沒帶上，v1.16.0 帶上了**（2026-10-02 核 tag 的 `infra/k8s/prod/backend.yaml`；prod 已跑 v1.16.0）。
+  走 Open Proxy 的 Hosted App 現在就要把上一條處理好。
 
 ### 5.1 Hosted App 當 Custom App 的後端（混合方案的一種）
 
@@ -507,6 +508,78 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
   身分欄位放進 request body；Hosted 不自行認人、不另建使用者表
 - 前端**不要**跨來源直打 Hosted：帶憑證的 CORS 平台不支援（proxy 只處理同站 cookie）
 - 業務資料仍落平台的表：Hosted 用 Open Proxy（§5）讀寫，不自帶 DB（規則 32）
+
+### 5.2 平台 App 檔案與平台 AI（`/open/storage/*`、`/open/ai-hub/*`；平台 v1.16.0 起）
+
+隨附整合那把 key 除了資料面，還能讀寫**App 檔案**（app 程式碼自己上傳、只對這支 app 可見的檔案）與
+呼叫**平台 AI**。這就是 Hosted 線的「Storage API」——原系統的 S3／Supabase Storage／本機上傳目錄
+遷入時落這裡（§7.1、規則 32）。核自平台 `docs/integrations/public-api.md` §1.4「平台 AI 與 App 檔案」
+與 `backend/app/api/open_storage.py`（模組 docstring 是錯誤契約的權威）；**2026-10-02 測試租戶 prod
+實打一輪**（探針 Hosted App，結果見下表「實打」欄，測完已刪）。
+
+- **憑證與 base URL 同 §5**：`Authorization: Bearer $AIGO_API_TOKEN`，打
+  `$AIGO_PLATFORM_API_URL/api/v1/open/...`——env 值**不含** `/api/v1`（實打值是叢集內部位址
+  `http://backend.aigo-system.svc.cluster.local:8080`），自己接。**沒有 SDK、沒有新 env**；
+  限流與資料面共用同一個 600 次/分 的桶
+- **授權（三個開關）**：詳情頁「資料存取」→「平台 AI 與檔案」。開關寫入隨附整合的 scope，
+  **同一交易自動發布，不必另外發布**（實打：`GET /api/v1/apps/{整合 id}/scopes` 讀回
+  `published_scopes` 立即等於 `granted_scopes`，`scope-logs` 多一筆 `auto_published`）
+
+  | scope | 端點 | 風險 |
+  |---|---|---|
+  | `storage.read` | `GET /open/storage/url`、`GET /open/storage/list` | 低 |
+  | `storage.write` | `POST /open/storage/upload`、`/presign-upload`、`/confirm`、`DELETE /open/storage/file`；計入 App 配額（預設 5 GiB）與企業空間用量 | 低 |
+  | `ai.hub.invoke` | `POST /open/ai-hub/complete`、`GET /open/ai-hub/models`；扣**租戶 AI Credit** | **高**——開的人要在 UI 重新輸入自己的密碼 |
+
+  誰能切：持 `builder.access` **或** `hosted_apps.deploy`、且看得見這支 app 的人（非 owner 只能動這三個）。
+  API 等價是 `PUT /api/v1/apps/{整合 id}/requested-scopes` 再 `PUT .../granted-scopes`（body `{"scopes": [...]}`；
+  登入 session，Deploy Token 打不到）。**`ai.hub.invoke` 要帶 `reauth_password`——agent 不代填密碼，
+  請用戶自己在詳情頁開**；storage 兩個是低風險，可以用 API 開
+- ⚠️ **prod 現況 scope 閘不擋**：2026-10-02 零 scope 的探針打六條 storage 端點與 `/open/ai-hub/models`
+  **全部 200**（閘在 `off` 或 `audit`，黑箱分不出；`audit` 只記 `would_deny`）。**仍一律先開開關**——
+  平台切到 `enforce` 那天，沒開的 app 會整批 403 `app_scope_denied`（body 的 `required_scope` 告訴你開哪個）。
+  所以「沒開也能用」**不能**當作「設定正確」的證據；部署後驗證要讀回 `scopes`，不是看 200
+
+**端點與 prod 實打結果**（FileRef＝`{file_id, path, name, size, mime_type, created_at, status}`）：
+
+| 端點 | 送什麼 | 實打（2026-10-02） |
+|---|---|---|
+| `POST /open/storage/upload` | multipart：`file`（≤ 100 MiB）、選填 `folder`（`[A-Za-z0-9_-]{1,64}`，預設 `default`） | **200**（不是 201）回 FileRef，`status: ready` |
+| `GET /open/storage/url?file_id=` | `expires_in` 只收 `3600` | 200 `{url, expires_in}`；URL 是 S3 簽章網址，容器內直接 GET 拿回原內容。**回的 `expires_in` 是實際壽命，實打 3197、2716**（小於 3600）；`expires_in=60` → 422 `unsupported_expires_in`（附 `supported: [3600]`） |
+| `GET /open/storage/list?folder=&cursor=&limit=` | — | 200 `{items: FileRef[], next_cursor}`；**非遞迴**：不帶 `folder` 只列 `default`，看不到其他 folder 的檔 |
+| `POST /open/storage/presign-upload` | JSON `{filename, size, mime_type?, folder?}` | 200 `{file_id, url, method: "PUT", headers, expires_in: 900}`；`headers` 含 `Content-Type` 與 **`Content-Length`** |
+| `POST /open/storage/confirm` | JSON `{file_id}` | PUT 前 confirm → 409 `upload_not_found`；PUT 後 200 FileRef（`ready`）；再 confirm 仍 200（冪等） |
+| `DELETE /open/storage/file?file_id=` | — | 200 `{deleted: true}`；重刪 `{deleted: false}`（冪等，不是 404） |
+
+**光看契約不會知道的坑**（全部是實打觀察）：
+
+- **存 `file_id`，不存 URL**：URL 會過期，顯示時每次用 `/url` 換；快取 URL 時以回應的 `expires_in`
+  為準，**不要寫死 3600**
+- **presign 的 PUT 要原樣帶回傳的 `headers`**：`Content-Length` 被簽進簽章——body 長度跟宣告不同時，
+  S3 直接 403 `SignatureDoesNotMatch`（物件沒寫入），接著 confirm 回 409 `upload_not_found`；
+  手動設了比 body 大的 `Content-Length` 則是 client 卡住到 S3 回 400 `RequestTimeout`。
+  presign 時 `size` 就要填真實大小。pending 中的檔 `/url` 回 404（與查無同形）
+- **`list` 會列出非 `ready` 的列**：presign 後沒完成的直傳是 `pending`，刪掉後變 `cancelled` 且**仍出現在
+  list 裡**（實打），直到 sweeper 收掉（最長約 75 分鐘）。顯示清單一律濾 `status == "ready"`
+- **四種 404 同形**：查無、別支 app 的檔、`file_id` 不是 UUID、pending 都回 404 `{"code": "not_found"}`
+  （實打非 UUID 與隨機 UUID 兩種）——不能用 404 判斷「格式錯」
+- `folder` 只收英數、`_`、`-`：`a.b` 回 400 `invalid_folder`（實打）。同一支 app 的不同實例／不同版次
+  看得到彼此上傳的檔（檔案屬於隨附整合，不屬於容器）
+- 檔案**只對同一支 app 可見**、不進知識中心、平台登入使用者面一律 404（平台文件與原始碼，未實打）
+- ⚠️ **刪 Hosted App 不會清掉它的 App 檔案**（原始碼核對，未實打）：刪除是軟刪，隨附整合只翻 `draft`、
+  key 被撤銷，`file_nodes` 沒有對應的清除路徑。app 退場前要自己 `list`＋`DELETE` 清乾淨——
+  刪了之後就沒有 key 能再清
+- **平台 AI**：`POST /open/ai-hub/complete` 收 `messages`（純文字）＋選填 `model`（要在 `/models` 清單內）、
+  `file_id`（本 app 上傳且 `ready` 的檔，就是上面拿到的那個）、`response_format`；回上游 chat completion 原樣。
+  2026-10-02 只實打 `/models`（200，回模型清單與預設模型），`complete` 會扣 AI Credit **未實打**。
+  錯誤表（422 `model_not_allowed`、429 `quota_exceeded` 依 `event_type` 分企業空間／AI Credit…）以
+  平台 `public-api.md` §1.4 為準
+
+**怎麼測（agent 自己驗證時）**：`AIGO_API_TOKEN` 只經 k8s Secret 注入容器、不出現在任何 API 回應，
+本機拿不到——**測試一律在容器內跑**。做法：部署一支一次性探針 app（`internal`、只有 Python 標準庫），
+啟動時跑完「list → upload → url（並 GET 簽章網址核內容）→ presign → PUT → confirm → list → delete」，
+每步印一行 JSON 到 stdout，用 `GET /api/v1/hosted-apps/{id}/runtime-logs?tail=1000`（§8）讀回；
+要重跑就重新部署。**不要印 token**。測完把檔刪乾淨再刪 app（上一條：刪 app 不會清檔）。
 
 ## 6. 可見度與 internal app 的 401 處置
 
@@ -578,6 +651,7 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
 | 容器檔案系統（含用「檔案」tab／終端寫入的） | ❌ 重部署／重啟／縮到零就消失 |
 | `persistent_disk=true` 掛載的 **`/data`**（`AIGO_DATA_DIR`） | ✅ 10 GiB EFS；關旗標只卸掛不刪，刪 app 才刪 |
 | 平台資料（Open Proxy 寫入的自建表等） | ✅ 在平台側 |
+| 平台 App 檔案（`/open/storage/*` 上傳的檔，§5.2） | ✅ 在平台側；**刪 app 也不會自動清**，退場前自己刪 |
 
 - **複製（clone）不複製 `/data` 內容**，也不複製 Deploy Token 與部署歷史
 - Custom App 的 action runner 同一套語意：`open()` 寫得進 `/tmp`，但那是隨 pod 消失的 emptyDir，
@@ -608,6 +682,11 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
   工作量要在計畫階段向用戶如實預告
 - **歷史資料匯入在本地做**：走 data-center API 或匯入 action
   （`custom-app-dev-guide.md` §23.6）
+- **檔案／附件遷入平台 App 檔案**（§5.2）：原系統的 S3／Supabase Storage／本機上傳目錄退場，
+  檔案改用 `/open/storage/upload` 上傳，資料列存回傳的 **`file_id`**（取代原本的 URL 或 storage key），
+  顯示時用 `/open/storage/url` 換短效網址。憑證只在容器內，所以**歷史檔案的搬運也要在容器內做**
+  （例如 app 內一支一次性的匯入端點／啟動任務，從原 storage 讀、往平台寫，跑完移除）——
+  不像資料列能在本地打 data-center API。單檔 ≤ 100 MiB、App 配額預設 5 GiB，量大時先估總量
 
 **為什麼「繼續連原 DB」不是選項**——是規則，不再是網路限制。
 ★ 2026-09-17 起（平台 v1.15.2，PR #1641）operator 的

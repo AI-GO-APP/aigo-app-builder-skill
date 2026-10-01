@@ -395,8 +395,10 @@ app（含 Server Action 的 `ctx.db`）要讀寫某張自建表，**先替 app �
   顯示面每次用 `GET /ext/storage/url` 換短效 URL
 - 圖片欄位（自建表 `image` 型別）**不走本節**——它有自己的上傳端點與 10MB 限制
   （`data-center.md` §6）
-- Hosted App **完全沒有**平台 storage 介面（Open Proxy 無 storage 面）——
-  已回報平台（2026-09-02），現況處置見 `hosted-apps.md` §7.1 與規則 32
+- Hosted App 不走本節：它的 Storage API 是 `/open/storage/*`（容器內 `AIGO_API_TOKEN`，回 `file_id`；
+  平台 v1.16.0 起，2026-10-02 prod 實打），授權、端點與坑見 `hosted-apps.md` §5.2，遷入見 §7.1。
+  檔案只對上傳它的那支 app 可見，所以 Custom 與 Hosted 混合方案（`hosted-apps.md` §5.1）**不能共用同一批檔案**——
+  由一邊負責上傳／讀取，另一邊經它轉手
 
 ## 13. Runtime 全域變數
 
@@ -1732,7 +1734,7 @@ agent 不自行開、也不把「要不要常駐」丟給 owner 選。決策的�
 | **internal** | internal Custom App 前端（登入者） | `__APP_TOKEN__`＝app-scoped JWT（代表登入者；`POST /app-scoped-token/{app_id}`／`app-runtime-session` 發） | `/api/v1/data-center`、`/proxy/{app_id}`、`/actions/apps/{app_id}`、`/storage`、`/approvals`（★ `/refs` 與平台管理面**不在** route catalog 內，今天打得到是 audit 放行，見下） | 登入者的權限（自建表記錄 CRUD 掛 `builder.access`，§7.5；預設表看 Data Reference 授權） |
 | **external** | external／self_built Custom App 前端（app 使用者） | `__APP_TOKEN__`＝`custom-app-auth` 發的使用者 token（claim 帶 `custom_app_id`） | `/api/v1/ext/{data-center,proxy,actions,storage,data,compile,preview-token,runtime-errors}`＋`/custom-app-auth/{slug}/*` | app 脈絡，不驗使用者權限；別種憑證一律 401「無效或已過期的 Token」（實打） |
 | **匿名** | 未登入訪客（只有 external／self_built 可開） | 無 | `/api/v1/pub/{data-center,proxy,data}/{slug}/…`（**唯讀**：只有 GET／`query`） | 表要 `is_public_readable`＋app 開旗標＋**平台核可**（§15.1）；120 次/分/IP |
-| **Hosted／self_built 後端** | Hosted App 容器、第三方自建應用 | `Authorization: Bearer <API key>`（容器內 `AIGO_API_TOKEN`；`X-API-Key` 相容） | `/api/v1/open/{data-center,proxy,data,members}`（`/open/members` 只有 `GET /{user_id}/context`，prod v1.15.4 起） | app 身分（API key 本身沒有 user；internal Hosted 的登入者由 proxy 注入 header 帶進來）；預設表零授權起步，600 次/分/key（`hosted-apps.md` §5） |
+| **Hosted／self_built 後端** | Hosted App 容器、第三方自建應用 | `Authorization: Bearer <API key>`（容器內 `AIGO_API_TOKEN`；`X-API-Key` 相容） | `/api/v1/open/{data-center,proxy,data,members,storage,ai-hub}`（`/open/members` 只有 `GET /{user_id}/context`，prod v1.15.4 起；`storage`／`ai-hub` prod v1.16.0 起，另需 scope 開關，`hosted-apps.md` §5.2） | app 身分（API key 本身沒有 user；internal Hosted 的登入者由 proxy 注入 header 帶進來）；預設表零授權起步，600 次/分/key（`hosted-apps.md` §5） |
 
 同一張表的四條路徑（自建表記錄為例；預設表把 `data-center/tables/{key}/records` 換成 `proxy/{table}` 即可）：
 

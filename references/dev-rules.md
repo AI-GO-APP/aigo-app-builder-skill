@@ -251,7 +251,9 @@
       （判進 external 的例外 app 自動分流 `/ext/data-center`，不在此閘）
     - 機制、存量修復流程、假修法排除清單見 `references/data-center.md` §7.5
 32. **禁止自助直連或自帶資料庫；不得以 Hosted App 承載 DB 或 storage**（★ 強制，遷入情景最容易踩）
-    - 預設資料層仍是平台**預設表／自建表**（規則 18 雙軌分流、§19 SSOT）＋ Open Proxy，檔案一律 **Storage API**。
+    - 預設資料層仍是平台**預設表／自建表**（規則 18 雙軌分流、§19 SSOT）＋ Open Proxy，檔案一律 **Storage API**
+      ——Custom App 走 `/ext/storage`（`custom-app-dev-guide.md` §12），**Hosted App 走 `/open/storage/*`**
+      （資料列存 `file_id`；`hosted-apps.md` §5.2）。「Hosted 沒有 storage 所以自帶 S3／MinIO」不成立。
       builder 不得自行建立、選用或注入外部 PostgreSQL／Supabase／MySQL／Redis，
       也**不得**把 DB 本身或「包了 REST 的 DB 服務」（PostgREST、Hasura、自架 API-over-DB）
       部署成 Hosted App 供其他 App 存取——同租戶 app 間網路互通讓這在技術上做得出來，但它是
