@@ -29,6 +29,25 @@
 - 權限（v1.15.4）：app 範圍外部服務的建立／授權需 `builder.access`＋app 擁有者或 `system.admin`；PATCH／DELETE 需租戶內任一 app 擁有者
   或 `system.admin`；金鑰需 `builder.access`＋看得到該 app；租戶層 `/egress-services` 需 `system.admin`。
 
+## 1.57.0
+
+### 平台問題回報改用 AI GO 身分驗證登入（回報後端支援後生效）
+
+回報後端原本任何人都能註冊帳號、建卡沒有頻率限制；skill 是公開的，後端網址人人看得到，等於任何人都能
+大量灌卡到開發團隊的看板。回報後端新增「用 AI GO token 驗證身分」的登入，並加上建卡／附圖頻率限制；
+skill 這版改走新登入。
+
+- `scripts/report_issue.py`：租戶網址是 `https://<租戶>.ai-go.app` 時，先用 AI GO access token 呼叫回報後端的
+  `POST /api/auth/aigo`，後端向平台確認身分後才發回報 token；聯絡信箱一律是驗證過的 AI GO 信箱。
+  **AI GO 密碼不再用來衍生回報帳號**，只送 token（https）。
+  - 後端尚未支援（404／405）、5xx 或連不上 → 退回舊的衍生帳號流程並提示一次
+  - token 無效（401）→ 重新取得一次再試；仍失敗就請使用者重新登入，不退回舊流程
+  - 被限流（429）→ 顯示要等多久並結束，不自動重試
+  - UAT、localhost、非 https 的網址 → 直接走舊流程，不送 AI GO token；回報後端網址不是 https 也不送（localhost 例外）
+- 驗證登入與舊流程是兩個不同的回報帳號：切換後 `list` 看不到舊帳號的回報、`show <舊 id>` 可能 404
+  （回報仍在開發團隊那裡）；`list`／`show` 遇到這種情況會提示一句。
+- `references/issue-reporting.md`「機制與隱私」同步；新增 `tests/test_report_issue_auth.py`。
+
 ## 1.56.0
 
 ### Hosted App 的 `aigo` CLI 加版本閘門——瀏覽器登入需 ≥ 0.5.0
