@@ -155,8 +155,9 @@
   `hosted-apps.md` §7.1），不因共用而硬併成一個 app。
 - ⚠️ **資料層不參與這個判斷**：不論分到哪條線，DB 與 storage 都**不允許**
   自立 Hosted App 承載（`dev-rules.md` 規則 32）——table schema 一律落平台
-  預設表／自建表、檔案一律 Storage API；Hosted App 的資料層一律改寫
-  Open Proxy（`hosted-apps.md` §7.1）。「把 Postgres／包了 REST 的 DB
+  預設表／自建表、檔案一律 Storage API（Hosted 線就是 `/open/storage/*`，
+  `hosted-apps.md` §5.2）；Hosted App 的資料層一律改寫 Open Proxy、檔案層改寫
+  `/open/storage`（`hosted-apps.md` §7.1）。「把 Postgres／包了 REST 的 DB
   搬成一個 Hosted App 給其他 App 打」不是選項。
   唯一例外見 **dev-rules.md 規則 32**（平台工程師核准並建立的租戶級外接 PostgreSQL；核准紀錄存在才生效）：
   §2.4 映射做完、逐項確認交易／FK／唯一約束／列鎖／RLS 在平台**做不到也改不掉設計**時才提申請，
