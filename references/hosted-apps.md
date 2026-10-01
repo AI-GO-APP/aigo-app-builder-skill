@@ -410,8 +410,9 @@ Hosted App 容器**只帶平台注入的 `AIGO_*`**，原系統的 env 一顆都
    其他落點見下方。**「尚缺」只算「目標位置需要、但還沒設」的列**——不搬／退役的列寫理由即可，
    不算尚缺（例如原系統的 `DATABASE_URL`，見本節末）
 3. **把「尚缺」逐顆列給用戶**，說明缺了哪個功能會壞，請負責人到對應位置設定（Hosted：「環境變數」tab）。
-   遷入與其 UAT 的密鑰值一律**由負責人設定**；AI 只提供設定規格、盤點與驗證，**不代填密鑰**、
-   值不在對話裡傳（人工設定政策）。尚缺未清空時，只能給**進度／阻塞說明**（列出缺項與影響），
+   遷入與其 UAT 的密鑰**值**一律由負責人提供：填進本機檔（600、不進 git）由 AI 讀檔寫入（Custom App 的 `ctx.secrets`
+   用 `scripts/aigo_secrets.py set`；Hosted env 走 runtime-settings 時同樣從檔案讀、不印值）、或自己到設定頁貼上；
+   AI 不向人要值、不自己編值，值不在對話裡傳、不印出（dev-guide §25.2 確認流程）。尚缺未清空時，只能給**進度／阻塞說明**（列出缺項與影響），
    **不得對外交付、不得回報遷入完成**
 4. **驗證**：依 `env_availability` 分開——`runtime` 等滿傳播窗後驗（§3.4「只改 env」列）；
    **`build`／`both` 要設定後重新建置部署**（改設定不會觸發重建，舊 bundle 裡還是舊值），
@@ -502,7 +503,7 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
   302、fetch 401 `hosted_app_auth_required`），Server Action 端看到的是 401／HTML，不是資料
 - **app 自驗簽章**：Custom 端把共享金鑰存 `ctx.secrets`，action 自組 `Authorization: Bearer …`
   （egress 閘道原樣轉送 `Authorization`，dev-guide §25）；Hosted 端每個請求驗證，驗不過 401
-- Hosted 的網域要先由**用戶**在 Builder「外部服務」以同名 slug 建成 egress 白名單，AI 列出 slug 與網域交給用戶，不代設（SKILL.md 計畫第 4.6 項、dev-guide §25.2 人工設定政策）
+- Hosted 的網域要先以同名 slug 建成 egress 外部服務並授權本 App：AI 說明 slug、網域與會送出的資料，用戶同意後由 AI 建立（SKILL.md 計畫第 4.6 項、dev-guide §25.2 確認流程）
 - **使用者身分由 Custom 端帶**：action 內用 `ctx.user_id`／`ctx.user_permissions` 分流後，把需要的
   身分欄位放進 request body；Hosted 不自行認人、不另建使用者表
 - 前端**不要**跨來源直打 Hosted：帶憑證的 CORS 平台不支援（proxy 只處理同站 cookie）

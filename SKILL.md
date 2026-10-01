@@ -130,22 +130,21 @@ uv run --project scripts python scripts/aigo_auth.py app add <alias> --id <uuid>
 - **新 app 用 API 建，不必走 UI**：`POST /api/v1/builder/apps`，`name` + `template_slug` 必填；
   ★ **access_mode 由模板決定、建立後不可改**，且**建 app 只在 Phase 1.5 計畫確認後**
   （`starter-internal` 是預設；`starter-external` 只在分配表明寫時用）→ `custom-app-dev-guide.md` §26
+- **只用兩支 starter 建殼，不用業務模板的 slug 建 app**：模板是素材——`GET /templates/{slug}/preview`
+  取回全碼抄回本地改造，表／引用／外部服務依效果繫結表自行 provision（`references/template-workflow.md`）
 - `config.json` 欄位、`base_url` 的三層來源與優先序、登入 401 的排查 → `references/environment.md`
 - **Hosted App 用 `aigo` CLI 時**：先過 `hosted-apps.md` §3.3 版本閘門（`scripts/aigo_cli_check.py`）；
   既有 app 只部署 → 用戶放 Deploy Token；建新 app／session-only → 用戶自己 `aigo login --workspace`（§3.1）
 ## Phase 1.25：多系統遷入盤點（條件觸發）
 
-> **觸發條件**：用戶有 **2 個以上外部系統**（各自帶 Supabase / Google Sheet / MySQL
-> 等 DB）要遷入 AI GO。僅遷入 1 個系統或純新建 App → 跳過，直接進 Phase 1.5
-> （純新建從 §1.0 需求盤點起手）。
-
-> 觸發時 → 讀 `references/migration-workflow.md` §1。目的是在任何單一 App 開始
-> Phase 1.5 之前建立**全局視圖**，避免各 App 各自為政導致資料架構混亂；
-> 產出的「遷入全景表」會在後續各 App 的 Phase 1.5 持續參照。
+> **觸發條件**：用戶有 **2 個以上外部系統**（各自帶 Supabase / Google Sheet / MySQL 等 DB）要遷入 AI GO；
+> 僅遷入 1 個系統或純新建 App → 跳過，直接進 Phase 1.5（純新建從 §1.0 需求盤點起手）。
+> 觸發時 → 讀 `references/migration-workflow.md` §1：在任何單一 App 開始 Phase 1.5 之前建立**全局視圖**，
+> 避免各 App 各自為政導致資料架構混亂；產出的「遷入全景表」在後續各 App 的 Phase 1.5 持續參照。
 
 ## Phase 1.5：需求盤點與實作計畫（★ 強制步驟）
 
-> **在任何開發工作開始前（包含建立 app、從模板建立），必須先完成需求盤點、提出實作計畫
+> **在任何開發工作開始前（包含建立 app、從模板起手、既有 app 加新功能），必須先完成需求盤點、提出實作計畫
 > 並獲得用戶確認。禁止跳過此步驟直接進入 Phase 2 寫 code；也禁止在 §1.0 盤點與計畫確認前
 > 建立 app**——模板＝`access_mode`，建立後不可改。
 
@@ -166,11 +165,19 @@ uv run --project scripts python scripts/aigo_auth.py app add <alias> --id <uuid>
 **產出「需求形狀結論」**（照 `resources/new_app_requirements_template.md` 填）。
 四問的理由、答不出時給的選項、結論格式 → `references/planning.md` §1.0。
 
+### 1.0.5 模板盤點（★ 所有開發都做，含既有 app 的增量開發）
+
+四問之後、計畫成形之前查模板目錄（`GET /templates`，分類看 **slug 前綴的產業套組**，不只看 `category`），
+結論三選一寫進計畫：**(a)** 可直接用／**(b)** 有近似的（寫明從哪支改、改什麼）→ 兩者都走「`preview` 取碼 →
+拷問效果繫結 → starter 建殼 → 自行 provision」，產出**效果繫結表**；**(c)** 都不適用 → 寫一句理由，
+仍讀最接近的一兩支。做法、端點與權限 → `references/template-workflow.md`（腳本 `scripts/aigo_template.py`）。
+
 ### 計畫內容必須包含（★ 逐項展開在 `references/planning.md`）
 
 | # | 項目 | SSOT |
 |---|---|---|
 | 1 | 需求分析：功能清單、使用場景、使用者流程 | §1.0 問題二 |
+| 1.3 | **模板盤點結論**（a／b／c）；a、b → **效果繫結表**（每個非預設繫結＝改 ports 實作） | `template-workflow.md` §2、§4 |
 | 1.5 | **產品線與模式判斷**（結果不可逆）→ 產出 **app 分配表** | `product-line-decision.md` |
 | 1.7 | **授權架構選型**（角色、`access_role_ids`、邀請）→ 產出 **授權架構表** | `member-admin.md` §1 |
 | 2 | 功能群拆分（2 群以上不同目的才拆 app） | `product-line-decision.md` §7 |
@@ -182,14 +189,16 @@ uv run --project scripts python scripts/aigo_auth.py app add <alias> --id <uuid>
 **常駐（`always_on`）兩條線都要有結論，預設都是 `false`**——Hosted 過 `hosted-apps.md` §3.0 三問；
 Custom 過 `custom-app-dev-guide.md` §28.1（答案幾乎一律是「關」，沒命中即時互動訊號不必問 owner）。
 
-### 計畫閘門（★ 五條，缺一不得進 Phase 2）
+### 計畫閘門（★ 七條，缺一不得進 Phase 2）
 
 1. 四問未齊，或計畫缺「需求形狀結論」「app 分配表」「授權架構表」「資料承載表」任一張 → 不算完成
 2. app 分配表任何一列**沒有常駐結論** → 不算完成（寫「開」要帶「理由 X；退場條件 Y」＋確認付費方案）
 3. 資料承載表任何一張自建表缺「已對照的預設表／不採用理由」 → 不算完成
    （issue #53：少了它，46 張表的遷入案第一版判 40 張自建表，對照後只剩 13 張）
-4. **必須等用戶明確回覆「同意」**才進 Phase 2；用戶改需求 → 更新計畫再確認
-5. 確認後的固定動作：依 app 分配表建 app（**建 app 的唯一時點**）並 `aigo_auth.py app add` 登錄、
+4. 沒有模板盤點結論（a／b／c），或 (c) 沒寫理由 → 不算完成
+5. 效果繫結表任一列的「落實動作」在計畫裡沒有對應項目 → 不算完成
+6. **必須等用戶明確回覆「同意」**才進 Phase 2；用戶改需求 → 更新計畫再確認
+7. 確認後的固定動作：依 app 分配表建 app（**建 app 的唯一時點**）並 `aigo_auth.py app add` 登錄、
    記 `app_domain`、依授權架構表建角色與發邀請（`member-admin.md` §3–§5，每步過
    `data-operations.md` §3.5 寫入閘門）；判走 Hosted 的轉 `hosted-apps.md`
 
@@ -204,10 +213,10 @@ Custom 過 `custom-app-dev-guide.md` §28.1（答案幾乎一律是「關」，�
   - 多頁：HashRouter + Sidebar 導航
   - 可用 `scripts/aigo_scaffold.py` 的 `scaffold_new_project()`
 
-- **VFS 有內容**：下載到本地進行增量開發
-  - 將雲端 VFS 下載為本地檔案結構
-  - 保留現有所有程式碼
-  - 可用 `scripts/aigo_scaffold.py` 的 `download_vfs_to_local()`
+- **VFS 有內容**：`aigo_scaffold.py` 的 `download_vfs_to_local()` 下載到本地增量開發，保留現有程式碼
+- **從模板起手**（盤點結論 a／b）：starter 空殼先清示範 action 與 `_template.json`（不清發布 409
+  `EGRESS_NOT_READY`）→ `aigo_template.py preview` 把模板碼取到**另一個**參考目錄 → 抄進專案改造
+  （非預設繫結改 ports 實作）→ 依效果繫結表 provision（`template-workflow.md` §5）
 
 ## Phase 3：開發指引
 
@@ -259,8 +268,7 @@ Custom 過 `custom-app-dev-guide.md` §28.1（答案幾乎一律是「關」，�
 | 31 | **Internal app 前端禁止直呼自建表 SDK** | ★ 強制 |
 | 32 | **禁止以 Hosted App 承載資料庫或 storage** | ★ 強制 |
 
-> 這 15 條的完整說明、判準與實測佐證在 `references/dev-rules.md`（含目錄）。
-> 只看表不足以動手的情況：規則 18 的雙軌分流、18.5 的命名兩步法、23 的角色沿用——這三條必讀原文。
+> 完整說明、判準與實測佐證在 `references/dev-rules.md`（含目錄）；規則 18 雙軌分流、18.5 命名兩步法、23 角色沿用必讀原文。
 ### Server-Side Action 撰寫（★ 四條硬規則；`ctx` 清單見 `custom-app-dev-guide.md` §7）
 
 ```python
@@ -278,12 +286,10 @@ def execute(ctx):
 3. **金鑰由 app 自帶**：閘道只驗域名、不注入憑證（ADR 0010）——存 `ctx.secrets`，
    action 自組 `Authorization` header
 4. **`ctx.db` 沒有結構操作**：執行期不能建表改欄，這是刻意的能力邊界
-5. **★ 人工設定政策**：在 AI 開發流程中，外部服務的建立／修改／啟停／刪除與 App 授權，以及
-   secrets 的新增／更新／刪除，**由使用者或具權限的管理員在 Builder 手動完成**——外部服務到
-   `/builder/{app_id}` 的「外部服務」tab，金鑰到「服務」tab。這是刻意的安全設計：讓人理解並決定
-   連線目的地、用途與可能送出的資料。AI 可整理設定需求、做唯讀檢查（`available-egress-services`、
-   發布預檢），但**不得透過 API、腳本或代操作 UI 完成上述設定**；持有可用 token 不代表允許代設。
-   設定缺口＝「等待人工設定」，**不是 bug**（→ 錯誤處理、`issue-reporting.md`；dev-guide §25.2）
+5. **★ 外部服務與金鑰：AI 可代設，先講清楚再動手**：建立／授權外部服務、寫入 secrets 之前，用白話告訴用戶
+   **連到哪個網域、會送出哪些資料、哪支 action 用**，**單獨取得同意**（不併進計畫同意；網域或資料變了要重問）；
+   金鑰值由用戶填進 600 權限的本機檔、`aigo_secrets.py` 讀檔寫入，**不在對話裡傳、不印出、不讀回**。權限：外部服務
+   `builder.access`＋本 App 擁有者或 `system.admin`；金鑰 `builder.access`＋看得到該 app（dev-guide §25.2）。缺口**不是 bug**、不回報
 
 > 逾時有兩道且原文同形：manifest `timeout_ms`（1000～120000，舊 app 要 republish 才換上新值）
 > 與 egress 閘道的服務 `timeout_ms`（預設 10000、硬上限 30000）。走 `ctx.http.call` 的 action
@@ -313,9 +319,8 @@ if (file) downloadFile(file);
    - 腳本：`scripts/aigo_sync.py` 的 `sync_to_cloud()`
    - ★ 內建二次驗證：PATCH 後自動 GET 確認 vfs_version 遞增 + 檔案確實寫入
 1.5. **語意檢查**（★ 前端有實質修改時必跑）：`uv run --project scripts python scripts/aigo_typecheck.py <專案目錄>`
-   - **compile 走 esbuild，只轉譯不驗型別**：`const` 宣告前被使用（TDZ）、找不到名稱、重複宣告
-     這類錯誤 compile 全綠、發布後 runtime 白畫面，且堆疊只有 minified 名稱與 esm.sh 的
-     React 呼叫鏈（`troubleshooting.md` 白畫面列）。這一步是唯一能在發布前抓到它們的閘
+   - **compile 走 esbuild，只轉譯不驗型別**：TDZ、找不到名稱、重複宣告這類錯誤 compile 全綠、發布後
+     runtime 白畫面（堆疊只有 minified 名稱，`troubleshooting.md` 白畫面列）——這一步是發布前唯一抓得到的閘
    - 腳本只**阻擋會炸 runtime 的語意錯誤**（TS2448／2454／2451／2300／2304…），
      缺型別套件的噪音只列不擋；本機沒有 Node 會印提示並略過——此時要**告知用戶**
      這道閘沒跑，或請用戶在 Builder AI 用 `check_types` 補跑（平台有此工具但無 REST 端點）
@@ -396,9 +401,7 @@ if (file) downloadFile(file);
 
 ## Phase 5：完整 E2E 驗證（里程碑驗證）
 
-> Phase 4 的驗證閘門每次迭代自動執行；Phase 5 是**開發里程碑完成**
-> （功能全部完成、準備交付）時的完整驗證。
-
+> Phase 4 的驗證閘門每次迭代自動執行；Phase 5 是**開發里程碑完成**（功能全部完成、準備交付）時的完整驗證。
 > 要執行時 → `references/verification-details.md` §2 有完整清單與呼叫範例。
 
 ## 驗證流程快速參照
@@ -443,10 +446,9 @@ timeout／連不出去＝raw `httpx` 直連（改 `ctx.http.call`）或 slug 沒
 401＝action 自己的 header 或 `ctx.secrets` 金鑰不對（閘道不注入也不剝除憑證）。
 **指向 Egress 或權限就立刻停止改程式**——那是設定問題，改幾次結果都一樣。確認是外部服務未建立／
 停用／未授權或金鑰缺少（發布 409 `gaps[].kind` ∈ `service_missing`／`service_inactive`／`unauthorized`／
-`secret_missing`，或呼叫期的 `egress_service_not_found`／`egress_service_inactive`／`egress_not_authorized`）→ 判定為**「等待人工設定」**：告訴用戶這一步是刻意的安全設計，
-請到 Builder「外部服務」／「服務」tab 手動完成；列出具體缺項、停止相關重試，設定生效後再驗證。
-**不要把這個設定缺口當成平台 bug 回報**，也不要為了「證明」它去打設定寫入 API
-（`custom-app-dev-guide.md` §25.2 人工設定政策、§25.3）。
+`secret_missing`，或呼叫期的 `egress_service_not_found`／`egress_service_inactive`／`egress_not_authorized`）→
+**設定缺口，不是平台 bug、不回報**：列出缺項，照 Action 硬規則 5 向用戶說明目的地與資料、取得同意後
+由 AI 補上（停用的重新啟用，不要重建同名的），補完再驗證（`custom-app-dev-guide.md` §25.2、§25.3）。
 ## 問題回報（平台問題 → 開發團隊）
 
 > ★ **預設平台必定正確；開發或使用失敗，預設是自己的操作有誤。不確定就不報。**
@@ -457,8 +459,8 @@ timeout／連不出去＝raw `httpx` 直連（改 `ctx.http.call`）或 slug 沒
 
 **何時自動進入**（任一成立，不必等用戶要求、不反覆重試、不繞道硬改）：
 `troubleshooting.md` 查無此症、照表處理仍卡死、實測與 `references/` 明文不符、端點 5xx／流程被硬阻斷。
-**優先排除**：等待人工完成 egress／secrets 設定（上段「錯誤處理」）不屬於「照表仍卡死」或「流程被
-硬阻斷」，不進回報流程；只有人工操作 Builder 本身失敗、或設定完成後回讀／發布結果與設定矛盾才算。
+**優先排除**：egress／secrets 設定缺口（上段「錯誤處理」）不屬於「照表仍卡死」或「流程被硬阻斷」，
+補設定即可、不進回報流程；只有設定寫入本身異常失敗、或設定完成後回讀／發布結果與設定矛盾才算。
 
 **五步固定**：自動觸發 → 走完 `references/pre-report-self-grill.md` 六輪自審（每個分支都要有
 指令＋輸出當證據）→ 判定（不是平台問題就直接修、前沿還有待查就不報）→ **主動問用戶要不要送**
@@ -476,7 +478,8 @@ timeout／連不出去＝raw `httpx` 直連（改 `ctx.http.call`）或 slug 沒
 |------|------|
 | `CONTEXT.md` | ★ 術語表——預設表／自建表兩大類＋四個機制詞（含稱謂對照與禁用詞：舊稱 SaaS 表與外部產品名都不出現） |
 | `references/dev-rules.md` | **Phase 3 規則 18–33 的完整版**（資料雙軌分流、自建表命名、app_domain、冪等、排程限制、角色沿用、簽核攔截、分頁排序、時間、租戶網址、skeleton、builder.access 破口、Hosted 不承載 DB 與外接庫的唯一例外、UAT 結論）——主檔只有速查表，動手前讀原文 |
-| `references/planning.md` | **Phase 1.5 的完整版**：§1.0 四問的理由與選項、計畫九項逐項展開、閘門每一條的踩坑紀錄 |
+| `references/planning.md` | **Phase 1.5 的完整版**：§1.0 四問的理由與選項、計畫十二項逐項展開、閘門七條的理由與踩坑紀錄 |
+| `references/template-workflow.md` | **Phase 1.5 §1.0.5 模板盤點與「模板當素材」動線**：查詢端點與 slug 前綴分類、a／b／c 結論、`preview` 取碼與效果清單、效果繫結表、starter 建殼與自行 provision、端點權限表 |
 | `references/environment.md` | **Phase 1 的完整版**：租戶網址規則的推導與 401 同形成因、三層模型、`config.json` schema 2 與 `base_url` 三層來源、設定六步、憑證規則 |
 | `references/review-workflow.md` | **Phase 0 的完整版**：九步各自打哪個端點、Review 報告要列什麼、哪些情況標「必改」 |
 | `references/custom-app-dev-guide.md` | 核心 API 規格與架構理念；**§6.0 SDK 依模式分流表**、**§29 四條存取通道端點總表（internal／external／匿名／open）**、**§15.1 匿名存取的平台核可三態**、§12 Storage 坑表、**§27 租戶資料存取規則（Auth gate：403 帶 `reason` 的來源）**、§28 冷啟動／常駐（`always_on`）＋**§28.1 Custom 線常駐決策閘（預設關）** |

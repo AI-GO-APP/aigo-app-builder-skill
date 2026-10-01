@@ -115,6 +115,7 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 執行期網域�
      **access_mode 由模板決定、建立後不可改**，回應的 `id` 就是 `app_id`。
      ★ **新建情景不在這裡臨場選模板**：先完成 Phase 1.5（§1.0 需求盤點 → 產品線與模式判斷
      → 計畫確認），模板 slug 照計畫的 **app 分配表**——計畫未確認前登錄表留空是合法狀態。
+     **只用這兩支 starter 建**，不用業務模板的 slug——模板是素材，走 `references/template-workflow.md`。
      判走 Hosted App 的 app 不走這個端點（`references/hosted-apps.md` §3）。
      完整契約與「起手式帶示範檔案要先清」等注意事項見
      `references/custom-app-dev-guide.md` §26

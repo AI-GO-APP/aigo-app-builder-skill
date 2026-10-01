@@ -1,3 +1,34 @@
+## 1.58.0
+
+### 模板當素材、Phase 1.5 加模板盤點與效果繫結；AI 可代設外部服務與金鑰（先確認再動手）
+
+對應 skill issue #99、#100。
+
+**模板一律當素材，只有一條路**（`references/template-workflow.md`，新）
+- 用 `preview` 取模板內容 → 問清楚每個效果要繫結到哪裡 → 從 starter 建空殼 → AI 自行建表、登記引用、設外部服務與金鑰。
+  **不再**直接用業務模板建 app：dev-guide §26.1「其他模板也可用 slug 建立」刪除，§26.2「模板會一併 seed 自建表與引用」改為警告。
+- 問答結果寫成**效果繫結表**（`new_app_requirements_template.md` 新增第六節）；每個非預設繫結都要真的改 ports 的 code，列為計畫閘門。
+- 模板效果今天只能從資料表結構與程式碼推斷：平台產生 preview 時會覆寫 `_template_meta.json`，模板自己宣告的 `effects` 讀不到
+  （要等平台配合 Template Protocol 調整）。分類看 slug 前綴，不只看 `category`。
+- 新增 `scripts/aigo_template.py`（唯讀：`list`／`suites`／`effects`／`preview`；preview 只寫進新的或空的資料夾，先驗證全部路徑、
+  寫進暫存資料夾再改名，失敗不留半成品，擋絕對路徑、`..`、磁碟代號、反斜線與 NUL）。
+
+**Phase 1.5 模板盤點閘門**
+- 新增 §1.0.5 與計畫項目 1.3：盤點結論三種——(a) 直接用、(b) 抄相近的來改、(c) 不用，(c) 寫一句理由即可。
+  既有 app 的增量開發也要盤點；盤點結果不寫進需求範本。
+- 計畫閘門由五條擴為七條（新增第 4 條盤點結論、第 5 條效果繫結表），`planning.md`、`product-line-decision.md`、evals 同步。
+
+**推翻 1.51.0 的人工設定政策：AI 可代設外部服務（egress）與金鑰**
+- 前提是**先確認再動手**：建立或授權外部服務、寫入金鑰之前，AI 先用白話列出目的網域、送出的資料、哪支 action 用、
+  外部服務是整個租戶共用的；這張表**單獨確認**，不併在計畫同意裡；網域或送出的資料一變就重新確認；刪除另外確認。
+- 金鑰的值不出現在對話：新增 `scripts/aigo_secrets.py`（`list` 只列名稱；`set --from-file` 只讀權限 600 的檔案、只走 https、
+  值只放在請求本文；`delete` 要 `--confirm`；**沒有讀取值的指令**；不跟隨 symlink、權限檢查與讀取用同一個 fd；Windows 無法設 600，請用戶在 Builder 貼上）。
+- `EGRESS_NOT_READY` 等設定缺口仍然不當平台 bug 回報——改由 AI 在確認後自行補上。
+- 改寫 SKILL.md Action 規則 5 與錯誤處理、dev-guide §25.2–§25.5、`uat-environment.md` §3 與附錄 A、`pre-report-self-grill.md`
+  Q4.5b／Q6.1、`issue-reporting.md`、`troubleshooting.md`、`platform-behaviors.md`、`hosted-apps.md`、`aigo_publish.py` 提示。
+- 權限（v1.15.4）：app 範圍外部服務的建立／授權需 `builder.access`＋app 擁有者或 `system.admin`；PATCH／DELETE 需租戶內任一 app 擁有者
+  或 `system.admin`；金鑰需 `builder.access`＋看得到該 app；租戶層 `/egress-services` 需 `system.admin`。
+
 ## 1.57.0
 
 ### 平台問題回報改用 AI GO 身分驗證登入（回報後端支援後生效）
