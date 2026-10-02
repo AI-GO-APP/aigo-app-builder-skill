@@ -583,7 +583,8 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
 
 ## 6. 可見度與 internal app 的 401 處置
 
-- `PUT /{id}/access-settings`，body `{visibility, access_role_ids}`：`visibility` = `public`（預設）／
+- `PUT /{id}/access-settings`，body `{visibility, access_role_ids, workspace_login_redirect}`（**`workspace_login_redirect` 必填**，
+  漏了回 422 `Field required`；2026-10-02 prod 實打，值可先 GET app 讀回原值照送）：`visibility` = `public`（預設）／
   `internal`（需登入 AI GO）。**`internal` ＋ `access_role_ids=[]` ＝ 全租戶已登入成員**；填角色 id
   就只放行那些角色；`public` 下 `access_role_ids` 必須為空（DB CHECK）。需 `hosted_apps.deploy`，
   再收窄到 app 的 `created_by`／admin。**internal app 沒有預覽截圖**。

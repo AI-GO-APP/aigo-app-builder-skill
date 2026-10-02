@@ -196,6 +196,8 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
 - 其餘前綴走 `/register?token=…&redirect=…`；**不指定落點的受邀者會落在 `/dashboard`**——
   對只有 app 角色的外部人員那是他沒權限的地方，**邀請外部人員一律指定落點**
 - 重寄（`resend-invite`）省略 `redirect_url` 會沿用上一張的落點
+- ⚠ 2026-10-02 prod 實打：`POST /invitations`（`send_email:true`、`redirect_url:/hosted-app-handoff/<slug>`）的**新註冊者**
+  註冊完落在工作區 `/dashboard`，沒有帶到 app——交付時另外給 app 網址，不要只靠落點
 - **`POST /members` 與 `POST /invitations` 在 `send_email:false` 下是同一件事**（★ 實打）：都只建邀請、回
   `token`＋`chat_invite_link`，`POST /members` 回應的 `id`／`user_id` 是 `null`——受邀者註冊完成前**沒有成員列**，
   之後要改角色（`PUT /members/{id}`）或重寄（`resend-invite`）都要先從 `GET /members` 找到他的 id

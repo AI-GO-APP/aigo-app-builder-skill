@@ -1,5 +1,11 @@
 ## 1.59.0
 
+### 平台實測補記（2026-10-02）
+
+- 規則 34 補上實測：拿掉放行角色後 proxy 下一個請求即擋，資料層靠租約到期斷（約 2.5 分鐘）；工作區擁有者不受 `access_role_ids` 限制
+- `hosted-apps.md`：`PUT access-settings` 的 `workspace_login_redirect` 必填
+- `member-admin.md`：邀請 `redirect_url` 對新註冊者沒帶到 app
+
 ### 新增規則 34：沿用 AI GO 登入又保留自家認證後端的 app，必須做「即時撤權」
 
 某遷入案（2026-10）盤點發現缺口：app 把 AI GO 身分橋接成自家認證後端（例如 Supabase GoTrue session＋RLS）後，

@@ -307,6 +307,12 @@
       同一顆 DB 上仍在跑的舊站不能受影響；先 log 觀察、驗過再切 enforce
     - (7) **交接文件逐路徑寫明撤權延遲**：例如 app 端停用＝立即；AI GO 端移除成員 ≤ 租約 TTL＋context 快取時間。
       沒寫＝沒過閘（落點：遷入計畫、Phase 5 交接）
+    - **平台實測（2026-10-02，某遷入案的 UAT app）**：
+        - 拿掉一般成員的放行角色後，**proxy 在下一個請求就擋**（平台頁「App 不存在或你沒有存取權」），
+          請求進不了 app ⇒ app 端「心跳時 context 回 404 → 立即撤銷」在平台上走不到；**資料層實際靠租約到期**斷
+          （實測拿掉角色到 DB 開始拒絕約 2.5 分鐘，TTL 180 秒）。所以 (2) 的租約 TTL 就是 AI GO 端移除的撤權上限，要設短
+        - **工作區擁有者不受 `access_role_ids` 限制**：拿掉 app 角色後仍進得去、context 照回 200。
+          擁有者要撤只能拿掉擁有者身分；給客戶一般使用者開帳號**不要給擁有者**，交接文件要寫明
     - 附帶：pg_net／webhook 之類的呼叫端打 internal app 時**沒有 AI GO session**，會被 proxy 擋下——
       這類入口要另規劃路徑，不能指望穿過 proxy
     - 相關：`member-admin.md` §7.1（兩道門）、`migration-workflow.md` §2.0 BaaS 註記與 §2.4.5、`hosted-apps.md` §6（session 24 小時）
