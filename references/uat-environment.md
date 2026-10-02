@@ -80,7 +80,7 @@ Custom App 的草稿版（`{租戶}.ai-go.app/runtime/version-test/{識別碼}`�
 3. **env 覆寫**：`PUT /hosted-apps/{id}/runtime-settings` 是**全量替換**（`hosted-apps.md` §4），所以用**白名單重建**，
    不是「改幾個已知的鍵」：逐鍵決定沿用／換值／清空。最少要動的：資料庫連線（指 UAT 庫）、session secret／
    cron key／換票金鑰（全部新值，正式與 UAT 不共用；**另外**：兼當加密金鑰、而 UAT 庫是正式複本時，
-   換新值的同時要清掉或重新加密那些欄位，`hosted-apps.md` §4「不可隨手換新」）、所有回指自己的網址改成 UAT 網址、入口網址改成 UAT 入口、
+   換新值的同時預設清掉那些欄位（要保留就由負責人重新加密），`hosted-apps.md` §4「不可隨手換新」）、所有回指自己的網址改成 UAT 網址、入口網址改成 UAT 入口、
    空庫開站門禁只放建置者、通知／推播／第三方金鑰清空；`always_on=false`、`persistent_disk=false`（除非 UAT 真的要驗持久碟）。
 4. **入口 Custom App**：`POST /builder/apps`（同模板，body 帶 `url_name: "<name>-uat"`）。
    ⚠️ `url_name` **發布後永久凍結**，`-uat` 必須在建立時就帶上；正式 app 的 `url_name` 可能是 `null`（中文名產不出），
@@ -123,7 +123,7 @@ Custom App 的草稿版（`{租戶}.ai-go.app/runtime/version-test/{識別碼}`�
 | 磁貼只有測試者看得到 | 用非測試者帳號開 UAT 入口 → 平台「無法存取此應用」 | 被擋 |
 | 入口可進 | `{租戶}.ai-go.app/runtime/<name>-uat` 200，測試者登入後換票成功 | 進得去 |
 | 403 對照 | 用 UAT app 身分讀一張有 `$user.*` 規則的預設表：`POLICY_GATE_MODE` **翻旗後**預期 403；仍 off 時回 200 **不算失敗**（`hosted-apps.md` §5）——UAT 正是翻旗前先看到這條的地方 | 符合當下旗標 |
-| 金鑰隔離 | 拿正式的 cron key 打 UAT 端點 → 403 | 舊值失效 |
+| 金鑰隔離 | 拿正式的 cron key 打 UAT 端點 → 401／403（與 app 選定的碼一致） | 舊值失效 |
 | 排程／通知未動 | UAT 沒有平台排程；通知目的地為空或測試值；DB 裡的排程總開關與通知設定列是 UAT 要的值（複本會帶正式值） | 確認 |
 
 ## 5. 維運

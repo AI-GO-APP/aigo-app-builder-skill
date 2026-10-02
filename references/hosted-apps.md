@@ -160,9 +160,10 @@ APScheduler、框架啟動鉤子裡掛的 loop）在 app 閒置縮到零後就�
    打 Hosted 的排程端點，帶共享金鑰 header。**前置同 §5.1**：Hosted 設 `visibility=public`；Hosted 網域由**用戶**
    在 Builder「外部服務」以同名 slug 建立並授權本 App；共享金鑰由負責人在「服務」tab 設進 `ctx.secrets`——
    AI 只列出 slug／網域／`key_name`，**不代設**（`custom-app-dev-guide.md` §25.2）
-2. Hosted 那支端點驗金鑰（驗不過就拒絕；回 401 或 403 擇一，與 UAT 的金鑰隔離檢查一致，`uat-environment.md` §4）、
+2. Hosted 那支端點驗金鑰（驗不過就拒絕；§5.1 用 401，`uat-environment.md` §4「金鑰隔離」的預期值照你選的碼）、
    **在這個請求裡**把到期的工作做完、回報每支工作的結果
-3. 平台排程綁這支 action；Hosted 端依「現在時間」自己決定哪些工作到期。間隔受方案限制：付費檔最小 5 分鐘、
+3. 平台排程綁這支 action；Hosted 端依**排程給的時間**決定哪些工作到期——轉發 action 把 `ctx.params["scheduled_at"]`（`event-triggers.md` §2.5）
+   放進 body 轉給 Hosted，用它推算時段；不要用 Hosted 端的「現在時間」（重投與冷啟動延遲會讓它跨到下一格）。間隔受方案限制：付費檔最小 5 分鐘、
    免費檔最小 60 分鐘且每支 app 最多 2 支排程——先 `GET .../crons/quota`（`event-triggers.md` §2.4）
 4. Hosted 維持 `always_on=false`：平台排程每次都是入站請求，會把它叫醒
 
@@ -175,15 +176,19 @@ APScheduler、框架啟動鉤子裡掛的 loop）在 app 閒置縮到零後就�
 | 排程 action 執行上限 | **120 秒** | `event-triggers.md` §2.6 |
 | Hosted 單一請求 | 300 秒 | §2 |
 
-經 egress 轉發時實際天花板是 **30 秒**。Hosted 端用時間預算控制：預算用完就停手、把剩下的留給下一次 tick。
+經 egress 轉發時，天花板＝那支外部服務的 `timeout_ms`（**預設 10 秒**，最高 30 秒；要拿滿 30 秒得請用戶調整，計畫裡寫明）。
+Hosted 端的預算＝該值 − 冷啟動 − 往返裕度，用完就停手、把剩下的留給下一次 tick。
 
 **冷啟動要算進去**：實例在最後一個請求後要等一段平台內部延遲才縮到零（目前約 15 分鐘，**不是契約**）。
 - 間隔**比它短**的排程（每 5、10 分鐘）等於讓實例一直醒著——資源上與常駐相近，計畫裡要寫明；只有第一發是冷啟動
-- 間隔**比它長**的（每小時、每天）**每次都是冷啟動**，而冷啟動可能是數十秒（§3.0）：第一發可能在 egress 30 秒內
-  還沒開始處理，action 被整支砍成 `status: "timeout"`——**不算成功也不算錯誤，不會觸發自動暫停，也看不出來**；
+- 間隔**比它長**的（每小時、每天）**每次都是冷啟動**，而冷啟動可能是數十秒（§3.0）：第一發可能在 egress 的 `timeout_ms` 內
+  還沒開始處理，action 被整支砍成 `status: "timeout"`——排程分頁的最近狀態會標成錯誤色，但**不計入連續錯誤、
+  不會自動暫停、不重投**，下一發成功就被蓋掉，只看最近狀態很容易漏看；
   Hosted 端卻可能在連線斷掉之後才開始跑（正是下面禁止的「回應後還在做事」）
 - 所以：UAT 先實測冷啟動秒數；工作必須容許「這一輪沒跑完、下一輪接手」（下方佔用列＋到期時間）；
-  冷啟動逼近 30 秒時，在正式 tick 前幾分鐘排一支只打健康檢查的暖機排程，或改用較短間隔讓實例保持醒著
+  冷啟動逼近 egress 上限時，在正式 tick 前 15 分鐘以內排一支只打健康檢查的暖機排程，或改用較短間隔讓實例保持醒著。
+  限制：較短間隔只限付費檔（最小 5 分鐘；免費檔最小 60 分鐘，比縮容延遲長）；免費檔每支 app 只有 2 支排程，暖機會用掉第 2 支；
+  暖機那一發本身回 `timeout` 是預期的，結果表與健康檢查只看正式 tick
 
 **★ 回應送出後不得再做事**
 
@@ -204,9 +209,12 @@ APScheduler、框架啟動鉤子裡掛的 loop）在 app 閒置縮到零後就�
 - **平台自建表**（規則 32 的預設路徑）沒有複合唯一鍵、也沒有條件式 UPDATE，唯一的伺服器端原語是
   **單欄 unique 的 409**：在 unique 欄寫入決定性字串，例如 `"{工作}|{時段}|1"`，409＝已被佔
   （模式見 `custom-app-dev-guide.md` §23.9）
-- 佔用列帶**狀態、開始時間、完成時間、到期時間**。過了到期仍未完成（實例被終止、沒寫完成）時，
-  **不要改寫舊列**（「讀到過期 → 更新」兩個實例會同時搶到），改佔下一個嘗試號 `"{工作}|{時段}|2"`，
-  409 一樣代表別人搶先。沒有到期機制的話，實例一被終止，那個時段就永遠「已佔用、沒跑完」，工作默默漏掉
+- 佔用列帶**狀態、開始時間、完成時間、到期時間**。**到期時間 ≥ 開始時間＋300 秒＋裕度**——egress 切斷後
+  Hosted 端的請求不會跟著停，最長可能跑滿 §2 的 300 秒；比這短就會跟仍在跑的舊嘗試重疊、同一時段跑兩次
+- 判斷流程從 `|1` 往上試：寫入成功＝由我執行；409 就讀那一列——已完成或未到期＝跳過整個時段；已到期＝試下一號。
+  **不要改寫舊列**（「讀到過期 → 更新」兩個實例會同時搶到），409 一樣代表別人搶先
+- 嘗試號設上限（例如 3）：超過就在結果表寫「放棄」、讓健康檢查亮紅，不要無限加列。
+  沒有到期機制的話，實例一被終止，那個時段就永遠「已佔用、沒跑完」，工作默默漏掉
 - 走規則 32 例外的外接 PostgreSQL，才可以用原生的複合唯一鍵與條件式 UPDATE
 
 **★ 誠實的執行結果：平台的「成功」只代表 action 有回應**
@@ -524,8 +532,10 @@ action 以 `ctx.secrets` 讀取（Builder 沒有 runtime-settings 這支 GET，�
   第三方 token、API key、個資欄位。換新值後網站照常能開、登入也正常，要等有人用到那個功能時才在解密失敗——
   症狀像「第三方授權壞了」。決定「換新值」之前，先在程式碼搜這顆 key 有沒有被用在加密／雜湊／KDF
   （`createCipheriv`、`createHash`、`encrypt`、`Fernet`、`AESGCM` 一類的呼叫附近）；有的話：
-  - 正式遷入（資料整庫搬過來）：**沿用原值**，並用一列既有資料實際解密一次驗證
-  - UAT 用正式資料複本：換新值時要把那些加密欄位清掉或用新金鑰重新加密，否則 UAT 讀到的是解不開的資料
+  - 正式遷入（資料整庫搬過來）：由負責人**沿用原值**設定。驗證走 app 本身的功能路徑（觸發一次會用到那顆 token 的功能，
+    或用 app 內只回「解密成功／失敗」的自檢端點）——**AI 不取得金鑰、不在本機解密、不印出解密結果**
+  - UAT 用正式資料複本：預設把那些加密欄位**清掉**，否則 UAT 讀到的是解不開的資料；真的要保留就由負責人執行
+    重新加密腳本，AI 只提供腳本與欄位清單
   - 新庫從零開始：可以換新
 - 密鑰類一律標 `runtime`，**不要標 `build`**（會進映像與建置日誌，見上）
 - 原系統的 `DATABASE_URL` 一類**不要**搬——資料層改走 Open Proxy（§7.1），直連在網路層不通
@@ -822,9 +832,14 @@ DNS、NAT、對端防火牆、憑證、資料存取規則照樣管，而規則 3
   用 5432（session pooler）或直連。`pg_dump`／`pg_restore` 加 `--no-owner --no-privileges`（原庫的角色在 Supabase
   不存在；`psql -f` 沒有這兩個旗標，要在 dump 端就加）。app 平常的連線仍然走 6543（見上）。
 - **規則 32 要求 app 用最小權限角色連線**；若核准紀錄明載 app 暫以擁有者連線，至少做這層保底：對 `public`
-  每張表開 RLS、不加 policy，並對 `anon`／`authenticated` `REVOKE` 表、sequence、function 的權限，再
-  `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES／SEQUENCES／FUNCTIONS FROM anon, authenticated`
-  （否則之後新建的表又會被自動授權）。擁有者身分不受影響，而萬一 Data API 被打開或金鑰外流，公開角色也讀不到東西。
+  每張表開 RLS、不加 policy，並對 `anon`／`authenticated` `REVOKE` 表、sequence、function 的權限，再改預設權限
+  （否則之後新建的物件又會被自動授權；`FOR ROLE` 填實際建表的角色，function 的 EXECUTE 預設授給 `PUBLIC`）：
+  ```sql
+  ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;
+  ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon, authenticated;
+  ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, anon, authenticated;
+  ```
+  服務以 schema 分開時（規則 32），每個服務 schema 都要做同樣的處理。擁有者身分不受影響，而萬一 Data API 被打開或金鑰外流，公開角色也讀不到東西。
   不要 `FORCE ROW LEVEL SECURITY`（那會連擁有者一起擋）。
 - **`seq`／serial 會跳號**：被唯一約束擋掉的寫入會吃掉號碼，並行寫入時明顯；用 `seq` 當增量書籤的程式
   要知道「比書籤小的號碼可能晚到」。
