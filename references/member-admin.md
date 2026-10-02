@@ -286,7 +286,7 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
 - **名單會漂**：app 之後每新增一個可登入的人，AI GO 那邊也要有帳號與角色。對照做成冪等腳本，切換當天跑一次、之後定期跑。
 - **UAT**：只補測試者，不邀整批人（`uat-environment.md` §3.5）。
 - **移除成員不會通知 app**：平台沒有成員被移除的 webhook，app 若保留自家認證後端（自己發 session／token），
-  被移除者已發出的 token 會續用到期。必須做即時撤權：`dev-rules.md` 規則 34。
+  被移除者已發出的 token 會續用到期。若選用這種做法，必須做即時撤權：`dev-rules.md` 規則 34。
 
 ## 8. 回應怎麼讀（2026-09-08 測試租戶擁有者帳號實打；★ 標記＝實測字串）
 
