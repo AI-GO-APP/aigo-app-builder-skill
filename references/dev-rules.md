@@ -290,6 +290,8 @@
     - Custom App 的 `version-test` 草稿版**不是** UAT（同一個資料落點）；「在正式 app 灌 demo 資料」「換個租戶測」
       也不算；遷入案的計畫階段就要有「同一份程式、換旗標指不同庫」的設計，否則搭不出 UAT
 34. **沿用 AI GO 登入、同時保留自家認證後端的 app，必須做「即時撤權」**（★ 強制，2026-10-01 立）
+    - **適用範圍**：只在**選擇**讓使用者用 AI GO 帳號登入、又保留自家認證後端時才適用。本規則**不代表建議**搬遷案改用 AI GO 登入；
+      維持原系統自己的登入（例如原本的 Supabase Auth）是正當選項，那樣本規則不適用
     - 觸發：Hosted App 掛在 AI GO 登入後面（internal），並把 AI GO 身分**橋接**成自家認證後端的 session／token
       （例：Supabase GoTrue session＋RLS，或任何自己發 token、瀏覽器直接拿去打資料的系統）。
       **為什麼**：平台沒有「成員被移除」的 webhook，app token 也無法列舉受眾，而 proxy session 可長達 24 小時；
