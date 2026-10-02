@@ -65,7 +65,9 @@
 | **`POST /invitations`／建角色／指派角色回 403，帳號明明有 `hr.member_manage`** | 後端子集規則：目標角色的 permissions 不是呼叫者權限的子集（例如想派「系統管理員」）、或建角色時要求的權限字串超出自己所有。印出差集給用戶，請更高權限者操作；不要換角色硬塞 → `member-admin.md` §2／§8 |
 | **建排程回 403，帳號有 `builder.access`** | 寫排程要 `builder.app_cron_manage` 或 `settings.write`（`builder.access` 只能讀）。印平台原文、請管理員把 `builder.app_cron_manage` 加進開發者角色；**不要**導去 `/dashboard/settings/app-crons`（只有 admin／`settings.write` 看得到）、更不要要 `system.admin` → `event-triggers.md` §2.1 |
 | **Hosted App 打 `/api/v1/open/*` 回 429** | 每分鐘 600 次、桶鍵＝該 app 的 API Key（整支 app 共用）。看 `X-RateLimit-Limit`，分批放慢；遷入逐列寫入先用 600/min 估時程 → `hosted-apps.md` §5 |
-| **Hosted App 的 WebSocket／SSE 每 5 分鐘斷一次；>300 秒的請求 504** | ksvc 單請求 300 秒上限（平台常數）。client 做自動重連＋斷點續傳；長任務切批次或改背景工作 → `hosted-apps.md` §2 |
+| **Hosted App 的 WebSocket／SSE 每 5 分鐘斷一次；>300 秒的請求 504** | ksvc 單請求 300 秒上限（平台常數）。client 做自動重連＋斷點續傳；長任務**切段、DB 存游標、每次 tick 接著做**——**不要**改成「先回應、背景跑」，縮到零的實例沒有在途請求就可能被終止 → `hosted-apps.md` §2、§2.1 |
+| **Hosted App 搬進來後排程完全不跑／偶爾少跑一次，沒有錯誤** | 不跑：排程器寫在容器裡（`setInterval`／node-cron），縮到零就停——改成平台排程 → 轉發 action → Hosted 端點；少跑：工作在「先回 202、背景跑」或佔用列沒有到期時間，實例被終止後那格永遠不重跑；冷啟動吃掉 egress 30 秒，action 回 `timeout`（不算錯誤、不會暫停，平台上不顯眼）；排程漏跑只補一次、不逐格補（`event-triggers.md` §2.9）。另核 DB 裡的排程總開關 → `hosted-apps.md` §2.1 |
+| **平台排程顯示成功，但工作其實沒做成** | 平台的成功只代表轉發 action 有回應；看 Hosted 端的執行結果表／健康檢查。轉發 action 是否吞錯誤要刻意決定 → `hosted-apps.md` §2.1 |
 | **Hosted App 使用者「登入後一半請求變未登入」、in-process 佇列處理一半消失** | max-scale 2、無 sticky session，行程內狀態不跨實例。session／佇列／快取落平台的表或 `/data` → `hosted-apps.md` §2 |
 | **Hosted App 沒人用卻一直有實例在跑** | `always_on` 被開了。照 `hosted-apps.md` §3.0 決策閘問一次業務問題，皆否就 `PUT runtime-settings` 關掉（五欄一起送） |
 | **匯入 job `completed` 但 `imported_count: 0`，`sources[].status: "parked"`、無錯誤訊息** | 目標是自建表（`self_built_table`／`new_table`）——prod 的 import-worker 沒有 tier-3 旗標，靜默 park（API 回的 `tier3_write_enabled: true` 是另一顆 pod 的值）。改走本地腳本逐筆寫自建表；**已回報平台（2026-09-08）**，不必重複開單 → `data-operations.md` §5 |

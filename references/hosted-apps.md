@@ -40,7 +40,7 @@
 ## 目錄
 
 - 1. 是什麼：與 Custom App 的邊界
-- 2. 應用形狀硬規則（★ 失敗率最高的來源，動手前逐條核）
+- 2. 應用形狀硬規則（★ 失敗率最高的來源，動手前逐條核）——2.1 定時工作與長任務
 - 3. 部署
 - 4. 環境變數（詳情頁「環境變數」tab；`PUT /{id}/runtime-settings`）
 - 5. 取平台資料（隨附整合 + Open Proxy）——5.2 平台 App 檔案與平台 AI
@@ -88,6 +88,7 @@
 | 建置包絡：**CodeBuild 整台 `BUILD_GENERAL1_MEDIUM`（ARM，8 GiB）**，OOM 只在整台用盡時發生（ADR 0028；UAT／prod 皆已切換）；v1.13.0 之前是 k8s Job 的 2 CPU / 4 GiB。預設時限 900 秒。★ 建置工具會依 CPU 數開多個 worker 各占一份 heap，包絡再大也要限 worker 數 | `OOMKilled`／`exit code 137`／timeout；**容器級 OOM 時日誌可能全空**（§8） |
 | 不可是 monorepo／空目錄；無法辨識的目錄會 fallback 成 static 站 | precheck Issue／部署出來是靜態檔 |
 | **單一請求上限 300 秒**（ksvc `timeoutSeconds=300`，平台常數，核自 prod tag v1.13.1 `orchestrate/runtime.go`）——SSE／WebSocket 長連線**滿 300 秒必斷**，長任務不能在一個請求裡跑完 | 長連線每 5 分鐘斷一次；client 沒做自動重連就「偶爾失聯」；>300 秒的匯出／報表請求 504 |
+| **回應送出後不得再做事**——縮到零的實例沒有在途請求就可能被終止（§2.1） | 「先回 202、背景跑」的工作與 fire-and-forget 寫入**偶爾**消失、無錯誤訊息；排程只跑一半 |
 | **最多 2 個實例**（`max-scale=2`，平台常數，同上出處）——**行程內狀態（記憶體 session、in-process 佇列、本機快取）不跨實例共享**，也沒有 sticky session | 使用者「登入後一半請求變未登入」、佇列消費一半不見；狀態一律落平台的表或 `/data`（§7） |
 | **容器只保留 `NET_BIND_SERVICE` 一個 capability**（`drop ALL` 後恆補這一顆，2026-09-05 起；gVisor 已拆除，隔離靠 seccomp＋PSA baseline） | 執行檔帶其他 file capability（`setcap` 過的二進位）會 `exec …: operation not permitted`；只綁 <1024 埠的 caddy／nginx-unprivileged **現在可以**（UAT 09-05、prod v1.13.0 起；2026-09-08 prod 實打 zbpack static 站＝caddy 映像，rollout 成功） |
 
@@ -145,6 +146,84 @@ OOM 只在整台用盡時發生，上面「4 GiB 的 60–65%」是舊引擎的�
 （約 5000）；但「限單 worker」的原則不變，因為 CodeBuild 那台也是多 vCPU。
 ⚠️ 新引擎下的 OOM／無日誌失敗矩陣**尚未在 prod 實打**（平台 T15 也列為待驗），撞到時先照 §8 順序處理。
 
+### 2.1 定時工作與長任務（★ Hosted 沒有時鐘）
+
+縮到零的 Hosted App **只在有入站請求時存在**。原系統常見的「行程內計時器」（`setInterval`、node-cron、
+APScheduler、框架啟動鉤子裡掛的 loop）在 app 閒置縮到零後就停了，沒有任何東西會再叫醒它（§3.0）。
+搬進來時這是**最常見的「排程跑不動」成因**，而且不會有錯誤訊息。
+
+**★ 預設做法：平台排程 → Custom App 轉發 action → Hosted 端點**
+
+平台排程（App Cron）**只能綁 Custom App 的 action**，不能直接打 Hosted App（`event-triggers.md` §2）。所以：
+
+1. 一支 Custom App（通常就是入口 App）放一支轉發 action，例如 `run_tick`：用 `ctx.http.call(<slug>, …)`
+   打 Hosted 的排程端點，帶共享金鑰 header。**前置同 §5.1**：Hosted 設 `visibility=public`；Hosted 網域由**用戶**
+   在 Builder「外部服務」以同名 slug 建立並授權本 App；共享金鑰由負責人在「服務」tab 設進 `ctx.secrets`——
+   AI 只列出 slug／網域／`key_name`，**不代設**（`custom-app-dev-guide.md` §25.2）
+2. Hosted 那支端點驗金鑰（驗不過就拒絕；回 401 或 403 擇一，與 UAT 的金鑰隔離檢查一致，`uat-environment.md` §4）、
+   **在這個請求裡**把到期的工作做完、回報每支工作的結果
+3. 平台排程綁這支 action；Hosted 端依「現在時間」自己決定哪些工作到期。間隔受方案限制：付費檔最小 5 分鐘、
+   免費檔最小 60 分鐘且每支 app 最多 2 支排程——先 `GET .../crons/quota`（`event-triggers.md` §2.4）
+4. Hosted 維持 `always_on=false`：平台排程每次都是入站請求，會把它叫醒
+
+**時間預算**——這條鏈上有四道上限，取最小的那道：
+
+| 上限 | 值 | 出處 |
+|---|---|---|
+| egress 閘道 `timeout_ms` | 預設 10 秒，**最高 30 秒**；要調高請**用戶**在 Builder「外部服務」改（AI 不代設） | `custom-app-dev-guide.md` §25.4 |
+| 轉發 action 的 manifest `timeout_ms` | 生效值＝min（自己的值, 120 秒 ceiling）；要設得**比 egress 的 `timeout_ms` 大**（例如 35000），否則它先斷 | `custom-app-dev-guide.md` §7、`event-triggers.md` §2.6 |
+| 排程 action 執行上限 | **120 秒** | `event-triggers.md` §2.6 |
+| Hosted 單一請求 | 300 秒 | §2 |
+
+經 egress 轉發時實際天花板是 **30 秒**。Hosted 端用時間預算控制：預算用完就停手、把剩下的留給下一次 tick。
+
+**冷啟動要算進去**：實例在最後一個請求後要等一段平台內部延遲才縮到零（目前約 15 分鐘，**不是契約**）。
+- 間隔**比它短**的排程（每 5、10 分鐘）等於讓實例一直醒著——資源上與常駐相近，計畫裡要寫明；只有第一發是冷啟動
+- 間隔**比它長**的（每小時、每天）**每次都是冷啟動**，而冷啟動可能是數十秒（§3.0）：第一發可能在 egress 30 秒內
+  還沒開始處理，action 被整支砍成 `status: "timeout"`——**不算成功也不算錯誤，不會觸發自動暫停，也看不出來**；
+  Hosted 端卻可能在連線斷掉之後才開始跑（正是下面禁止的「回應後還在做事」）
+- 所以：UAT 先實測冷啟動秒數；工作必須容許「這一輪沒跑完、下一輪接手」（下方佔用列＋到期時間）；
+  冷啟動逼近 30 秒時，在正式 tick 前幾分鐘排一支只打健康檢查的暖機排程，或改用較短間隔讓實例保持醒著
+
+**★ 回應送出後不得再做事**
+
+「先回 202、工作丟背景跑」「`void promise`」「回應後 fire-and-forget 寫日誌／發通知」——
+在縮到零的環境裡**都沒有保證**：沒有在途請求時，實例可能隨縮容、重新部署、滾動更新被終止，
+背景工作跑到一半就消失。縮容延遲是平台內部設定（會變，不是契約），不能拿來當工作時間。
+
+- 工作**同步在請求內**做完，在上面的預算內回應
+- 做不完的長任務**切段**：DB 存游標／進度列，每次 tick 從游標接著做，日誌與結果寫「本輪完成 N、剩 M」
+- 真的切不開、又必須一次跑很久的，才考慮 `always_on=true`（§3.0 決策閘，寫理由與退場條件）；
+  即使常駐，單一請求仍有 300 秒上限
+
+**★ 防重複執行：每個（工作, 時段）只能被佔一次**
+
+平台排程是 at-least-once（`event-triggers.md` §0），Hosted 最多 2 個實例（§2），常駐時行程內計時器也會兩邊各跑一次。
+所以每支工作執行前要在 DB 佔住這一格，佔不到＝別人已經在跑，直接跳過。行程內的旗標或記憶體鎖不算（不跨實例）。
+
+- **平台自建表**（規則 32 的預設路徑）沒有複合唯一鍵、也沒有條件式 UPDATE，唯一的伺服器端原語是
+  **單欄 unique 的 409**：在 unique 欄寫入決定性字串，例如 `"{工作}|{時段}|1"`，409＝已被佔
+  （模式見 `custom-app-dev-guide.md` §23.9）
+- 佔用列帶**狀態、開始時間、完成時間、到期時間**。過了到期仍未完成（實例被終止、沒寫完成）時，
+  **不要改寫舊列**（「讀到過期 → 更新」兩個實例會同時搶到），改佔下一個嘗試號 `"{工作}|{時段}|2"`，
+  409 一樣代表別人搶先。沒有到期機制的話，實例一被終止，那個時段就永遠「已佔用、沒跑完」，工作默默漏掉
+- 走規則 32 例外的外接 PostgreSQL，才可以用原生的複合唯一鍵與條件式 UPDATE
+
+**★ 誠實的執行結果：平台的「成功」只代表 action 有回應**
+
+- Hosted 端每支工作每次執行寫一列結果（工作、時段、成功與否、耗時、錯誤摘要），再做一個讀它的
+  健康檢查端點／頁面。**驗收看這張表**，不是看平台排程的狀態
+- 轉發 action 要不要把錯誤往外丟，**刻意選一邊並寫進計畫**。注意 `ctx.http.call` 在 Hosted 回 4xx／5xx 時
+  **不會 raise**（dev-guide §25）——不檢查 `resp["status"]` 就等於選了「吞掉」：
+  - 往外丟（自己檢查 status 並 raise）：平台狀態誠實，但連續 10 次錯誤會**自動暫停排程、不會自己恢復**
+    （`event-triggers.md` §2.8），Hosted 掛一陣子排程就停了
+  - 吞掉（action 回成功、把錯誤放在回傳內容）：排程不會被暫停，但平台永遠顯示成功——
+    **必須**有上面的結果表與健康檢查，否則失敗沒人看得到。（egress 逾時例外：整支 action 被砍成 `timeout`，吞不到）
+- 部署後與每次改排程後：`run-now` 手動觸發一次（`event-triggers.md` §2.2），回結果表確認**工作本身**成功
+
+**★ 遷入時順帶核對**：原系統的排程總開關、停用清單若存在 DB 設定列，新庫裡的值決定工作會不會跑——
+空庫通常是「關」，整庫複本則沿用原值（§4「設定不只在 env」）。
+
 ## 3. 部署
 
 ### 3.0 `always_on` 決策閘（★ 部署前必過；預設 `false`，開了就佔叢集資源）
@@ -157,7 +236,7 @@ OOM 只在整台用盡時發生，上面「4 GiB 的 60–65%」是舊引擎的�
 
 | 問 owner 的業務問題 | 答「是」的意思 | 設定 |
 |---|---|---|
-| 「這個系統**自己**有沒有東西要定時跑？」（容器內 cron／APScheduler／背景執行緒／佇列消費者） | 縮到零時沒有任何入站請求會把它叫醒（§7）——背景工作會停 | `true` |
+| 「這個系統**自己**有沒有東西要定時跑？」（容器內 cron／APScheduler／背景執行緒／佇列消費者） | 縮到零時沒有任何入站請求會把它叫醒（§7）——背景工作會停。**先問能不能改成平台排程打進來**（§2.1）；能改就改、常駐維持 `false` | 改不了才 `true` |
 | 「有沒有要**一直連著**的東西？」（WebSocket／SSE／長輪詢；注意單請求 300 秒上限，§2） | 沒實例就沒連線 | `true` |
 | 「第一個人打開時等 **N 秒**能不能接受？」——要問出實際容忍秒數，不要預設「快比較好」 | 容忍不了冷啟動（實測數十秒等級） | `true`，並寫下依據 |
 | 以上皆否 | 純網頁／API、有人用才需要在 | **`false`**（預設，不要動） |
@@ -431,7 +510,7 @@ action 以 `ctx.secrets` 讀取（Builder 沒有 runtime-settings 這支 GET，�
 | 類別 | 例 | 沒帶到的症狀 |
 |---|---|---|
 | **對外網址** | `APP_URL`／`NEXT_PUBLIC_SITE_URL` | OAuth redirect、金流回跳、信件連結導到 `https://0.0.0.0:8080/...`（§2 綁定介面陷阱） |
-| session／簽章密鑰 | `SESSION_SECRET`／`JWT_SECRET`／`NEXTAUTH_SECRET` | 登入後全 401，或每次部署都把使用者登出 |
+| session／簽章密鑰 | `SESSION_SECRET`／`JWT_SECRET`／`NEXTAUTH_SECRET` | 登入後全 401，或每次部署都把使用者登出；**兼當加密金鑰時**見下方「不可隨手換新」 |
 | 第三方憑證 | OAuth client id/secret、金流 key、郵件服務 key | 對應功能 4xx／5xx |
 | 功能開關 | 逐模組切換資料後端的旗標 | 走錯後端 |
 | 雲端服務帳號（檔案路徑型） | `GOOGLE_APPLICATION_CREDENTIALS=/path/key.json` 這類**指向本機檔案**的 | 容器裡沒有那個檔 → 依賴它的功能（雲端硬碟備份、試算表同步）全失敗。改成**值型**（整份 JSON 或 base64 放進一顆 env，程式改讀值），不要把金鑰檔打進映像 |
@@ -441,6 +520,13 @@ action 以 `ctx.secrets` 讀取（Builder 沒有 runtime-settings 這支 GET，�
 - **兩側都要改**：換了新值的密鑰（session、排程金鑰、webhook 簽章）與新的對外網址，
   凡是**從外面打進來的**（留原機的排程、第三方 webhook 設定、其他系統）都要同步改到新值與新網址；
   對帳表加一欄「誰會打進來」，逐一通知負責人
+- ★ **兼當加密金鑰的密鑰不可隨手換新**：有些系統拿 session secret 之類的值去**推導加密金鑰**，加密存在 DB 裡的
+  第三方 token、API key、個資欄位。換新值後網站照常能開、登入也正常，要等有人用到那個功能時才在解密失敗——
+  症狀像「第三方授權壞了」。決定「換新值」之前，先在程式碼搜這顆 key 有沒有被用在加密／雜湊／KDF
+  （`createCipheriv`、`createHash`、`encrypt`、`Fernet`、`AESGCM` 一類的呼叫附近）；有的話：
+  - 正式遷入（資料整庫搬過來）：**沿用原值**，並用一列既有資料實際解密一次驗證
+  - UAT 用正式資料複本：換新值時要把那些加密欄位清掉或用新金鑰重新加密，否則 UAT 讀到的是解不開的資料
+  - 新庫從零開始：可以換新
 - 密鑰類一律標 `runtime`，**不要標 `build`**（會進映像與建置日誌，見上）
 - 原系統的 `DATABASE_URL` 一類**不要**搬——資料層改走 Open Proxy（§7.1），直連在網路層不通
 
@@ -508,6 +594,7 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
   身分欄位放進 request body；Hosted 不自行認人、不另建使用者表
 - 前端**不要**跨來源直打 Hosted：帶憑證的 CORS 平台不支援（proxy 只處理同站 cookie）
 - 業務資料仍落平台的表：Hosted 用 Open Proxy（§5）讀寫，不自帶 DB（規則 32）
+- **同一條路也是 Hosted 定時工作的觸發方式**（平台排程 → 轉發 action → Hosted）：時間預算、防重複、結果回報見 §2.1
 
 ### 5.2 平台 App 檔案與平台 AI（`/open/storage/*`、`/open/ai-hub/*`；平台 v1.16.0 起）
 
@@ -726,6 +813,19 @@ DNS、NAT、對端防火牆、憑證、資料存取規則照樣管，而規則 3
   顯示用 1.6 GB 是正常的，不是漏。
 - **RLS 開著但零 policy 時**：以擁有者（`postgres`）連沒事；換成非擁有者角色連，**每張表讀回空、不報錯**，
   畫面上跟「真的沒資料」一模一樣。要嘛補 policy，要嘛明文只准擁有者連。
+- **直連主機預設只有 IPv6**：`db.<ref>.supabase.co` 在沒買 IPv4 add-on 時只解析出 IPv6，而 Hosted 出站只通 IPv4
+  （`dev-rules.md` 規則 32）——連不上時改用控制台 Connect 面板給的 **pooler 主機與使用者名稱**（pooler 的使用者是
+  `postgres.<ref>`，不是 `postgres`；只換主機會出現像「密碼錯」的認證錯誤），不是開防火牆。
+- **連線字串的密碼要百分比編碼**：控制台給的連線字串是 `[YOUR-PASSWORD]` 佔位，密碼裡有 `@`、`#`、`/`、`%`、`:`
+  這類字元時要先編碼再填，否則錯誤看起來像「密碼錯」或「主機找不到」。
+- **整庫匯入走 session 模式或直連，不走 6543**：`pg_dump`／`pg_restore` 大量 DDL 在交易模式 pooler 上會出錯；
+  用 5432（session pooler）或直連。`pg_dump`／`pg_restore` 加 `--no-owner --no-privileges`（原庫的角色在 Supabase
+  不存在；`psql -f` 沒有這兩個旗標，要在 dump 端就加）。app 平常的連線仍然走 6543（見上）。
+- **規則 32 要求 app 用最小權限角色連線**；若核准紀錄明載 app 暫以擁有者連線，至少做這層保底：對 `public`
+  每張表開 RLS、不加 policy，並對 `anon`／`authenticated` `REVOKE` 表、sequence、function 的權限，再
+  `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES／SEQUENCES／FUNCTIONS FROM anon, authenticated`
+  （否則之後新建的表又會被自動授權）。擁有者身分不受影響，而萬一 Data API 被打開或金鑰外流，公開角色也讀不到東西。
+  不要 `FORCE ROW LEVEL SECURITY`（那會連擁有者一起擋）。
 - **`seq`／serial 會跳號**：被唯一約束擋掉的寫入會吃掉號碼，並行寫入時明顯；用 `seq` 當增量書籤的程式
   要知道「比書籤小的號碼可能晚到」。
 
