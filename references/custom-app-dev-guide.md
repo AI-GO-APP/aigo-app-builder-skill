@@ -1282,7 +1282,7 @@ def execute(ctx):
 | 業務 slug 主鍵（`courses.id = 'chinese-a1'`） | slug 存 `legacy_id`，對外 id 一律回 `legacy_id` |
 | 批次建立去重（原靠 advisory lock） | 自然鍵寫進目標表的 unique 欄（`"batch:{kind}|{date}|{start}"`），409 = 略過 |
 | 條件式 `UPDATE … WHERE state=?`（樂觀鎖） | 沒有。目標表加 `version` 數字欄＋一張 `xxx_versions` 自建表，`legacy_id = "{id}:v{n+1}"`：讀當前 → claim 版本列（409 = 有人同時改）→ PATCH 目標列含新 version。寫入方把 version 放進自己的唯一鍵，寫完重讀比對，不同就自刪 |
-| advisory lock | 租約鎖表 `app_locks{legacy_id U, expires_at}`：acquire = claim；409 時讀既有列，過期就刪掉重試一次；仍拿不到回「忙碌」讓呼叫端重送 |
+| advisory lock | 租約鎖表 `app_locks{legacy_id U, expires_at}`：acquire = claim `"{鎖名}|{n}"`；409 時讀該列，未過期回「忙碌」讓呼叫端重送，過期就 claim `n+1`——**不要刪或改舊列**（兩個實例同時讀到過期，後刪的會刪掉先搶到的新列；同 `hosted-apps.md` §2.1） |
 | 計數器（座位數、點數餘額） | **每格一列**：`slot_seat_claims."{slot}#v{ver}#{seat}"`（seat 0..capacity-1，隨機起點掃）、`credit_ledger."{grant}#{seq}"`。超賣在結構上不可能；`booked_count` 變成認領後重算的衍生值；取消 = 刪列 |
 | 交易（webhook 履約多步驟） | **決定性唯一鍵＋inbox 兩階段**：先 claim `webhook_events{legacy_id=event_id, status='received'}`（409 且既有列 done → 直接 ACK；409 且仍 received → 上次中途失敗，重跑）；每個副作用各自用可重算的 legacy_id claim（`orders="session:{id}"`、`unlocks="{user}:{type}:{item}"`），全部做完才 PATCH done。沒有 rollback，但任一步崩潰都可重送重跑而不重複發權益；要讓上游重送就把 inbox 列刪掉 |
 

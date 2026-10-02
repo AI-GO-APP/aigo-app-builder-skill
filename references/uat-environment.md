@@ -48,7 +48,7 @@ Custom App 的草稿版（`{租戶}.ai-go.app/runtime/version-test/{識別碼}`�
 | 平台自建表 | 同租戶內**另一組表**（表名前綴或 `_uat` 後綴），或走 §2 的外接庫 UAT 專案 | — |
 | 外接 PostgreSQL（dev-rules.md 規則 32 例外） | 租戶的 `<tenant>-uat` 專案（一租戶一顆 UAT，服務以 schema 分） | `<tenant>-uat` |
 | 外部服務（egress slug） | 指向正式後端的 slug 要另建一支指向 UAT | `<slug>-uat` |
-| 平台排程 | UAT **先不建**；要驗排程時另建並指向 UAT 的 action | — |
+| 平台排程 | UAT **先不建**；照 `hosted-apps.md` §2.1「排程最後才開」逐支驗過、owner 確認後才建，指向 UAT 的 action | — |
 | Webhook 接收、通知、LINE、Email | 指向測試用目的地或關閉 | — |
 | 檔案（Storage） | 同租戶 Storage 另開資料夾前綴 | `uat/` |
 | **使用者** | **同一個租戶、同一批成員**——沒有「UAT 租戶」。差別只在 app 的角色白名單（§3 步驟 4、`member-admin.md` §7） | UAT 專用角色 |
@@ -126,7 +126,7 @@ Custom App 的草稿版（`{租戶}.ai-go.app/runtime/version-test/{識別碼}`�
 | 入口可進 | `{租戶}.ai-go.app/runtime/<name>-uat` 200，測試者登入後換票成功 | 進得去 |
 | 403 對照 | 用 UAT app 身分讀一張有 `$user.*` 規則的預設表：`POLICY_GATE_MODE` **翻旗後**預期 403；仍 off 時回 200 **不算失敗**（`hosted-apps.md` §5）——UAT 正是翻旗前先看到這條的地方 | 符合當下旗標 |
 | 金鑰隔離 | 拿正式的 cron key 打 UAT 端點 → 401／403（與 app 選定的碼一致） | 舊值失效 |
-| 排程／通知未動 | UAT 沒有平台排程；通知目的地為空或測試值；DB 裡的排程總開關與通知設定列是 UAT 要的值（複本會帶正式值） | 確認 |
+| 排程／通知未動 | UAT 沒有平台排程，或只有 owner 確認過的排程（目的地全是測試值）；通知目的地為空或測試值；DB 裡的排程總開關與通知設定列是 UAT 要的值（複本會帶正式值） | 確認 |
 
 ## 5. 維運
 
