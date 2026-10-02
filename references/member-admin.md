@@ -196,6 +196,8 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
 - 其餘前綴走 `/register?token=…&redirect=…`；**不指定落點的受邀者會落在 `/dashboard`**——
   對只有 app 角色的外部人員那是他沒權限的地方，**邀請外部人員一律指定落點**
 - 重寄（`resend-invite`）省略 `redirect_url` 會沿用上一張的落點
+- ⚠ 2026-10-02 prod 實打：`POST /invitations`（`send_email:true`、`redirect_url:/hosted-app-handoff/<slug>`）的**新註冊者**
+  註冊完落在工作區 `/dashboard`，沒有帶到 app——交付時另外給 app 網址，不要只靠落點
 - **`POST /members` 與 `POST /invitations` 在 `send_email:false` 下是同一件事**（★ 實打）：都只建邀請、回
   `token`＋`chat_invite_link`，`POST /members` 回應的 `id`／`user_id` 是 `null`——受邀者註冊完成前**沒有成員列**，
   之後要改角色（`PUT /members/{id}`）或重寄（`resend-invite`）都要先從 `GET /members` 找到他的 id
@@ -283,6 +285,8 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
   等於正式上線。遷入者交清單、說明兩道門，由客戶決定名單與時機。
 - **名單會漂**：app 之後每新增一個可登入的人，AI GO 那邊也要有帳號與角色。對照做成冪等腳本，切換當天跑一次、之後定期跑。
 - **UAT**：只補測試者，不邀整批人（`uat-environment.md` §3.5）。
+- **移除成員不會通知 app**：平台沒有成員被移除的 webhook，app 若保留自家認證後端（自己發 session／token），
+  被移除者已發出的 token 會續用到期。必須做即時撤權：`dev-rules.md` 規則 34。
 
 ## 8. 回應怎麼讀（2026-09-08 測試租戶擁有者帳號實打；★ 標記＝實測字串）
 

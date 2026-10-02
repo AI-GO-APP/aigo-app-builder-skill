@@ -583,7 +583,8 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
 
 ## 6. 可見度與 internal app 的 401 處置
 
-- `PUT /{id}/access-settings`，body `{visibility, access_role_ids}`：`visibility` = `public`（預設）／
+- `PUT /{id}/access-settings`，body `{visibility, access_role_ids, workspace_login_redirect}`（**`workspace_login_redirect` 必填**，
+  漏了回 422 `Field required`；2026-10-02 prod 實打，值可先 GET app 讀回原值照送）：`visibility` = `public`（預設）／
   `internal`（需登入 AI GO）。**`internal` ＋ `access_role_ids=[]` ＝ 全租戶已登入成員**；填角色 id
   就只放行那些角色；`public` 下 `access_role_ids` 必須為空（DB CHECK）。需 `hosted_apps.deploy`，
   再收窄到 app 的 `created_by`／admin。**internal app 沒有預覽截圖**。
@@ -639,7 +640,7 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
   - 前端**用 `code` 判斷**（不要只看 401），正確處置是 `window.location.reload()`
     發起頂層導覽；**不要**自己導去回應裡的 `login_origin`（CSRF nonce 只在
     HTML 導覽路徑鑄造，自導必失敗）；不要無限重試
-- session 24 小時；平台 cookie 會在進容器前被剝掉——**容器內看不到、也不用管**平台 cookie
+- session 24 小時（被移除成員的 session 也可能續用到期；若 app 另有自家認證後端，須做即時撤權，見 `dev-rules.md` 規則 34）；平台 cookie 會在進容器前被剝掉——**容器內看不到、也不用管**平台 cookie
 - 已修的一個平台缺陷（#1421，2026-09）：internal app 的 auth proxy 曾把**已登入使用者的冷 miss**
   丟進匿名枚舉的全域佇列（8 名額），枚舉流量一來所有登入者都拿 503。現在只有真匿名才排隊。
   v1.13.0 起 prod 生效；仍見「登入者間歇 503、無 app 端錯誤」先查平台側，不是 app 掛

@@ -1,4 +1,4 @@
-# 開發硬規則（Phase 3 規則 18–32 的完整版）
+# 開發硬規則（Phase 3 規則 18–34 的完整版）
 
 > `SKILL.md` Phase 3「核心規則」的規則 18 起在此展開。規則 1–17 是一行講完的，留在 SKILL.md。
 > **每條都是 ★ 強制或會靜默出錯的**——動手前逐條核，不要憑印象。
@@ -21,6 +21,8 @@
 - 規則 30：啟動先渲染 skeleton，不要讓長 API 擋住首次渲染
 - 規則 31：Internal app 前端禁止直呼自建表 SDK
 - 規則 32：禁止以 Hosted App 承載資料庫或 storage
+- 規則 33：每支要上正式的 app 都要有一個「UAT 結論」
+- 規則 34：沿用 AI GO 登入、同時保留自家認證後端的 app，必須做「即時撤權」
 
 ---
 
@@ -287,3 +289,30 @@
       自檢與回滾驗證後才逐項啟用
     - Custom App 的 `version-test` 草稿版**不是** UAT（同一個資料落點）；「在正式 app 灌 demo 資料」「換個租戶測」
       也不算；遷入案的計畫階段就要有「同一份程式、換旗標指不同庫」的設計，否則搭不出 UAT
+34. **沿用 AI GO 登入、同時保留自家認證後端的 app，必須做「即時撤權」**（★ 強制，2026-10-01 立）
+    - 觸發：Hosted App 掛在 AI GO 登入後面（internal），並把 AI GO 身分**橋接**成自家認證後端的 session／token
+      （例：Supabase GoTrue session＋RLS，或任何自己發 token、瀏覽器直接拿去打資料的系統）。
+      **為什麼**：平台沒有「成員被移除」的 webhook，app token 也無法列舉受眾，而 proxy session 可長達 24 小時；
+      app 端不做事，被移除的人手上已發出的後端 token 在到期前照用不誤
+    - (1) **持續複查成員資格**：以短週期呼叫 `GET /api/v1/open/members/{X-Aigo-User-Id}/context`，**404 ⇒ 拒絕**；
+      不能只信橋接當下查的那一次
+    - (2) **每個後端 session 綁一筆伺服器端租約（lease）**：欄位至少 session id → AI GO user id、到期時間、`revoked_at`；
+      由**走平台 proxy 的心跳**續期（心跳走 proxy 才帶得到身分，也才會在 session 失效時被擋）
+    - (3) **在資料層強制，不是只擋頁面**：後端 token 是瀏覽器直接拿去打資料的，檢查必須落在**每一個資料請求**上。
+      PostgREST／Supabase：用 `db_pre_request` 函式涵蓋所有表（含 RLS 關閉的表）與 RPC；Storage、Realtime 另加 RESTRICTIVE policy。
+      只在某個 helper function 內檢查**不夠**——policy 大量不看身分時（例如 `USING (true)`），helper 根本不會被呼叫
+    - (4) **app 端停用要在下一個請求就生效**：app 內的「停用」動作要同步寫入租約的 `revoked_at`（或讓檢查讀得到停用旗標），不等 token 到期
+    - (5) **關掉或加閘後端自己的密碼登入**：否則被撤權的人直接用密碼登入後端，上面全部白做
+    - (6) **預設惰性（inert-by-default）並附模式開關**（例如 off／log／enforce）：平行運行期間，
+      同一顆 DB 上仍在跑的舊站不能受影響；先 log 觀察、驗過再切 enforce
+    - (7) **交接文件逐路徑寫明撤權延遲**：例如 app 端停用＝立即；AI GO 端移除成員 ≤ 租約 TTL＋context 快取時間。
+      沒寫＝沒過閘（落點：遷入計畫、Phase 5 交接）
+    - **平台實測（2026-10-02，某遷入案的 UAT app）**：
+        - 拿掉一般成員的放行角色後，**proxy 在下一個請求就擋**（平台頁「App 不存在或你沒有存取權」），
+          請求進不了 app ⇒ app 端「心跳時 context 回 404 → 立即撤銷」在平台上走不到；**資料層實際靠租約到期**斷
+          （實測拿掉角色到 DB 開始拒絕約 2.5 分鐘，TTL 180 秒）。所以 (2) 的租約 TTL 就是 AI GO 端移除的撤權上限，要設短
+        - **工作區擁有者不受 `access_role_ids` 限制**：拿掉 app 角色後仍進得去、context 照回 200。
+          擁有者要撤只能拿掉擁有者身分；給客戶一般使用者開帳號**不要給擁有者**，交接文件要寫明
+    - 附帶：pg_net／webhook 之類的呼叫端打 internal app 時**沒有 AI GO session**，會被 proxy 擋下——
+      這類入口要另規劃路徑，不能指望穿過 proxy
+    - 相關：`member-admin.md` §7.1（兩道門）、`migration-workflow.md` §2.0 BaaS 註記與 §2.4.5、`hosted-apps.md` §6（session 24 小時）

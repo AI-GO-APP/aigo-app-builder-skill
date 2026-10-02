@@ -1,3 +1,29 @@
+## 1.59.0
+
+### 平台實測補記（2026-10-02）
+
+- 規則 34 補上實測：拿掉放行角色後 proxy 下一個請求即擋，資料層靠租約到期斷（約 2.5 分鐘）；工作區擁有者不受 `access_role_ids` 限制
+- `hosted-apps.md`：`PUT access-settings` 的 `workspace_login_redirect` 必填
+- `member-admin.md`：邀請 `redirect_url` 對新註冊者沒帶到 app
+
+### 新增規則 34：沿用 AI GO 登入又保留自家認證後端的 app，必須做「即時撤權」
+
+某遷入案（2026-10）盤點發現缺口：app 把 AI GO 身分橋接成自家認證後端（例如 Supabase GoTrue session＋RLS）後，
+平台沒有「成員被移除」的 webhook、app token 也無法列舉受眾，proxy session 又可長達 24 小時——
+被移除的人手上已發出的後端 token 在到期前照用，且後端 token 是瀏覽器直接拿去打資料的，擋頁面沒用。
+
+- `dev-rules.md` 規則 34（★ 強制）：(1) 以 `GET /api/v1/open/members/{X-Aigo-User-Id}/context` 短週期複查，404 ⇒ 拒絕；
+  (2) 每個後端 session 綁伺服器端租約（session id → user id、到期、`revoked_at`），由走 proxy 的心跳續期；
+  (3) 在資料層強制（PostgREST／Supabase：`db_pre_request` 涵蓋全部表含 RLS 關閉者與 RPC，Storage／Realtime 加 RESTRICTIVE policy；
+  只在單一 helper function 內檢查不夠）；(4) app 端停用於下一個請求生效；(5) 關掉或加閘後端自己的密碼登入；
+  (6) 預設惰性＋模式開關，平行運行期間同庫舊站不受影響；(7) 交接逐路徑寫明撤權延遲。
+  附帶：pg_net／webhook 呼叫端沒有 AI GO session，會被 proxy 擋下，要另規劃路徑。
+- `dev-rules.md` 目錄補上規則 33、34，標題範圍 18–32 → 18–34；`SKILL.md` 速查表補 33、34 兩列（原表停在 32）。
+- 交叉引用：`member-admin.md` §7.1、`migration-workflow.md` §2.0（BaaS 註記）與 §2.4.5、`hosted-apps.md` §6（session 24 小時）。
+
+沒做的：不提供現成的 SQL／函式範本（各 BaaS 差異大，且尚未有可公開的驗證過版本）；不改平台行為。
+
+
 ## 1.58.0
 
 ### Hosted App 的平台 Storage API：`/open/storage/*`（平台 v1.16.0 起；修 #107）
