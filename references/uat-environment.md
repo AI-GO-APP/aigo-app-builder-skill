@@ -63,6 +63,8 @@ Custom App 的草稿版（`{租戶}.ai-go.app/runtime/version-test/{識別碼}`�
   同顆會共用 compute 與備份範圍，UAT 灌資料會拖慢正式。
 - UAT 資料：用正式 dump 的**去識別化**副本，或合成資料。含真人個資的正式 dump 直接灌 UAT
   要租戶 owner 同意並限制誰能登入（§3 步驟 4 的 UAT 角色就是那道限制）。
+  複本裡若還有使用者授權 token、推播訂閱、聊天綁定、第三方活動 ID 這類「會打到外面」的資料，
+  預設**重建空庫再塞測試資料**，不要原地清——資料分類與步驟見 `hosted-migration-runbook.md` §5。
 
 ## 3. 建置步驟（Hosted + Custom 入口的形狀；其他形狀挑用得到的）
 
