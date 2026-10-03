@@ -18,6 +18,8 @@ Custom App 線有 Phase 1～5，Hosted 線原本只寫「不進 Phase 2–4、�
   - 「只換運算層、UAT＝無」的分支（前提：共用庫已有規則 32 核准或屬短期過渡例外；階段 D 在新站只做只讀與安全項）
   - 入站路徑判斷（轉發 action／webhook 需要 `public`，`internal` 會擋）、切換前只放行名單開關、規則 34 即時撤權
   - 預設表一租戶一份：首次匯入即寫進正式、同步一律差異補寫、UAT 不得寫預設表；檔案搬遷與 `file_id` 對照；使用者欄位先以信箱暫存
+  - 切換當天：最後同步前原站必須已停寫入（停不了的要事先演練抓變更）；排程用單支手動觸發驗、自然週期留觀察期；原站不重新開放
+  - 回滾順序：先擋新站寫入 → 停新站排程 → 處理資料 → 改回登記 → 最後才打開原站
   - 建 UAT 時 clone、env 重建、`access-settings` 由［負責人］一氣呵成，AI 不單獨 clone；需要入站的 UAT 維持 `public`
   - 自訂網域的 `records[]` 分離與否標為未核實；外接 PostgreSQL 連線字串 env 是「`DATABASE_URL` 不搬」的例外
 - 新增 `resources/hosted_migration_test_plan_template.md`：按功能列「問題／現況／怎麼修／怎麼在 UAT 測／誰做／結果」、測試資料、切換清單、待決策、未核實
