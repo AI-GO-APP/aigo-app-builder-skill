@@ -67,7 +67,7 @@ python scripts/check_update.py     # macOS / Linux 用 python3
 | 意圖 | 走法 |
 |------|------|
 | **開發新 App**（從零做新功能） | 走主流程（Phase 0 →），**但建 app 之前必先完成 Phase 1.5 §1.0 的需求盤點**（四問＋Custom App 能力邊界核對，對稱遷入線的 §2.0）——用戶開場的一句話是題目不是需求；產品線判斷（Custom／Hosted／混合）與授權架構（誰能開、掛什麼角色）在 Phase 1.5 定案後才建 app |
-| **現有 App 遷入**（有既存系統／repo／DB 要搬進 AI GO） | **先讀 `references/migration-workflow.md`，從 §2.0 的 stack 盤點做起**（架構師視角：先盤前端／後端／資料的結構，再分流產品線），之後才回主流程 |
+| **現有 App 遷入**（有既存系統／repo／DB 要搬進 AI GO） | **先讀 `references/migration-workflow.md`，從 §2.0 的 stack 盤點做起**（架構師視角：先盤前端／後端／資料的結構，再分流產品線），之後才回主流程；判走 Hosted App 的，主流程改照 `references/hosted-migration-runbook.md`（盤點 → 測試 → 切換 → 退場） |
 | **資料操作，不開發 app**（查、改、批次、匯出自己有權限的資料） | **走 `references/data-operations.md` 的短流程**：`aigo_auth.py status` → `aigo_data.py me` → `perm-check` → 路由查該檔 §4 → `call`／`export`。不進 Phase 0 的 VFS review、不建 app、不走 proxy——用登入者自己的 token 與權限。**寫入前必過該檔 §3.5 的寫入閘門**——這條線打的是唯一一份正式資料，沒有沙箱也沒有還原路徑 |
 | **成員／角色管理，不開發 app**（批次邀請、建連結、開角色、改權限、設 app 角色白名單） | **走 `references/member-admin.md`**（§2 端點、§4 邀請流程、§5 角色 CRUD）：登入者本人的 JWT，不建 app、不走 `/open/*`；寫入同樣過 `data-operations.md` §3.5 閘門（邀請與改角色都是不可逆的正式資料） |
 
@@ -488,6 +488,7 @@ timeout／連不出去＝raw `httpx` 直連（改 `ctx.http.call`）或 slug 沒
 | `references/product-line-decision.md` | **Phase 1.5 判產品線與模式時（兩條路共用 SSOT）**：預設 Custom App 與偏離訊號、Custom App 能力邊界核對表、兩問四象限（登入者一律 internal）、混合方案分工（含 Hosted 當 Custom 後端）、不可逆前提、app 分配表 |
 | `references/member-admin.md` | **Phase 1.5 第 1.7 項授權架構選型的 SSOT ＋ 成員／角色管理 playbook**：內外人員共用帳號體系的立場、三問與授權架構表、邀請／角色端點與權限、`access_role_ids`（兩條線）、批次邀請流程與四個邊界、Hosted internal 身分取得（header＋members context）、既有系統使用者搬遷、403 解讀 |
 | `references/migration-workflow.md` | **有現存系統要遷入時**：stack 盤點（§2.0，最先做；**四種 stack 形狀**，含「BaaS 為後端、瀏覽器直連」；原雲端拓撲與本機／外部微服務、排程的落點）、產品線判斷的遷入輸入（§2.1）、專案解構、Schema 映射、使用者與登入的落點（§2.4.5）、資料遷移、切換準備（§2.6：外部登記項、寫死的正式資源） |
+| `references/hosted-migration-runbook.md` | **判走 Hosted App 的遷入案的主流程**：先確認真正的正式站、七個階段與通過條件、常駐 PaaS 隱藏假設掃描、UAT 測試資料策略、功能測試順序（模板 `resources/hosted_migration_test_plan_template.md`）、切換當天步驟與回滾、觀察與舊站退場 |
 | `references/uat-environment.md` | **規則 33 的做法**：UAT 結論怎麼下、`version-test` 為何不算、鏡像拓撲、`-uat` 命名、獨立資料庫與憑證、clone Hosted 的正式設定窗口與可見度重設、egress／secrets／Open Proxy 引用、只補測試者、驗證表、維運與退場 |
 | `references/verification-details.md` | **要執行驗證時**：四項驗證的完整定義、Phase 5 里程碑 |
 | `references/troubleshooting.md` | **出錯時**：錯誤速查表 |
