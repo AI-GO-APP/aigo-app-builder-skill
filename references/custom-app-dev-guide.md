@@ -293,7 +293,7 @@ POST /api/v1/builder/apps/{app_id}/publish
 （沒登記時 `is_enabled` 預設 true；只有公開 webhook 另外要求 manifest 寫 `"webhook": true`）。同步走 PATCH、不刪遠端檔，
 所以「本機刪檔＋拿掉登記＋重新發布」之後那支 action 還在線上。做法：`full_deploy(..., on_remote_only="delete")`
 （或直接 `delete_remote_files()`）刪掉遠端檔 → 發布回 409 `ACTION_REMOVAL` → 用戶確認後帶 `confirm_removal=true` 重發。
-`scripts/aigo_sync.py` 1.66.0 起偵測到遠端有本機沒有的 `actions/` 檔會在寫入前中止（`troubleshooting.md`「刪掉的 action 還能呼叫」列）。
+`scripts/aigo_sync.py` 1.68.0 起偵測到遠端有本機沒有的 `actions/` 檔會在寫入前中止（`troubleshooting.md`「刪掉的 action 還能呼叫」列）。
 
 `scripts/aigo_publish.py publish_app()` 三個參數都可帶，並在 POST 前先跑 `egress_preflight()`
 把宣告、字面 slug 與已授權清單對照列出來；409 回來會把 `code` 翻成下一步，**不會自動帶 confirm**。
