@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import stat
 import sys
 from pathlib import Path
@@ -64,7 +65,15 @@ def read_secret_file(path: str | os.PathLike) -> str:
         raise SecretFileError(f"金鑰檔不是 UTF-8 文字：{p}") from None
     if not value:
         raise SecretFileError(f"金鑰檔是空的：{p}")
+    # 整個檔會當成「一顆金鑰的值」送出去——.env 形狀（多行 KEY=value）代表放錯東西了。
+    # 多行本身不擋：PEM、service account JSON 是合法的多行值
+    if sum(1 for line in value.splitlines() if _ENV_LINE.match(line)) >= 2:
+        raise SecretFileError(f"金鑰檔看起來是 .env（多行 KEY=value）；一個檔只放一顆金鑰的值本身：{p}")
     return value
+
+
+# `=` 後面要接非 `=` 的字元才算：base64 行尾的 `=`／`==` padding（PEM 內文）不算
+_ENV_LINE = re.compile(r"^(export\s+)?[A-Za-z_][A-Za-z0-9_]*=[^=\s]")
 
 
 def _require_https(base_url: str) -> str:
@@ -98,6 +107,8 @@ def set_secret(base_url: str, token: str, app_id: str, key_name: str, value_file
     import httpx
     base = _require_https(base_url)
     value = read_secret_file(value_file)
+    if value.startswith(f"{key_name}="):
+        raise SecretFileError(f"金鑰檔內容以「{key_name}=」開頭；檔裡只放值本身，不要帶 KEY=：{value_file}")
     existing = _find(base, token, app_id, key_name)
     if existing is None:
         body = {"key_name": key_name, "value": value, "description": description or ""}
@@ -111,7 +122,7 @@ def set_secret(base_url: str, token: str, app_id: str, key_name: str, value_file
         resp = httpx.put(f"{base}/api/v1/actions/secrets/{existing['id']}", json=body,
                          headers=_headers(token), timeout=30)
         action = "updated"
-    if resp.status_code >= 400:
+    if not resp.is_success:
         # 不 raise_for_status：HTTPStatusError 的 repr 帶 request，避免任何把 body 帶出去的可能
         raise RuntimeError(f"寫入金鑰 {key_name} 失敗：HTTP {resp.status_code}")
     return action
@@ -127,7 +138,7 @@ def delete_secret(base_url: str, token: str, app_id: str, key_name: str, *, conf
     if existing is None:
         return False
     resp = httpx.delete(f"{base}/api/v1/actions/secrets/{existing['id']}", headers=_headers(token), timeout=30)
-    if resp.status_code >= 400:
+    if not resp.is_success:
         raise RuntimeError(f"刪除金鑰 {key_name} 失敗：HTTP {resp.status_code}")
     return True
 

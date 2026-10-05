@@ -27,7 +27,8 @@
 - 改寫 SKILL.md Action 規則 5 與錯誤處理、dev-guide §25.2–§25.5、`uat-environment.md` §3 與附錄 A、`pre-report-self-grill.md`
   Q4.5b／Q6.1、`issue-reporting.md`、`troubleshooting.md`、`platform-behaviors.md`、`hosted-apps.md`、`aigo_publish.py` 提示。
 - 合併時對齊 1.61.0 之後才寫進來的段落：`hosted-apps.md` §2.1 排程轉發鏈的外部服務與共享金鑰、
-  egress `timeout_ms` 調高，都由「AI 不代設」改為照 §25.2 確認流程。Hosted 的 `runtime-settings` 全量替換仍不由 AI 代做
+  egress `timeout_ms` 調高，都由「AI 不代設」改為照 §25.2 確認流程。`hosted-migration-runbook.md` 轉發鏈前置與拆解模板的金鑰欄同步。Hosted env 的密鑰與 `runtime-settings` 全量替換仍由負責人設、AI 不代做。
+- `aigo_secrets.py`：金鑰檔一顆一個、只放值本身——`.env` 形狀（多行 `KEY=value`）或以 `<KEY>=` 開頭的檔會被拒絕（PEM 這類多行值照常）；3xx 回應不再當成成功
 - 權限（v1.15.4）：app 範圍外部服務的建立／授權需 `builder.access`＋app 擁有者或 `system.admin`；PATCH／DELETE 需租戶內任一 app 擁有者
   或 `system.admin`；金鑰需 `builder.access`＋看得到該 app；租戶層 `/egress-services` 需 `system.admin`。
 

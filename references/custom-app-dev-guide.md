@@ -1443,7 +1443,7 @@ def execute(ctx):
 > 2. **這是獨立的一步，不併進計畫同意**：用戶說「計畫同意」不等於同意這張表——要單獨問、單獨得到明確同意。
 >    沒回覆、回覆含糊或只同意其中幾列 → 只做同意的那幾列。**網域或送出的資料一有變動就重新確認那一列**
 >    （含 Pending host 核准 `egress-pending-hosts/{id}/approve`，它會建立並授權一支共用池服務）
-> 3. **金鑰的值不經過對話**：請用戶自己填進本機檔（例：`<工作區>/.aigo/secrets.env`，權限必須 600，
+> 3. **金鑰的值不經過對話**：請用戶自己填進本機檔（**一顆金鑰一個檔、檔裡只放值本身，不是 `KEY=value`**；例：`<工作區>/.aigo/secrets/<KEY_NAME>`，權限必須 600，
 >    `.aigo/` 已在 `.gitignore`），再用 `scripts/aigo_secrets.py set <app> <KEY> --from-file <檔>` 寫入——
 >    值只放在 HTTPS 請求本體，**不印出、不寫進 log／repo／指令列**；用戶也可以選擇自己到 Builder「服務」tab 貼上（**Windows 一律這樣做**：檔案無法設成 600，腳本會拒絕；金鑰檔也不可以是 symlink）。
 >    不向用戶要金鑰值、不代為產生第三方的金鑰。**永遠不讀金鑰值**：平台有 `GET /actions/secrets/{id}/value`

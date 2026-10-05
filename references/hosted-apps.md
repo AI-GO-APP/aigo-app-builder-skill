@@ -537,8 +537,9 @@ Hosted App 容器**只帶平台注入的 `AIGO_*`**，原系統的 env 一顆都
    清單只放目標位置是 runtime-settings、處置不是不搬／退役的列；`--a <prod-id> --b <uat-id>` 比兩個 app，
    列出兩邊值相同的 key。只打 GET、不印值）
 3. **把「尚缺」逐顆列給用戶**，說明缺了哪個功能會壞，請負責人到對應位置設定（Hosted：「環境變數」tab）。
-   遷入與其 UAT 的密鑰**值**一律由負責人提供：填進本機檔（600、不進 git）由 AI 讀檔寫入（Custom App 的 `ctx.secrets`
-   用 `scripts/aigo_secrets.py set`；Hosted env 走 runtime-settings 時同樣從檔案讀、不印值）、或自己到設定頁貼上；
+   遷入與其 UAT 的密鑰**值**一律由負責人提供：填進本機檔（600、不進 git）由 AI 讀檔寫入（只限 Custom App 的 `ctx.secrets`，
+   用 `scripts/aigo_secrets.py set`）、或自己到設定頁貼上；**Hosted env 的密鑰一律由負責人在「環境變數」tab 設**——
+   `PUT runtime-settings` 是全量替換，等於經手所有密鑰值，AI 不代做；
    AI 不向人要值、不自己編值，值不在對話裡傳、不印出（dev-guide §25.2 確認流程）。尚缺未清空時，只能給**進度／阻塞說明**（列出缺項與影響），
    **不得對外交付、不得回報遷入完成**
 4. **驗證**：依 `env_availability` 分開——`runtime` 等滿傳播窗後驗（§3.4「只改 env」列）；
@@ -546,7 +547,7 @@ Hosted App 容器**只帶平台注入的 `AIGO_*`**，原系統的 env 一顆都
    確認 version marker，並驗證瀏覽器實際拿到新值。每列的「用途」都實際跑一次——排程類手動觸發一次、
    看**工作本身的執行結果**，不是平台排程的「成功」
 
-**Custom App 線**同樣要盤點、對帳，但落點不同：後端密鑰由負責人在 Builder「服務」tab 設定、
+**Custom App 線**同樣要盤點、對帳，但落點不同：後端密鑰照 dev-guide §25.2 寫入（值由負責人填 600 本機檔、AI 用 `aigo_secrets.py set`，或負責人自己貼到 Builder「服務」tab）、
 action 以 `ctx.secrets` 讀取（Builder 沒有 runtime-settings 這支 GET，已設與否在「服務」tab 核對，
 `custom-app-dev-guide.md` §26、§28）；前端公開設定與打包時注入的值另列落點與驗證方式，不套用上面的 Hosted GET。
 

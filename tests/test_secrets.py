@@ -107,6 +107,38 @@ class ApiTest(unittest.TestCase):
                     self.run_quiet(s.set_secret, BASE, 't', 'app', 'API_KEY', f)
             self.assertNotIn(VALUE, str(cm.exception))
 
+    def test_redirect_is_not_reported_as_success(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = secret_file(d)
+            with patch('httpx.get', return_value=response(200, [])), \
+                    patch('httpx.post', return_value=response(302, {})):
+                with self.assertRaises(RuntimeError):
+                    self.run_quiet(s.set_secret, BASE, 't', 'app', 'API_KEY', f)
+            with patch('httpx.get', return_value=response(200, [{'id': 'sid', 'key_name': 'API_KEY'}])), \
+                    patch('httpx.delete', return_value=response(302, {})):
+                with self.assertRaises(RuntimeError):
+                    self.run_quiet(s.delete_secret, BASE, 't', 'app', 'API_KEY', confirm=True)
+
+    def test_env_shaped_file_is_rejected_without_leaking(self):
+        with tempfile.TemporaryDirectory() as d:
+            multi = secret_file(d, content=f'API_KEY={VALUE}\nCRON_KEY=b\n', name='multi')
+            with self.assertRaises(s.SecretFileError) as cm:
+                s.read_secret_file(multi)
+            self.assertNotIn(VALUE, str(cm.exception))
+            prefixed = secret_file(d, content=f'API_KEY={VALUE}\n', name='prefixed')
+            with patch('httpx.get') as get, patch('httpx.post') as post:
+                with self.assertRaises(s.SecretFileError) as cm:
+                    self.run_quiet(s.set_secret, BASE, 't', 'app', 'API_KEY', prefixed)
+                get.assert_not_called()
+                post.assert_not_called()
+            self.assertNotIn(VALUE, str(cm.exception))
+
+    @unittest.skipIf(os.name == 'nt', 'posix only')
+    def test_multiline_values_like_pem_are_allowed(self):
+        pem = '-----BEGIN PRIVATE KEY-----\nYWJj=\nZGVm==\n-----END PRIVATE KEY-----'
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(s.read_secret_file(secret_file(d, content=pem + '\n', name='pem')), pem)
+
     def test_refuses_non_https(self):
         with tempfile.TemporaryDirectory() as d, patch('httpx.post') as post:
             with self.assertRaises(ValueError):
