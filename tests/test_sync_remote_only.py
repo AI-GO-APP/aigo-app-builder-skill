@@ -136,19 +136,56 @@ class FullDeployRemoteOnlyTest(unittest.TestCase):
             full_deploy(BASE, 't', 'app', 'slug', '/tmp/project', **kwargs)
         return calls, publish
 
-    def test_delete_removes_exactly_the_stale_paths_before_syncing(self):
-        calls, publish = self.deploy(REMOTE, on_remote_only='delete', confirm_removal=True)
+    def test_delete_removes_only_the_approved_paths_before_syncing(self):
+        calls, publish = self.deploy(REMOTE, on_remote_only='delete', delete_paths=list(STALE),
+                                     confirm_removal=True)
         self.assertEqual([c[0] for c in calls], ['delete', 'sync'])
         self.assertEqual(calls[0][1], (BASE, 't', 'app', STALE, 7))
         self.assertEqual(calls[1][1], (BASE, 't', 'app', LOCAL, 8))
-        self.assertEqual(calls[1][2], {'on_remote_only': 'abort'})
+        self.assertEqual(calls[1][2], {'on_remote_only': 'keep'})
         self.assertEqual(publish.call_args.kwargs, {'confirm_removal': True})
 
-    def test_delete_with_nothing_stale_only_syncs(self):
-        remote = {k: v for k, v in REMOTE.items() if k not in STALE}
-        calls, _ = self.deploy(remote, on_remote_only='delete')
-        self.assertEqual([c[0] for c in calls], ['sync'])
-        self.assertEqual(calls[0][1], (BASE, 't', 'app', LOCAL, 7))
+    def test_delete_leaves_stale_paths_the_user_did_not_approve(self):
+        # 確認之後別人才加的 action、或用戶決定留下的共用模組：不在清單內就不刪
+        calls, _ = self.deploy(REMOTE, on_remote_only='delete', delete_paths=['actions/_probe_kb.py'])
+        self.assertEqual(calls[0][1], (BASE, 't', 'app', ['actions/_probe_kb.py'], 7))
+        self.assertEqual(calls[1][2], {'on_remote_only': 'keep'})
+
+    def test_delete_requires_approved_paths(self):
+        for kwargs in ({}, {'delete_paths': []}):
+            with self.assertRaises(ValueError):
+                self.deploy(REMOTE, on_remote_only='delete', **kwargs)
+
+    def test_delete_paths_without_delete_mode_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self.deploy(REMOTE, on_remote_only='keep', delete_paths=['actions/_probe_kb.py'])
+
+    def test_delete_refuses_paths_that_are_not_remote_only_actions(self):
+        # 本機還有的、actions/ 以外的、遠端根本沒有的——任何一條混進來都整個拒絕，什麼都不刪
+        for bad in ('actions/keep.py', 'src/old_page.tsx', '_template.json', 'actions/gone.py'):
+            calls = []
+            with self.subTest(bad=bad):
+                from aigo_publish import full_deploy
+                with patch('aigo_auth.get_app_info', return_value={'id': 'app', 'name': 'n'}), \
+                        patch('aigo_sync.read_local_files', return_value=LOCAL), \
+                        patch('aigo_sync.get_remote_vfs', return_value=(REMOTE, 7)), \
+                        patch('aigo_sync.delete_remote_files',
+                              side_effect=lambda *a, **k: calls.append('delete')), \
+                        patch('aigo_sync.sync_to_cloud', side_effect=lambda *a, **k: calls.append('sync')), \
+                        patch('builtins.print'):
+                    with self.assertRaises(ValueError):
+                        full_deploy(BASE, 't', 'app', 'slug', '/tmp/project', on_remote_only='delete',
+                                    delete_paths=['actions/_probe_kb.py', bad])
+                self.assertEqual(calls, [])
+
+    def test_abort_message_separates_non_action_files_and_flags_missing_local_actions(self):
+        err = RemoteOnlyFilesError(STALE + ['actions/manifest.json'], local_has_actions=False)
+        self.assertEqual(err.actions, ['actions/_probe_kb.py'])
+        self.assertEqual(err.others, ['actions/_shared/util.py', 'actions/manifest.json'])
+        self.assertIn('共用模組', str(err))
+        self.assertIn('本機沒有任何 actions/ 檔', str(err))
+        self.assertIn('delete_paths', str(err))
+        self.assertNotIn('本機沒有任何 actions/ 檔', str(RemoteOnlyFilesError(STALE)))
 
     def test_keep_is_forwarded_and_nothing_is_deleted(self):
         calls, _ = self.deploy(REMOTE, on_remote_only='keep')

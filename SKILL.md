@@ -314,7 +314,7 @@ if (file) downloadFile(file);
 1. **同步 VFS**：讀取本地檔案 → PATCH `/api/v1/builder/apps/{id}/source/files`
    - 腳本：`scripts/aigo_sync.py` 的 `sync_to_cloud()`
    - ★ 內建二次驗證：PATCH 後自動 GET 確認 vfs_version 遞增 + 檔案確實寫入
-   - ★ **PATCH 不刪檔**：本機刪掉的 `actions/*.py` 留在遠端、發布後照樣可被呼叫（manifest 拿掉登記不會下架），所以遠端有本機沒有的 `actions/` 檔時 sync 預設**寫入前中止並列出**——把清單給用戶確認，再用 `full_deploy(..., on_remote_only="delete")`／`delete_remote_files()`（下架）或 `on_remote_only="keep"`（保留）→ `troubleshooting.md`「刪掉的 action 還能呼叫」列
+   - ★ **PATCH 不刪檔**：本機刪掉的 `actions/*.py` 留在遠端、發布後照樣可被呼叫（manifest 拿掉登記不會下架），所以遠端有本機沒有的 `actions/` 檔時 sync 預設**寫入前中止並列出**——把清單給用戶確認，再用 `full_deploy(..., on_remote_only="delete", delete_paths=[用戶確認過的路徑])`／`delete_remote_files()`（下架）或 `on_remote_only="keep"`（保留）→ `troubleshooting.md`「刪掉的 action 還能呼叫」列
 1.5. **語意檢查**（★ 前端有實質修改時必跑）：`uv run --project scripts python scripts/aigo_typecheck.py <專案目錄>`
    - **compile 走 esbuild，只轉譯不驗型別**：`const` 宣告前被使用（TDZ）、找不到名稱、重複宣告
      這類錯誤 compile 全綠、發布後 runtime 白畫面，且堆疊只有 minified 名稱與 esm.sh 的

@@ -300,17 +300,25 @@ def check_publish_status(base_url: str, token: str, app_id: str) -> str:
 
 
 def full_deploy(base_url: str, token: str, app_id: str, slug: str, project_path: str,
-                *, on_remote_only: str = "abort", **publish_kwargs: Any) -> dict:
+                *, on_remote_only: str = "abort", delete_paths: list[str] | None = None,
+                **publish_kwargs: Any) -> dict:
     """完整部署流程：sync → compile → publish（publish_kwargs 透傳給 publish_app）
 
     `on_remote_only`：遠端還有本機已刪的 actions/ 檔時怎麼辦——"abort"（預設）寫入前中止並列出、
-    "keep" 列出後照常同步、"delete" 先刪掉它們再同步（只有這裡能刪：本函式讀的是完整本機專案）。
+    "keep" 列出後照常同步、"delete" 先刪 `delete_paths` 再同步（只有這裡能刪：本函式讀的是完整本機專案）。
+    `delete_paths`：用戶確認過要刪的路徑，"delete" 必填。只刪清單內的；清單外的殘留一律保留並列出
+    （確認之後別人才加的 action 不會被順手刪掉）。清單內有不是「遠端有、本機沒有的 actions/ 檔」的路徑就整個拒絕。
     """
     from aigo_sync import (read_local_files, get_remote_vfs, sync_to_cloud,
                            remote_only_actions, delete_remote_files)
     from aigo_compile import compile_app
     if on_remote_only not in ("abort", "keep", "delete"):
         raise ValueError(f"on_remote_only 只能是 abort／keep／delete，收到 {on_remote_only!r}")
+    if on_remote_only == "delete" and not delete_paths:
+        raise ValueError("on_remote_only=\"delete\" 必須帶 delete_paths（用戶確認過的路徑）；"
+                         "先用預設的 abort 取得清單給用戶確認")
+    if delete_paths and on_remote_only != "delete":
+        raise ValueError("delete_paths 只能搭配 on_remote_only=\"delete\"")
 
     result: dict[str, Any] = {"sync": None, "compile": None, "publish": None}
 
@@ -325,11 +333,17 @@ def full_deploy(base_url: str, token: str, app_id: str, slug: str, project_path:
     remote_vfs, version = get_remote_vfs(base_url, token, app_id)
     if on_remote_only == "delete":
         stale = remote_only_actions(local_files, remote_vfs)
-        if stale:
-            deleted = delete_remote_files(base_url, token, app_id, stale, version)
-            version = deleted.get("vfs_version") or get_remote_vfs(base_url, token, app_id)[1]
-            print("🗑️ 已刪除遠端殘留的 actions/ 檔（尚未同步、尚未發布）：\n" + "\n".join(f"   - {p}" for p in stale))
-        on_remote_only = "abort"
+        approved = sorted(set(delete_paths or []))
+        not_stale = [p for p in approved if p not in stale]
+        if not_stale:
+            raise ValueError("delete_paths 內有不是「遠端有、本機沒有的 actions/ 檔」的路徑，未刪除任何東西："
+                             + "、".join(not_stale))
+        deleted = delete_remote_files(base_url, token, app_id, approved, version)
+        new_version = deleted.get("vfs_version")
+        version = new_version if isinstance(new_version, int) else get_remote_vfs(base_url, token, app_id)[1]
+        print("🗑️ 已刪除遠端殘留的 actions/ 檔（尚未同步、尚未發布）：\n" + "\n".join(f"   - {p}" for p in approved))
+        # 清單外的殘留不是用戶確認過的，保留；sync_to_cloud 會把它們列出來
+        on_remote_only = "keep"
     result["sync"] = sync_to_cloud(base_url, token, app_id, local_files, version,
                                    on_remote_only=on_remote_only)
 
