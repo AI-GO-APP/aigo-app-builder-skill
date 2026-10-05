@@ -1,4 +1,4 @@
-## 1.58.0
+## 1.69.0
 
 ### 模板當素材、Phase 1.5 加模板盤點與效果繫結；AI 可代設外部服務與金鑰（先確認再動手）
 
@@ -26,8 +26,225 @@
 - `EGRESS_NOT_READY` 等設定缺口仍然不當平台 bug 回報——改由 AI 在確認後自行補上。
 - 改寫 SKILL.md Action 規則 5 與錯誤處理、dev-guide §25.2–§25.5、`uat-environment.md` §3 與附錄 A、`pre-report-self-grill.md`
   Q4.5b／Q6.1、`issue-reporting.md`、`troubleshooting.md`、`platform-behaviors.md`、`hosted-apps.md`、`aigo_publish.py` 提示。
+- 合併時對齊 1.61.0 之後才寫進來的段落：`hosted-apps.md` §2.1 排程轉發鏈的外部服務與共享金鑰、
+  egress `timeout_ms` 調高，都由「AI 不代設」改為照 §25.2 確認流程。Hosted 的 `runtime-settings` 全量替換仍不由 AI 代做
 - 權限（v1.15.4）：app 範圍外部服務的建立／授權需 `builder.access`＋app 擁有者或 `system.admin`；PATCH／DELETE 需租戶內任一 app 擁有者
   或 `system.admin`；金鑰需 `builder.access`＋看得到該 app；租戶層 `/egress-services` 需 `system.admin`。
+
+## 1.68.0
+
+### 修正：本機刪掉的 action 同步後還留在平台，發布後照樣可以被呼叫
+
+租戶回報：本機刪掉 `actions/<name>.py`、從 `actions/manifest.json` 拿掉登記後跑 `full_deploy()`，發布回 `published`，
+那支 action 仍回 200、跑的是舊程式碼；帶 `confirm_removal=True` 重發也一樣。對照平台原始碼與該 App 的發布快照核實：
+
+- `sync_to_cloud()` 走 PATCH，只新增或覆寫，**不刪遠端檔**；`full_deploy()` 沒有接上既有的 `diff_vfs()`／`delete_remote_files()`
+- 平台判斷 action 能不能被呼叫**只看 VFS 有沒有那個檔**，manifest 沒登記不會擋（`is_enabled` 預設 true）
+- `confirm_removal=true` 只放行 409 `ACTION_REMOVAL`，本身不刪檔；遠端檔沒少，那道守門也不會觸發
+
+變更：
+
+- `scripts/aigo_sync.py`：新增 `remote_only_actions()` 與 `RemoteOnlyFilesError`；`sync_to_cloud()` 加 `on_remote_only` 參數——
+  `"abort"`（**預設**）遠端有本機沒有的 `actions/` 檔時**寫入前中止並列出路徑**、`"keep"` 列出後照常同步。
+  只看 `actions/` 底下：其他路徑有平台注入檔與本機不掃的檔，不拿「本機沒有」當成該刪
+- `scripts/aigo_publish.py`：`full_deploy()` 加同名參數，多一個 `"delete"`——先刪掉遠端殘留再同步。
+  `"delete"` 必須帶 `delete_paths`（用戶確認過的路徑）：只刪清單內的，清單外的殘留保留並列出（回傳 `remote_only_kept`）；
+  清單內混進本機還有的、`actions/` 以外的路徑就整個拒絕。確認之後別人才加的 action 不會被順手刪掉
+  刪除只放在這裡：`sync_to_cloud()` 收到的 `files` 可能只是部分檔案，拿它當本機全貌去刪會誤刪
+- 中止訊息把 `actions/<name>.py` 與其他檔（`manifest.json`、`_shared/` 共用模組）分開列，
+  後者提醒刪掉可能讓其他 action 壞掉；本機完全沒有 `actions/` 檔時另外警告不要整批刪
+- ⚠️ **行為變更**：既有專案只要遠端留著本機沒有的 `actions/` 檔（最常見是起手式的 `actions/summarize_leads.py`），
+  更新後第一次同步會中止。把清單給用戶確認，再用 `full_deploy(on_remote_only="delete", delete_paths=[…])`／`delete_remote_files()` 或 `"keep"`；只同步部分檔案的呼叫端要明確帶 `"keep"`
+- `SKILL.md` Phase 4.1、`troubleshooting.md`（新增「刪掉的 action 還能呼叫」列）、`custom-app-dev-guide.md` §8／§26.2：
+  寫明下架 action 要刪 VFS 檔、改 manifest 無效、`confirm_removal` 不刪檔
+- `tests/test_sync_remote_only.py`：18 條離線測試
+
+## 1.67.0
+
+### 產品線判斷先問：專案進正式環境了嗎
+
+產品線判斷原本只看需求形狀（新建）或 stack 形狀（遷入），沒有把「有沒有正式使用者與正式資料」當輸入。
+新增一道最前面的判斷：
+
+- 還沒進正式環境（全新，或有程式但沒上線）→ 先看 Custom App 做不做得到，過得了就走 Custom App
+- 已進正式環境、有既有程式要搬 → 引導走 Hosted App 整搬，主流程照遷入作業手冊
+- 已進正式環境、但沒有程式要搬（只有試算表／SaaS／人工流程）→ 照全新判，正式資料另外搬進平台
+
+這是引導的預設值，不是硬規則；例外與判準寫在同一節。
+
+變更：
+
+- `product-line-decision.md` 新增 §0：怎麼算已進正式環境、四種專案狀態的引導方向、理由與例外
+- `SKILL.md` 源頭意圖分流：要做 app 的先問這一題；§1.0 四問前先確認
+- `migration-workflow.md` §2.1：新增問題零；問題二的對照表與表下各點註明只適用還沒進正式環境的系統
+- `planning.md` 第 1.5 項：預設立場前先過 §0
+
+## 1.65.0
+
+### 統一說法：原系統本來就在用的 Supabase Auth 可以維持
+
+規則 32 的例外寫「不得順帶採用 Supabase Auth」，`member-admin.md` §7.1 與規則 34 則寫「維持原本的 Supabase Auth 是正當選項」，
+兩邊沒對齊；1.63.0 的遷入作業手冊照前者寫成「維持自家登入要先問平台」。統一為後者：
+
+- `dev-rules.md` 規則 32：限制改為「不得在例外核准的那顆外接庫專案上順帶啟用」這些功能；原系統本來就在用、維持原樣的登入不在此限
+- `hosted-migration-runbook.md` §2：原系統用 Supabase Auth 時，維持原本的登入是正當選項，不要搬進例外核准的外接庫專案；資料層靠 BaaS 的部分才是平台決議事項
+- `migration-workflow.md` §2.0 第 4 類與 §2.1 對照表：註明待決的是資料層，登入本身可以維持原本的 BaaS Auth
+
+## 1.64.0
+
+### 延伸欄位權限分界核實＋不要登記 `dc_` 開頭的表
+
+問題起點：「延伸欄位只開放給有 `builder.access` 的人讀寫」是否為真。對照平台最新原始碼並在測試租戶完整實測：
+
+- **值**：成立。批取／寫值只認 `builder.access`；另有匯入（`system.data_import`）可寫不可讀。
+- **定義**：不成立。建、改要 `datacenter.schema_write`（只有 `builder.access` 會 403），刪要 `system.admin`＋confirm。
+- **旁路**：`dc_ext_values`／`dc_ext_field_defs` 不在引用黑名單，可登記成 app 的資料引用。
+  值表走 proxy 全 500（沒有 `id` 欄），但**定義表可讀、可改、可新增、可刪**（刪會連帶刪光該欄所有值），
+  proxy 不看 `builder.access`，等於任何打得開 app 的員工都能繞過 `datacenter.schema_write` 與 `system.admin`。
+
+變更：
+
+- `data-center.md` §10：通道表補「Data Reference 直接引用值表」一列；新增「權限分界：定義與值分開管」與
+  「🚨 不要登記 `dc_` 開頭的表」兩段（含 2026-10-05 實測結果）；§7 登記段加同一條禁令
+- `default-table-lookup.md`：`available-tables` 相減公式扣掉 `dc_` 開頭的目錄表
+- `dev-rules.md` 規則 18：登記引用時 `dc_` 開頭的表一律不登記
+
+## 1.63.0
+
+### Hosted App 遷入作業手冊：從盤點、測試到切換與退場的主流程
+
+Custom App 線有 Phase 1～5，Hosted 線原本只寫「不進 Phase 2–4、驗證用 §3.4」，盤點、UAT、測試、切換散在各章節，
+沒有順序與每階段的通過條件。某遷入案實際走一輪後整理成主流程：
+
+- 新增 `references/hosted-migration-runbook.md`：
+  - 檔頭：標［負責人］的步驟（密鑰、第三方後台、舊平台、正式環境的寫入與開關）由負責人執行或逐項核准，AI 只列規格與只讀驗證
+  - §0 先確認真正的正式站在哪（各環境的版本、使用者實際連哪邊、資料來源），版本不同的環境不互相佐證
+  - §1 七個階段總覽與通過條件：盤點 → 隱藏假設掃描 → 建新站與 UAT → 功能測試 → 切換準備 → 切換當天 → 觀察與退場
+  - §3 常駐 PaaS 的隱藏假設掃描表（計時器、回應後做事、記憶體狀態、本機檔案、單一實例、長請求、啟動一次、固定出站 IP、路徑型憑證、綁定位址）
+  - §5 UAT 測試資料策略：資料表五分類、預設重建空庫＋測試資料、外部測試資源、建資料腳本的 UAT 檢查
+  - §2 資料落點照規則 32（預設平台表；外接 PostgreSQL 要有平台核准紀錄）、登入由客戶與 PO 決定、UAT 結論一句
+  - §4 新站先收緊可見度再 clone、排程轉發鏈前置、首次資料匯入（映射閘門、簽核流程、ID 對照、限流估時）
+  - §6 功能測試順序；§7 切換準備（名冊與角色、自訂網域、全量或差異同步、去識別化資料演練、三種回滾資料處理）；
+    §8 切換當天步驟（放行正式角色、改回正式目的地再開排程）與回滾；§9 觀察期與舊站退場
+  - 「只換運算層、UAT＝無」的分支（前提：共用庫已有規則 32 核准或屬短期過渡例外；階段 D 在新站只做只讀與安全項）
+  - 入站路徑判斷（轉發 action／webhook 需要 `public`，`internal` 會擋）、切換前只放行名單開關、規則 34 即時撤權
+  - 預設表一租戶一份：首次匯入即寫進正式、同步一律差異補寫、UAT 不得寫預設表；檔案搬遷與 `file_id` 對照；使用者欄位先以信箱暫存
+  - 切換當天：最後同步前原站必須已停寫入（停不了的要事先演練抓變更）；排程用單支手動觸發驗、自然週期留觀察期；原站不重新開放
+  - 回滾順序：先擋新站寫入 → 停新站排程 → 處理資料 → 改回登記 → 最後才打開原站；入站端點（webhook、轉發 action）要靠寫入閘擋，擋不住的改完登記後再補抓差異
+  - 正式站手動觸發只限安全或冪等不對外的工作；對外的看第一個自然週期並有人盯；403 對照只能用 UAT 專用表，不碰預設表
+  - 建 UAT 時 clone、env 重建、`access-settings` 由［負責人］一氣呵成，AI 不單獨 clone；需要入站的 UAT 維持 `public`
+  - 自訂網域的 `records[]` 分離與否標為未核實；外接 PostgreSQL 連線字串 env 是「`DATABASE_URL` 不搬」的例外
+- 新增 `resources/hosted_migration_test_plan_template.md`：按功能列「問題／現況／怎麼修／怎麼在 UAT 測／誰做／結果」、測試資料、切換清單、待決策、未核實
+- `SKILL.md`、`migration-workflow.md` §2、`uat-environment.md` §2 指向本手冊；§2.6 A 的出站 IP 標為未核實並補退路
+
+## 1.62.0
+
+### 遷入切換準備：外部登記項、寫死的正式資源、兩支只讀檢查腳本
+
+遷入案實踩：env 全部對帳完，切換那天仍會一次全壞的是「登記在外面、會打進來的設定」；開 UAT 後最先出事的是
+「env 沒設就退回正式值」的寫死資源（UAT 上傳寫進正式雲端硬碟、在正式主題上建訂閱）。
+
+- `migration-workflow.md` 新增 **§2.6 切換準備**：
+  - A. 外部登記項：從程式盤出被外部呼叫的端點，逐一問「誰登記、在哪個後台、誰有權改」；8 類常見登記
+    （訊息平台 webhook、OAuth 回呼、推送訂閱、腳本與自動化、留在原機的排程、終端裝置、聊天 App、IP 白名單、
+    SSO／進件信箱／監控探針、DNS）；
+    產出切換清單與切換順序；UAT 另用一組測試登記；第三方後台由負責人改
+  - B. 寫死的正式資源：找法（只印命中片段、不印整行；舊平台網域、env 讀取帶預設值、雲端資源 ID）與修法
+    （非正式環境沒設就報錯；正式與否由 app 自己的 env 判斷、沒設＝非正式；CI 禁止舊網域字樣）
+  - C. 檢查工具
+  - §2.2 加一條指向 §2.6
+- `uat-environment.md`：§3 開始前先擋住寫死的正式資源（防線先上正式再 clone）、步驟 3 資源 ID 類 key 一律換掉；§4 驗證加「正式與 UAT 不共用密鑰」「沒有寫死的正式資源」兩列
+- 新增 `scripts/aigo_env_diff.py`（只讀）：比對兩個 Hosted App 的 runtime-settings，或拿對帳表檢查一支 app；
+  列只在一邊的 key、空值、兩邊值相同、`env_availability` 不同。**不印任何值或雜湊**；`--expect` 缺 key 時 exit 1
+- 新增 `scripts/aigo_cron_health.py`（只讀）：列平台排程的狀態、最近結果、暫停原因、過期未跑、連續錯誤；
+  `--expect-action` 斷言某支 action 有排程；有紅燈 exit 1。不顯示排程 `params`
+- `hosted-apps.md` §4、`event-triggers.md` §2.8 加腳本指引；`tests/test_env_diff_cron_health.py` 8 個離線測試
+## 1.61.0
+
+### 遷入案實踩：Hosted App 的定時工作與長任務、兼當加密金鑰的密鑰、外接 Supabase 補遺
+
+某遷入案（原 PaaS 常駐伺服器 → Hosted App）搬進來後「排程跑不動」，拆開是幾件通用的事：
+
+- `hosted-apps.md` 新增 **§2.1 定時工作與長任務**：
+  - Hosted 沒有時鐘——容器內計時器縮到零就停；預設做法是**平台排程 → Custom App 轉發 action → Hosted 端點**
+    （共享金鑰、Hosted 維持 `always_on=false`）
+  - 時間預算取四道上限最小者（egress 預設 10／最高 30 秒、轉發 action 自己的 `timeout_ms`、排程 action 120 秒、Hosted 300 秒）；
+    冷啟動：間隔短於縮容延遲（目前約 15 分鐘）的排程讓實例一直醒著，間隔長的每次冷啟動，可能吃掉 egress `timeout_ms`（預設 10 秒）而回 `timeout`（錯誤色但不計入暫停、不重投）
+  - 前置照 §5.1：Hosted `public`、egress 服務與共享金鑰由人設定，AI 不代設；排程間隔受方案限制
+  - **回應送出後不得再做事**（202 後背景跑、fire-and-forget 都沒保證）；長任務切段、DB 存游標、下次 tick 接著做
+  - 防重複：平台自建表用單欄 unique 的 409 佔（工作|時段|嘗試號），到期 ≥ 開始＋300 秒、過期不改舊列改佔下一號、嘗試號設上限；時段用 `scheduled_at` 推算；外接 PG 才用複合唯一鍵
+  - 誠實結果：平台的「成功」只代表 action 有回應；Hosted 端寫執行結果表＋健康檢查；轉發 action 吞錯或丟錯要刻意選
+    （丟錯會在連續 10 次後自動暫停）
+  - **排程最後才開**：盤每支工作的對外副作用 → 目的地換測試帳號 → 逐支手動觸發驗證 → owner 確認要在這個環境運作才建排程、開總開關；
+    遷入正式站時新舊排程不可同時開，每支寫停舊／開新的順序
+    正式站：目的地原值記進計畫、設定列由負責人改或核准、會寫業務資料的工作只在 UAT 驗、打開前改回正式值
+  - 防重複補：時段＝工作週期、Hosted 端自訂硬截止、排程間隔要短於工作週期才會到期接手；
+    平台 run-now 對 action 與正式觸發分不出來（`scheduled_at`＝當下），只驗轉發鏈，工作驗收用 app 單支觸發（獨立佔用鍵）
+  - §2 硬規則表新增「回應送出後不得再做事」；§3.0 決策閘第一題先問能否改平台排程；§5.1 指向 §2.1
+- `hosted-apps.md` §4：**兼當加密金鑰的密鑰不可隨手換新**（正式遷入由負責人沿用原值、走 app 功能路徑驗證，AI 不取得金鑰；UAT 用正式複本時預設清掉那些欄位）
+- `hosted-apps.md` §7.2 外接 Supabase 補四條：直連主機只有 IPv6 → 走 pooler；連線字串密碼要百分比編碼；
+  整庫匯入走 session 模式／直連並加 `--no-owner --no-privileges`；規則 32 要最小權限角色，暫以擁有者連線時的 RLS＋REVOKE＋DEFAULT PRIVILEGES 保底（不要 FORCE）
+- `uat-environment.md`：步驟 9 改為照「排程最後才開」逐支驗證；步驟 3 加加密金鑰例外；步驟 9 與 §4 驗證加「DB 裡的排程總開關／通知設定列跟著資料走」
+  （正式複本＝開、空庫＝關）
+- `custom-app-dev-guide.md` §23.9：租約鎖改為「過期 claim 下一號、不刪舊列」（原寫法有競態）
+- `hosted-apps.md` §7.2：function 的 EXECUTE 要對 `PUBLIC` 撤，且全域預設權限要不帶 `IN SCHEMA` 撤
+- `troubleshooting.md`：「>300 秒」那列刪掉「改背景工作」的建議；新增「排程完全不跑／少跑」「平台顯示成功但工作沒做成」兩列
+
+## 1.60.0
+
+### 登入方式改為二選一：維持原系統登入，或選用 AI GO 登入
+
+- `member-admin.md` §7.1、`migration-workflow.md` §2.4.5、`uat-environment.md` §3.5：搬遷案的登入不再預設綁在 AI GO；維持原系統自己的登入（例：Supabase Auth）是正當選項，由客戶與 PO 依案決定，遷入計畫寫明選哪一種
+- `dev-rules.md` 規則 34：寫明只在選用 AI GO 登入、又保留自家認證後端時適用，不代表建議採用
+
+## 1.59.0
+
+### 平台實測補記（2026-10-02）
+
+- 規則 34 補上實測：拿掉放行角色後 proxy 下一個請求即擋，資料層靠租約到期斷（約 2.5 分鐘）；工作區擁有者不受 `access_role_ids` 限制
+- `hosted-apps.md`：`PUT access-settings` 的 `workspace_login_redirect` 必填
+- `member-admin.md`：邀請 `redirect_url` 對新註冊者沒帶到 app
+
+### 新增規則 34：沿用 AI GO 登入又保留自家認證後端的 app，必須做「即時撤權」
+
+某遷入案（2026-10）盤點發現缺口：app 把 AI GO 身分橋接成自家認證後端（例如 Supabase GoTrue session＋RLS）後，
+平台沒有「成員被移除」的 webhook、app token 也無法列舉受眾，proxy session 又可長達 24 小時——
+被移除的人手上已發出的後端 token 在到期前照用，且後端 token 是瀏覽器直接拿去打資料的，擋頁面沒用。
+
+- `dev-rules.md` 規則 34（★ 強制）：(1) 以 `GET /api/v1/open/members/{X-Aigo-User-Id}/context` 短週期複查，404 ⇒ 拒絕；
+  (2) 每個後端 session 綁伺服器端租約（session id → user id、到期、`revoked_at`），由走 proxy 的心跳續期；
+  (3) 在資料層強制（PostgREST／Supabase：`db_pre_request` 涵蓋全部表含 RLS 關閉者與 RPC，Storage／Realtime 加 RESTRICTIVE policy；
+  只在單一 helper function 內檢查不夠）；(4) app 端停用於下一個請求生效；(5) 關掉或加閘後端自己的密碼登入；
+  (6) 預設惰性＋模式開關，平行運行期間同庫舊站不受影響；(7) 交接逐路徑寫明撤權延遲。
+  附帶：pg_net／webhook 呼叫端沒有 AI GO session，會被 proxy 擋下，要另規劃路徑。
+- `dev-rules.md` 目錄補上規則 33、34，標題範圍 18–32 → 18–34；`SKILL.md` 速查表補 33、34 兩列（原表停在 32）。
+- 交叉引用：`member-admin.md` §7.1、`migration-workflow.md` §2.0（BaaS 註記）與 §2.4.5、`hosted-apps.md` §6（session 24 小時）。
+
+沒做的：不提供現成的 SQL／函式範本（各 BaaS 差異大，且尚未有可公開的驗證過版本）；不改平台行為。
+
+
+## 1.58.0
+
+### Hosted App 的平台 Storage API：`/open/storage/*`（平台 v1.16.0 起；修 #107）
+
+skill 一直寫「Hosted App 完全沒有平台 storage 介面」（1.19.0 起，當時已回報平台）。平台 v1.16.0 補上了：
+Hosted App 用容器內的 `AIGO_API_TOKEN` 打 `/api/v1/open/storage/*` 六條端點上傳／取網址／列出／刪除
+「App 檔案」（拿到 `file_id`），也能打 `/open/ai-hub/*` 呼叫平台 AI。舊句會讓 builder 把遷入案的檔案層
+導向錯的處理方式。**1.19.0 那筆「已回報平台」平台已補上。**
+
+2026-10-02 在測試租戶部署一次性探針 Hosted App，零 scope 與開了 storage scope 各跑一輪，六條端點的
+正常路徑與錯誤路徑全部實打（測完檔案與 app 都已刪除）。
+
+- `references/hosted-apps.md` 新增 **§5.2 平台 App 檔案與平台 AI**：授權三開關（`storage.read`／
+  `storage.write`／`ai.hub.invoke`，授予即發布）、端點表附實打結果、實打才知道的坑——
+  `upload` 回 200 不是 201、`url` 回的 `expires_in` 小於 3600、presign 的 `Content-Length` 有簽進簽章、
+  `list` 會列出 `pending`／`cancelled`、四種 404 同形、刪 Hosted App 不會清檔（原始碼核對）；
+  **prod 的 scope 閘目前不擋**（零 scope 全部 200），仍要求先開開關；以及在容器內驗證的方法
+- `hosted-apps.md` §7 持久化表加「平台 App 檔案」一列；§7.1 補檔案／附件遷入（存 `file_id`、在容器內搬）；
+  檔頭部署落差改為 prod＝v1.16.0，`POLICY_GATE_MODE` 改為 v1.16.0 的 prod manifest 已是 on
+- `custom-app-dev-guide.md` §12.1 刪掉「Hosted 完全沒有 storage」，改指 §5.2；§29 通道表的 Hosted 列補 `storage`／`ai-hub`
+- `dev-rules.md` 規則 32、`migration-workflow.md` §2.1、`resources/project_deconstruction_template.md`：
+  寫明 Hosted 線的 Storage API 就是 `/open/storage/*`，檔案層和資料層一樣是必做的改寫工項
 
 ## 1.57.0
 

@@ -7,7 +7,7 @@
 
 ### ⚠️ 部署落差（prod＝最新 `v*` tag；main 只進 UAT）
 
-- **prod 跑平台最新的 `v*` tag**（2026-09-30 核：v1.15.4），**平台 `main` 只部署到 UAT**——main 剛合併的功能
+- **prod 跑平台最新的 `v*` tag**（2026-10-02 核：v1.16.0——該 tag 才有的 `/open/storage/*` 當天 prod 實打可用，§5.2），**平台 `main` 只部署到 UAT**——main 剛合併的功能
   在下一個 tag 前**只有 UAT 有**；tag 不一定從 main 切，「prod 有沒有」看 tag 內容，不看合併日期
 - 歷史（2026-09-07 prod＝v1.13.0，prod openapi 實查已含本檔當時所有端點）：下列 09-01／09-02 缺的東西
   已隨 v1.13.0 補齊，留作「下一次 prod 又落後 main」的判讀範本：
@@ -33,17 +33,17 @@
   §4）——`PUT` 的全量語意從四欄變**五欄**；租戶 app 數配額（舊 429「預設 5 支」）已整條移除（§10）
 - **靠旗標不靠版本的兩條**：租戶專屬節點 `TENANT_DEDICATED_NODES` 在 **UAT 與 prod 都是 `ops-only`**
   （租戶自助開機未開放，要平台替租戶開）⇒ §4.1 的 `resources` 在多數租戶會 403；
-  租戶資料存取規則 `POLICY_GATE_MODE` **prod＝off（v1.15.4 manifest 仍 off），main 上已改 on、等之後的 tag**（§5 末條）
+  租戶資料存取規則 `POLICY_GATE_MODE` **v1.16.0 的 prod manifest 已是 on**（2026-10-02 核 tag；v1.15.4 以前是 off）（§5 末條）
 - **判讀原則**：對著本檔宣稱的端點拿到 404 或回應缺欄位，**先懷疑部署落差**，
   不是文件錯也不是你打錯——隔幾天再試或問平台
 
 ## 目錄
 
 - 1. 是什麼：與 Custom App 的邊界
-- 2. 應用形狀硬規則（★ 失敗率最高的來源，動手前逐條核）
+- 2. 應用形狀硬規則（★ 失敗率最高的來源，動手前逐條核）——2.1 定時工作與長任務
 - 3. 部署
 - 4. 環境變數（詳情頁「環境變數」tab；`PUT /{id}/runtime-settings`）
-- 5. 取平台資料（隨附整合 + Open Proxy）
+- 5. 取平台資料（隨附整合 + Open Proxy）——5.2 平台 App 檔案與平台 AI
 - 6. 可見度與 internal app 的 401 處置
 - 7. 持久化語意（★ 資料放哪裡才不會消失）
 - 8. 日誌與除錯
@@ -88,6 +88,7 @@
 | 建置包絡：**CodeBuild 整台 `BUILD_GENERAL1_MEDIUM`（ARM，8 GiB）**，OOM 只在整台用盡時發生（ADR 0028；UAT／prod 皆已切換）；v1.13.0 之前是 k8s Job 的 2 CPU / 4 GiB。預設時限 900 秒。★ 建置工具會依 CPU 數開多個 worker 各占一份 heap，包絡再大也要限 worker 數 | `OOMKilled`／`exit code 137`／timeout；**容器級 OOM 時日誌可能全空**（§8） |
 | 不可是 monorepo／空目錄；無法辨識的目錄會 fallback 成 static 站 | precheck Issue／部署出來是靜態檔 |
 | **單一請求上限 300 秒**（ksvc `timeoutSeconds=300`，平台常數，核自 prod tag v1.13.1 `orchestrate/runtime.go`）——SSE／WebSocket 長連線**滿 300 秒必斷**，長任務不能在一個請求裡跑完 | 長連線每 5 分鐘斷一次；client 沒做自動重連就「偶爾失聯」；>300 秒的匯出／報表請求 504 |
+| **回應送出後不得再做事**——縮到零的實例沒有在途請求就可能被終止（§2.1） | 「先回 202、背景跑」的工作與 fire-and-forget 寫入**偶爾**消失、無錯誤訊息；排程只跑一半 |
 | **最多 2 個實例**（`max-scale=2`，平台常數，同上出處）——**行程內狀態（記憶體 session、in-process 佇列、本機快取）不跨實例共享**，也沒有 sticky session | 使用者「登入後一半請求變未登入」、佇列消費一半不見；狀態一律落平台的表或 `/data`（§7） |
 | **容器只保留 `NET_BIND_SERVICE` 一個 capability**（`drop ALL` 後恆補這一顆，2026-09-05 起；gVisor 已拆除，隔離靠 seccomp＋PSA baseline） | 執行檔帶其他 file capability（`setcap` 過的二進位）會 `exec …: operation not permitted`；只綁 <1024 埠的 caddy／nginx-unprivileged **現在可以**（UAT 09-05、prod v1.13.0 起；2026-09-08 prod 實打 zbpack static 站＝caddy 映像，rollout 成功） |
 
@@ -145,6 +146,129 @@ OOM 只在整台用盡時發生，上面「4 GiB 的 60–65%」是舊引擎的�
 （約 5000）；但「限單 worker」的原則不變，因為 CodeBuild 那台也是多 vCPU。
 ⚠️ 新引擎下的 OOM／無日誌失敗矩陣**尚未在 prod 實打**（平台 T15 也列為待驗），撞到時先照 §8 順序處理。
 
+### 2.1 定時工作與長任務（★ Hosted 沒有時鐘）
+
+縮到零的 Hosted App **只在有入站請求時存在**。原系統常見的「行程內計時器」（`setInterval`、node-cron、
+APScheduler、框架啟動鉤子裡掛的 loop）在 app 閒置縮到零後就停了，沒有任何東西會再叫醒它（§3.0）。
+搬進來時這是**最常見的「排程跑不動」成因**，而且不會有錯誤訊息。
+
+**★ 預設做法：平台排程 → Custom App 轉發 action → Hosted 端點**
+
+平台排程（App Cron）**只能綁 Custom App 的 action**，不能直接打 Hosted App（`event-triggers.md` §2）。所以：
+
+1. 一支 Custom App（通常就是入口 App）放一支轉發 action，例如 `run_tick`：用 `ctx.http.call(<slug>, …)`
+   打 Hosted 的排程端點，帶共享金鑰 header。**前置同 §5.1**：Hosted 設 `visibility=public`；Hosted 網域以同名 slug
+   建成外部服務並授權本 App，共享金鑰寫進 `ctx.secrets`——AI 先說明 slug、網域、`key_name` 與會送出的資料，
+   用戶同意後由 AI 代設；金鑰的值由負責人填本機檔或自己貼到「服務」tab，不在對話裡傳（`custom-app-dev-guide.md` §25.2 確認流程）
+2. Hosted 那支端點驗金鑰（驗不過就拒絕；§5.1 用 401，`uat-environment.md` §4「金鑰隔離」的預期值照你選的碼）、
+   **在這個請求裡**把到期的工作做完、回報每支工作的結果
+3. 平台排程綁這支 action；Hosted 端依**排程給的時間**決定哪些工作到期——轉發 action 把 `ctx.params["scheduled_at"]`（`event-triggers.md` §2.5）
+   放進 body 轉給 Hosted，用它推算時段；不要用 Hosted 端的「現在時間」（重投與冷啟動延遲會讓它跨到下一格）。間隔受方案限制：付費檔最小 5 分鐘、
+   免費檔最小 60 分鐘且每支 app 最多 2 支排程——先 `GET .../crons/quota`（`event-triggers.md` §2.4）
+4. Hosted 維持 `always_on=false`：平台排程每次都是入站請求，會把它叫醒
+
+**時間預算**——這條鏈上有四道上限，取最小的那道：
+
+| 上限 | 值 | 出處 |
+|---|---|---|
+| egress 閘道 `timeout_ms` | 預設 10 秒，**最高 30 秒**；要調高屬於修改外部服務，照 §25.2 確認流程先取得用戶同意再改 | `custom-app-dev-guide.md` §25.4 |
+| 轉發 action 的 manifest `timeout_ms` | 生效值＝min（自己的值, 120 秒 ceiling）；要設得**比 egress 的 `timeout_ms` 大**（例如 35000），否則它先斷 | `custom-app-dev-guide.md` §7、`event-triggers.md` §2.6 |
+| 排程 action 執行上限 | **120 秒** | `event-triggers.md` §2.6 |
+| Hosted 單一請求 | 300 秒 | §2 |
+
+經 egress 轉發時，天花板＝那支外部服務的 `timeout_ms`（**預設 10 秒**，最高 30 秒；要拿滿 30 秒得調高該服務的 `timeout_ms`（先經用戶同意），計畫裡寫明）。
+Hosted 端的預算＝該值 − 冷啟動 − 往返裕度，用完就停手、把剩下的留給下一次 tick。
+
+**冷啟動要算進去**：實例在最後一個請求後要等一段平台內部延遲才縮到零（目前約 15 分鐘，**不是契約**）。
+- 間隔**比它短**的排程（每 5、10 分鐘）等於讓實例一直醒著——資源上與常駐相近，計畫裡要寫明；只有第一發是冷啟動
+- 間隔**比它長**的（每小時、每天）**每次都是冷啟動**，而冷啟動可能是數十秒（§3.0）：第一發可能在 egress 的 `timeout_ms` 內
+  還沒開始處理，action 被整支砍成 `status: "timeout"`——排程分頁的最近狀態會標成錯誤色，但**不計入連續錯誤、
+  不會自動暫停、不重投**，下一發成功就被蓋掉，只看最近狀態很容易漏看；
+  Hosted 端卻可能在連線斷掉之後才開始跑（正是下面禁止的「回應後還在做事」）
+- 所以：UAT 先實測冷啟動秒數；工作必須容許「這一輪沒跑完、下一輪接手」（下方佔用列＋到期時間）；
+  冷啟動逼近 egress 上限時，在正式 tick 前約 5 分鐘（要遠小於縮容延遲）排一支只打健康檢查的暖機排程，或改用較短間隔讓實例保持醒著。
+  限制：較短間隔只限付費檔（最小 5 分鐘；免費檔最小 60 分鐘，比縮容延遲長）；免費檔每支 app 只有 2 支排程，暖機會用掉第 2 支；
+  暖機那一發本身回 `timeout` 是預期的，結果表與健康檢查只看正式 tick
+
+**★ 回應送出後不得再做事**
+
+「先回 202、工作丟背景跑」「`void promise`」「回應後 fire-and-forget 寫日誌／發通知」——
+在縮到零的環境裡**都沒有保證**：沒有在途請求時，實例可能隨縮容、重新部署、滾動更新被終止，
+背景工作跑到一半就消失。縮容延遲是平台內部設定（會變，不是契約），不能拿來當工作時間。
+
+- 工作**同步在請求內**做完，在上面的預算內回應
+- 做不完的長任務**切段**：DB 存游標／進度列，每次 tick 從游標接著做，日誌與結果寫「本輪完成 N、剩 M」
+- 真的切不開、又必須一次跑很久的，才考慮 `always_on=true`（§3.0 決策閘，寫理由與退場條件）；
+  即使常駐，單一請求仍有 300 秒上限
+
+**★ 防重複執行：每個（工作, 時段）只能被佔一次**
+
+平台排程是 at-least-once（`event-triggers.md` §0），Hosted 最多 2 個實例（§2），常駐時行程內計時器也會兩邊各跑一次。
+所以每支工作執行前要在 DB 佔住這一格，佔不到＝別人已經在跑，直接跳過。行程內的旗標或記憶體鎖不算（不跨實例）。
+
+- **平台自建表**（規則 32 的預設路徑）沒有複合唯一鍵、也沒有條件式 UPDATE，唯一的伺服器端原語是
+  **單欄 unique 的 409**：在 unique 欄寫入決定性字串，例如 `"{工作}|{時段}|1"`，409＝已被佔
+  （模式見 `custom-app-dev-guide.md` §23.9）
+- **時段＝工作自己的週期**（每日工作用日期、每小時工作用小時），不是 tick；由 `scheduled_at` 推算
+- 每支工作在 Hosted 端自訂**硬截止時間**（≤ 300 秒）：每做一個對外副作用之前先檢查，超過就停手、不再寫入。
+  §2 的 300 秒切的是代理層連線，容器內的 handler **不會因此停止**，所以不能拿它當上限
+- 佔用列帶**狀態、開始時間、完成時間、到期時間**。**到期時間 ≥ 開始時間＋硬截止＋裕度**；比這短就會跟仍在跑的
+  舊嘗試重疊、同一時段跑兩次
+- 判斷流程從 `|1` 往上試：寫入成功＝由我執行；409 就讀那一列——已完成或未到期＝跳過整個時段；已到期＝試下一號。
+  **不要改寫舊列**（「讀到過期 → 更新」兩個實例會同時搶到），409 一樣代表別人搶先
+- 嘗試號設上限（例如 3）：超過就在結果表寫「放棄」、讓健康檢查亮紅，不要無限加列。
+  沒有到期機制的話，實例一被終止，那個時段就永遠「已佔用、沒跑完」，工作默默漏掉
+- **到期接手要靠「下一次 tick 仍落在同一時段」**：平台排程的間隔要比工作週期短（例如每 10 分鐘 tick、每日工作），
+  到期後的下一發才會去試下一號。間隔等於週期時，同一時段不會再有 tick，漏掉的時段要靠補處理邏輯接手
+  （每次 tick 也檢查前幾個時段有沒有「放棄／未完成」；平台本身只補一次、不逐格補，`event-triggers.md` §2.9）
+- **手動觸發不要佔正式時段**：平台 `run-now` 對 action 來說**和正式觸發分不出來**——`cron_event` 相同、
+  `scheduled_at` 是**當下時間**，平台內部區分用的 delivery id 不會傳進 `ctx.params`（只寫進平台自己的執行報告）。
+  照上面的規則推算，它會撞到正式時段：那一格已完成就被當重複跳過、看不到結果；還沒跑就先佔走，正式那發反而被跳過。
+  所以**驗證工作本身用 app 自己的單支手動觸發**，改用獨立佔用鍵 `"{工作}|manual|{請求 id}"`，不佔、也不標記正式時段；
+  平台 `run-now` 只拿來驗「轉發鏈通不通」（看 action 回應與 Hosted 收到請求），不當工作驗收
+- 走規則 32 例外的外接 PostgreSQL，才可以用原生的複合唯一鍵與條件式 UPDATE
+
+**★ 誠實的執行結果：平台的「成功」只代表 action 有回應**
+
+- Hosted 端每支工作每次執行寫一列結果（工作、時段、成功與否、耗時、錯誤摘要），再做一個讀它的
+  健康檢查端點／頁面。**驗收看這張表**，不是看平台排程的狀態
+- 轉發 action 要不要把錯誤往外丟，**刻意選一邊並寫進計畫**。注意 `ctx.http.call` 在 Hosted 回 4xx／5xx 時
+  **不會 raise**（dev-guide §25）——不檢查 `resp["status"]` 就等於選了「吞掉」：
+  - 往外丟（自己檢查 status 並 raise）：平台狀態誠實，但連續 10 次錯誤會**自動暫停排程、不會自己恢復**
+    （`event-triggers.md` §2.8），Hosted 掛一陣子排程就停了
+  - 吞掉（action 回成功、把錯誤放在回傳內容）：排程不會被暫停，但平台永遠顯示成功——
+    **必須**有上面的結果表與健康檢查，否則失敗沒人看得到。（egress 逾時例外：整支 action 被砍成 `timeout`，吞不到）
+- 排程打開後（下方「排程最後才開」步驟 4）與每次改排程後：`run-now` 一次確認轉發鏈通（`event-triggers.md` §2.2），
+  工作本身看**下一個正式週期**寫進結果表的列，或用 app 的單支手動觸發驗（見上方「手動觸發不要佔正式時段」）
+
+**★ 遷入時順帶核對**：原系統的排程總開關、停用清單若存在 DB 設定列，新庫裡的值決定工作會不會跑——
+空庫通常是「關」，整庫複本則沿用原值（§4「設定不只在 env」）。
+
+**★ 排程最後才開：先用測試帳號逐支驗，確定要在這裡跑了才打開**
+
+新環境（UAT，或遷入後的正式站）上，平台排程與 app 的排程總開關是**最後一步**，不是部署完順手開的東西。
+排程一開，全部工作會照 DB 裡的設定自動跑——寄信、推播、寫第三方、呼叫付費 AI——
+而 DB 若是正式複本，那些目的地就是真人。順序：
+
+1. **盤每支工作的對外副作用**：寄信／聊天室或 webhook／LINE 等推播／寫雲端硬碟或試算表／寫回平台／
+   呼叫付費 API／建行事曆邀請……以及各自依賴的 env 與 DB 設定列。沒有副作用、或缺憑證只會無害失敗的，標「安全」
+2. **目的地改成測試帳號**：收件人、推播對象、聊天室、雲端資料夾換成測試用的；改不了的那支先放進 app 的停用清單。
+   改之前把每一列的**原值記進計畫**。正式站的設定列是正式資料：由負責人修改，或由 AI 列出「欄位、原值、新值」、
+   負責人逐項核准後才寫入。app 要能**單支手動觸發**某一支工作（帶工作名、同樣驗金鑰），不要只有「整批 tick」一個入口。
+   原系統沒有停用清單時，改用每支工作的 env 開關（預設關），或該支先不接進 tick——停用機制與單支觸發都是
+   遷入時的程式改動，要寫進計畫
+3. **逐支手動觸發驗證**：每支跑一次（手動觸發不佔正式時段，見上方防重複），看執行結果表（上方「誠實的執行結果」）
+   與測試帳號實際收到的東西；缺 env／設定的照 §4 對帳表補（人工設定）。**在正式站**只觸發標「安全」或目的地已換成
+   測試帳號的；會寫業務資料的工作（寫回平台、寫第三方、寫試算表）在 UAT 驗，正式站的第一次執行就是切換那一輪，
+   而且在舊排程停掉之後
+4. **owner 確認「這些功能要在這個環境運作」之後才打開**：正式站先依步驟 2 的紀錄把目的地改回正式值（同樣由負責人
+   執行或核准），再建平台排程、把排程總開關設為開、移出停用清單；UAT 要常態運作的，目的地維持測試值。
+   打開後第一個週期回結果表確認一次
+
+**遷入正式站的切換**：舊系統的排程在切換前通常**還在跑**。新站的排程開了、舊的還沒停，就是同一份通知寄兩次、
+同一筆資料寫兩次。每支工作寫清楚「舊的何時停、新的何時開、誰確認」（`migration-workflow.md` §2.0 的切換順序與回滾），
+不要兩邊同時開；也不要先停舊的、新的還沒驗過就空窗。
+
 ## 3. 部署
 
 ### 3.0 `always_on` 決策閘（★ 部署前必過；預設 `false`，開了就佔叢集資源）
@@ -157,7 +281,7 @@ OOM 只在整台用盡時發生，上面「4 GiB 的 60–65%」是舊引擎的�
 
 | 問 owner 的業務問題 | 答「是」的意思 | 設定 |
 |---|---|---|
-| 「這個系統**自己**有沒有東西要定時跑？」（容器內 cron／APScheduler／背景執行緒／佇列消費者） | 縮到零時沒有任何入站請求會把它叫醒（§7）——背景工作會停 | `true` |
+| 「這個系統**自己**有沒有東西要定時跑？」（容器內 cron／APScheduler／背景執行緒／佇列消費者） | 縮到零時沒有任何入站請求會把它叫醒（§7）——背景工作會停。**先問能不能改成平台排程打進來**（§2.1）；能改就改、常駐維持 `false` | 改不了才 `true` |
 | 「有沒有要**一直連著**的東西？」（WebSocket／SSE／長輪詢；注意單請求 300 秒上限，§2） | 沒實例就沒連線 | `true` |
 | 「第一個人打開時等 **N 秒**能不能接受？」——要問出實際容忍秒數，不要預設「快比較好」 | 容忍不了冷啟動（實測數十秒等級） | `true`，並寫下依據 |
 | 以上皆否 | 純網頁／API、有人用才需要在 | **`false`**（預設，不要動） |
@@ -409,6 +533,9 @@ Hosted App 容器**只帶平台注入的 `AIGO_*`**，原系統的 env 一顆都
    是否已設依目標位置各自核對：Hosted 用 `GET /{id}/runtime-settings` 讀回 **key 名**比對（不印值）；
    其他落點見下方。**「尚缺」只算「目標位置需要、但還沒設」的列**——不搬／退役的列寫理由即可，
    不算尚缺（例如原系統的 `DATABASE_URL`，見本節末）
+   （Hosted 核對可用 `scripts/aigo_env_diff.py --app <hosted-id> --expect <key 清單>`：缺席／空值時結束碼非 0；
+   清單只放目標位置是 runtime-settings、處置不是不搬／退役的列；`--a <prod-id> --b <uat-id>` 比兩個 app，
+   列出兩邊值相同的 key。只打 GET、不印值）
 3. **把「尚缺」逐顆列給用戶**，說明缺了哪個功能會壞，請負責人到對應位置設定（Hosted：「環境變數」tab）。
    遷入與其 UAT 的密鑰**值**一律由負責人提供：填進本機檔（600、不進 git）由 AI 讀檔寫入（Custom App 的 `ctx.secrets`
    用 `scripts/aigo_secrets.py set`；Hosted env 走 runtime-settings 時同樣從檔案讀、不印值）、或自己到設定頁貼上；
@@ -432,7 +559,7 @@ action 以 `ctx.secrets` 讀取（Builder 沒有 runtime-settings 這支 GET，�
 | 類別 | 例 | 沒帶到的症狀 |
 |---|---|---|
 | **對外網址** | `APP_URL`／`NEXT_PUBLIC_SITE_URL` | OAuth redirect、金流回跳、信件連結導到 `https://0.0.0.0:8080/...`（§2 綁定介面陷阱） |
-| session／簽章密鑰 | `SESSION_SECRET`／`JWT_SECRET`／`NEXTAUTH_SECRET` | 登入後全 401，或每次部署都把使用者登出 |
+| session／簽章密鑰 | `SESSION_SECRET`／`JWT_SECRET`／`NEXTAUTH_SECRET` | 登入後全 401，或每次部署都把使用者登出；**兼當加密金鑰時**見下方「不可隨手換新」 |
 | 第三方憑證 | OAuth client id/secret、金流 key、郵件服務 key | 對應功能 4xx／5xx |
 | 功能開關 | 逐模組切換資料後端的旗標 | 走錯後端 |
 | 雲端服務帳號（檔案路徑型） | `GOOGLE_APPLICATION_CREDENTIALS=/path/key.json` 這類**指向本機檔案**的 | 容器裡沒有那個檔 → 依賴它的功能（雲端硬碟備份、試算表同步）全失敗。改成**值型**（整份 JSON 或 base64 放進一顆 env，程式改讀值），不要把金鑰檔打進映像 |
@@ -442,6 +569,15 @@ action 以 `ctx.secrets` 讀取（Builder 沒有 runtime-settings 這支 GET，�
 - **兩側都要改**：換了新值的密鑰（session、排程金鑰、webhook 簽章）與新的對外網址，
   凡是**從外面打進來的**（留原機的排程、第三方 webhook 設定、其他系統）都要同步改到新值與新網址；
   對帳表加一欄「誰會打進來」，逐一通知負責人
+- ★ **兼當加密金鑰的密鑰不可隨手換新**：有些系統拿 session secret 之類的值去**推導加密金鑰**，加密存在 DB 裡的
+  第三方 token、API key、個資欄位。換新值後網站照常能開、登入也正常，要等有人用到那個功能時才在解密失敗——
+  症狀像「第三方授權壞了」。決定「換新值」之前，先在程式碼搜這顆 key 有沒有被用在加密／雜湊／KDF
+  （`createCipheriv`、`createHash`、`encrypt`、`Fernet`、`AESGCM` 一類的呼叫附近）；有的話：
+  - 正式遷入（資料整庫搬過來）：由負責人**沿用原值**設定。驗證走 app 本身的功能路徑（觸發一次會用到那顆 token 的功能，
+    或用 app 內只回「解密成功／失敗」的自檢端點）——**AI 不取得金鑰、不在本機解密、不印出解密結果**
+  - UAT 用正式資料複本：預設把那些加密欄位**清掉**，否則 UAT 讀到的是解不開的資料；真的要保留就由負責人執行
+    重新加密腳本，AI 只提供腳本與欄位清單
+  - 新庫從零開始：可以換新
 - 密鑰類一律標 `runtime`，**不要標 `build`**（會進映像與建置日誌，見上）
 - 原系統的 `DATABASE_URL` 一類**不要**搬——資料層改走 Open Proxy（§7.1），直連在網路層不通
 
@@ -491,8 +627,9 @@ action 以 `ctx.secrets` 讀取（Builder 沒有 runtime-settings 這支 GET，�
   （D28），所以租戶一開「依員工過濾」類規則，hosted app 的 Open Proxy 讀取會直接 403 而不是少列。
   遷入案的資料層改寫前把這條告訴租戶：對 app 身分要另設不帶 `$user.*` 的規則、或用 app 級規則放行；
   app 端改 code 無解 → `custom-app-dev-guide.md` §27
-- ⚠️ **`POLICY_GATE_MODE` 現況（2026-09-21）**：UAT 已 on；**prod manifest 於 2026-09-17 改 on（commit `00d4c86c`）
-  但 v1.15.3、v1.15.4 都沒帶上（2026-09-30 核）**——要等主線下一次發版（預計平台 1.16.0）才生效。走 Open Proxy 的 Hosted App 要在那之前把上一條處理掉。
+- ⚠️ **`POLICY_GATE_MODE` 現況（2026-10-02）**：UAT 已 on；**prod manifest 於 2026-09-17 改 on（commit `00d4c86c`），
+  v1.15.3、v1.15.4 沒帶上，v1.16.0 帶上了**（2026-10-02 核 tag 的 `infra/k8s/prod/backend.yaml`；prod 已跑 v1.16.0）。
+  走 Open Proxy 的 Hosted App 現在就要把上一條處理好。
 
 ### 5.1 Hosted App 當 Custom App 的後端（混合方案的一種）
 
@@ -508,10 +645,84 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
   身分欄位放進 request body；Hosted 不自行認人、不另建使用者表
 - 前端**不要**跨來源直打 Hosted：帶憑證的 CORS 平台不支援（proxy 只處理同站 cookie）
 - 業務資料仍落平台的表：Hosted 用 Open Proxy（§5）讀寫，不自帶 DB（規則 32）
+- **同一條路也是 Hosted 定時工作的觸發方式**（平台排程 → 轉發 action → Hosted）：時間預算、防重複、結果回報見 §2.1
+
+### 5.2 平台 App 檔案與平台 AI（`/open/storage/*`、`/open/ai-hub/*`；平台 v1.16.0 起）
+
+隨附整合那把 key 除了資料面，還能讀寫**App 檔案**（app 程式碼自己上傳、只對這支 app 可見的檔案）與
+呼叫**平台 AI**。這就是 Hosted 線的「Storage API」——原系統的 S3／Supabase Storage／本機上傳目錄
+遷入時落這裡（§7.1、規則 32）。核自平台 `docs/integrations/public-api.md` §1.4「平台 AI 與 App 檔案」
+與 `backend/app/api/open_storage.py`（模組 docstring 是錯誤契約的權威）；**2026-10-02 測試租戶 prod
+實打一輪**（探針 Hosted App，結果見下表「實打」欄，測完已刪）。
+
+- **憑證與 base URL 同 §5**：`Authorization: Bearer $AIGO_API_TOKEN`，打
+  `$AIGO_PLATFORM_API_URL/api/v1/open/...`——env 值**不含** `/api/v1`（實打值是叢集內部位址
+  `http://backend.aigo-system.svc.cluster.local:8080`），自己接。**沒有 SDK、沒有新 env**；
+  限流與資料面共用同一個 600 次/分 的桶
+- **授權（三個開關）**：詳情頁「資料存取」→「平台 AI 與檔案」。開關寫入隨附整合的 scope，
+  **同一交易自動發布，不必另外發布**（實打：`GET /api/v1/apps/{整合 id}/scopes` 讀回
+  `published_scopes` 立即等於 `granted_scopes`，`scope-logs` 多一筆 `auto_published`）
+
+  | scope | 端點 | 風險 |
+  |---|---|---|
+  | `storage.read` | `GET /open/storage/url`、`GET /open/storage/list` | 低 |
+  | `storage.write` | `POST /open/storage/upload`、`/presign-upload`、`/confirm`、`DELETE /open/storage/file`；計入 App 配額（預設 5 GiB）與企業空間用量 | 低 |
+  | `ai.hub.invoke` | `POST /open/ai-hub/complete`、`GET /open/ai-hub/models`；扣**租戶 AI Credit** | **高**——開的人要在 UI 重新輸入自己的密碼 |
+
+  誰能切：持 `builder.access` **或** `hosted_apps.deploy`、且看得見這支 app 的人（非 owner 只能動這三個）。
+  API 等價是 `PUT /api/v1/apps/{整合 id}/requested-scopes` 再 `PUT .../granted-scopes`（body `{"scopes": [...]}`；
+  登入 session，Deploy Token 打不到）。**`ai.hub.invoke` 要帶 `reauth_password`——agent 不代填密碼，
+  請用戶自己在詳情頁開**；storage 兩個是低風險，可以用 API 開
+- ⚠️ **prod 現況 scope 閘不擋**：2026-10-02 零 scope 的探針打六條 storage 端點與 `/open/ai-hub/models`
+  **全部 200**（閘在 `off` 或 `audit`，黑箱分不出；`audit` 只記 `would_deny`）。**仍一律先開開關**——
+  平台切到 `enforce` 那天，沒開的 app 會整批 403 `app_scope_denied`（body 的 `required_scope` 告訴你開哪個）。
+  所以「沒開也能用」**不能**當作「設定正確」的證據；部署後驗證要讀回 `scopes`，不是看 200
+
+**端點與 prod 實打結果**（FileRef＝`{file_id, path, name, size, mime_type, created_at, status}`）：
+
+| 端點 | 送什麼 | 實打（2026-10-02） |
+|---|---|---|
+| `POST /open/storage/upload` | multipart：`file`（≤ 100 MiB）、選填 `folder`（`[A-Za-z0-9_-]{1,64}`，預設 `default`） | **200**（不是 201）回 FileRef，`status: ready` |
+| `GET /open/storage/url?file_id=` | `expires_in` 只收 `3600` | 200 `{url, expires_in}`；URL 是 S3 簽章網址，容器內直接 GET 拿回原內容。**回的 `expires_in` 是實際壽命，實打 3197、2716**（小於 3600）；`expires_in=60` → 422 `unsupported_expires_in`（附 `supported: [3600]`） |
+| `GET /open/storage/list?folder=&cursor=&limit=` | — | 200 `{items: FileRef[], next_cursor}`；**非遞迴**：不帶 `folder` 只列 `default`，看不到其他 folder 的檔 |
+| `POST /open/storage/presign-upload` | JSON `{filename, size, mime_type?, folder?}` | 200 `{file_id, url, method: "PUT", headers, expires_in: 900}`；`headers` 含 `Content-Type` 與 **`Content-Length`** |
+| `POST /open/storage/confirm` | JSON `{file_id}` | PUT 前 confirm → 409 `upload_not_found`；PUT 後 200 FileRef（`ready`）；再 confirm 仍 200（冪等） |
+| `DELETE /open/storage/file?file_id=` | — | 200 `{deleted: true}`；重刪 `{deleted: false}`（冪等，不是 404） |
+
+**光看契約不會知道的坑**（全部是實打觀察）：
+
+- **存 `file_id`，不存 URL**：URL 會過期，顯示時每次用 `/url` 換；快取 URL 時以回應的 `expires_in`
+  為準，**不要寫死 3600**
+- **presign 的 PUT 要原樣帶回傳的 `headers`**：`Content-Length` 被簽進簽章——body 長度跟宣告不同時，
+  S3 直接 403 `SignatureDoesNotMatch`（物件沒寫入），接著 confirm 回 409 `upload_not_found`；
+  手動設了比 body 大的 `Content-Length` 則是 client 卡住到 S3 回 400 `RequestTimeout`。
+  presign 時 `size` 就要填真實大小。pending 中的檔 `/url` 回 404（與查無同形）
+- **`list` 會列出非 `ready` 的列**：presign 後沒完成的直傳是 `pending`，刪掉後變 `cancelled` 且**仍出現在
+  list 裡**（實打），直到 sweeper 收掉（最長約 75 分鐘）。顯示清單一律濾 `status == "ready"`
+- **四種 404 同形**：查無、別支 app 的檔、`file_id` 不是 UUID、pending 都回 404 `{"code": "not_found"}`
+  （實打非 UUID 與隨機 UUID 兩種）——不能用 404 判斷「格式錯」
+- `folder` 只收英數、`_`、`-`：`a.b` 回 400 `invalid_folder`（實打）。同一支 app 的不同實例／不同版次
+  看得到彼此上傳的檔（檔案屬於隨附整合，不屬於容器）
+- 檔案**只對同一支 app 可見**、不進知識中心、平台登入使用者面一律 404（平台文件與原始碼，未實打）
+- ⚠️ **刪 Hosted App 不會清掉它的 App 檔案**（原始碼核對，未實打）：刪除是軟刪，隨附整合只翻 `draft`、
+  key 被撤銷，`file_nodes` 沒有對應的清除路徑。app 退場前要自己 `list`＋`DELETE` 清乾淨——
+  刪了之後就沒有 key 能再清
+- **平台 AI**：`POST /open/ai-hub/complete` 收 `messages`（純文字）＋選填 `model`（要在 `/models` 清單內）、
+  `file_id`（本 app 上傳且 `ready` 的檔，就是上面拿到的那個）、`response_format`；回上游 chat completion 原樣。
+  2026-10-02 只實打 `/models`（200，回模型清單與預設模型），`complete` 會扣 AI Credit **未實打**。
+  錯誤表（422 `model_not_allowed`、429 `quota_exceeded` 依 `event_type` 分企業空間／AI Credit…）以
+  平台 `public-api.md` §1.4 為準
+
+**怎麼測（agent 自己驗證時）**：`AIGO_API_TOKEN` 只經 k8s Secret 注入容器、不出現在任何 API 回應，
+本機拿不到——**測試一律在容器內跑**。做法：部署一支一次性探針 app（`internal`、只有 Python 標準庫），
+啟動時跑完「list → upload → url（並 GET 簽章網址核內容）→ presign → PUT → confirm → list → delete」，
+每步印一行 JSON 到 stdout，用 `GET /api/v1/hosted-apps/{id}/runtime-logs?tail=1000`（§8）讀回；
+要重跑就重新部署。**不要印 token**。測完把檔刪乾淨再刪 app（上一條：刪 app 不會清檔）。
 
 ## 6. 可見度與 internal app 的 401 處置
 
-- `PUT /{id}/access-settings`，body `{visibility, access_role_ids}`：`visibility` = `public`（預設）／
+- `PUT /{id}/access-settings`，body `{visibility, access_role_ids, workspace_login_redirect}`（**`workspace_login_redirect` 必填**，
+  漏了回 422 `Field required`；2026-10-02 prod 實打，值可先 GET app 讀回原值照送）：`visibility` = `public`（預設）／
   `internal`（需登入 AI GO）。**`internal` ＋ `access_role_ids=[]` ＝ 全租戶已登入成員**；填角色 id
   就只放行那些角色；`public` 下 `access_role_ids` 必須為空（DB CHECK）。需 `hosted_apps.deploy`，
   再收窄到 app 的 `created_by`／admin。**internal app 沒有預覽截圖**。
@@ -567,7 +778,7 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
   - 前端**用 `code` 判斷**（不要只看 401），正確處置是 `window.location.reload()`
     發起頂層導覽；**不要**自己導去回應裡的 `login_origin`（CSRF nonce 只在
     HTML 導覽路徑鑄造，自導必失敗）；不要無限重試
-- session 24 小時；平台 cookie 會在進容器前被剝掉——**容器內看不到、也不用管**平台 cookie
+- session 24 小時（被移除成員的 session 也可能續用到期；若 app 另有自家認證後端，須做即時撤權，見 `dev-rules.md` 規則 34）；平台 cookie 會在進容器前被剝掉——**容器內看不到、也不用管**平台 cookie
 - 已修的一個平台缺陷（#1421，2026-09）：internal app 的 auth proxy 曾把**已登入使用者的冷 miss**
   丟進匿名枚舉的全域佇列（8 名額），枚舉流量一來所有登入者都拿 503。現在只有真匿名才排隊。
   v1.13.0 起 prod 生效；仍見「登入者間歇 503、無 app 端錯誤」先查平台側，不是 app 掛
@@ -579,6 +790,7 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
 | 容器檔案系統（含用「檔案」tab／終端寫入的） | ❌ 重部署／重啟／縮到零就消失 |
 | `persistent_disk=true` 掛載的 **`/data`**（`AIGO_DATA_DIR`） | ✅ 10 GiB EFS；關旗標只卸掛不刪，刪 app 才刪 |
 | 平台資料（Open Proxy 寫入的自建表等） | ✅ 在平台側 |
+| 平台 App 檔案（`/open/storage/*` 上傳的檔，§5.2） | ✅ 在平台側；**刪 app 也不會自動清**，退場前自己刪 |
 
 - **複製（clone）不複製 `/data` 內容**，也不複製 Deploy Token 與部署歷史
 - Custom App 的 action runner 同一套語意：`open()` 寫得進 `/tmp`，但那是隨 pod 消失的 emptyDir，
@@ -609,6 +821,11 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
   工作量要在計畫階段向用戶如實預告
 - **歷史資料匯入在本地做**：走 data-center API 或匯入 action
   （`custom-app-dev-guide.md` §23.6）
+- **檔案／附件遷入平台 App 檔案**（§5.2）：原系統的 S3／Supabase Storage／本機上傳目錄退場，
+  檔案改用 `/open/storage/upload` 上傳，資料列存回傳的 **`file_id`**（取代原本的 URL 或 storage key），
+  顯示時用 `/open/storage/url` 換短效網址。憑證只在容器內，所以**歷史檔案的搬運也要在容器內做**
+  （例如 app 內一支一次性的匯入端點／啟動任務，從原 storage 讀、往平台寫，跑完移除）——
+  不像資料列能在本地打 data-center API。單檔 ≤ 100 MiB、App 配額預設 5 GiB，量大時先估總量
 
 **為什麼「繼續連原 DB」不是選項**——是規則，不再是網路限制。
 ★ 2026-09-17 起（平台 v1.15.2，PR #1641）operator 的
@@ -647,6 +864,31 @@ DNS、NAT、對端防火牆、憑證、資料存取規則照樣管，而規則 3
   顯示用 1.6 GB 是正常的，不是漏。
 - **RLS 開著但零 policy 時**：以擁有者（`postgres`）連沒事；換成非擁有者角色連，**每張表讀回空、不報錯**，
   畫面上跟「真的沒資料」一模一樣。要嘛補 policy，要嘛明文只准擁有者連。
+- **直連主機預設只有 IPv6**：`db.<ref>.supabase.co` 在沒買 IPv4 add-on 時只解析出 IPv6，而 Hosted 出站只通 IPv4
+  （`dev-rules.md` 規則 32）——連不上時改用控制台 Connect 面板給的 **pooler 主機與使用者名稱**（pooler 的使用者是
+  `postgres.<ref>`，不是 `postgres`；只換主機會出現像「密碼錯」的認證錯誤），不是開防火牆。
+- **連線字串的密碼要百分比編碼**：控制台給的連線字串是 `[YOUR-PASSWORD]` 佔位，密碼裡有 `@`、`#`、`/`、`%`、`:`
+  這類字元時要先編碼再填，否則錯誤看起來像「密碼錯」或「主機找不到」。
+- **整庫匯入走 session 模式或直連，不走 6543**：`pg_dump`／`pg_restore` 大量 DDL 在交易模式 pooler 上會出錯；
+  用 5432（session pooler）或直連。`pg_dump`／`pg_restore` 加 `--no-owner --no-privileges`（原庫的角色在 Supabase
+  不存在；`psql -f` 沒有這兩個旗標，要在 dump 端就加）。app 平常的連線仍然走 6543（見上）。
+- **規則 32 要求 app 用最小權限角色連線**；若核准紀錄明載 app 暫以擁有者連線，至少做這層保底：對 `public`
+  每張表開 RLS、不加 policy，並對 `anon`／`authenticated` `REVOKE` 表與 sequence 的權限；現有 function 則
+  `REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, anon, authenticated`（function 的 EXECUTE 預設授給
+  `PUBLIC`，只撤 anon／authenticated 擋不住）。再改預設權限，否則之後新建的物件又會被自動授權
+  （`FOR ROLE` 填實際建表的角色；**全域**授給 `PUBLIC` 的預設只能不帶 `IN SCHEMA` 撤——以 schema 為單位的預設權限
+  只會疊加在全域之上，撤不掉全域那層）：
+  ```sql
+  -- 全域：function 的 EXECUTE 預設給 PUBLIC，只能不帶 IN SCHEMA 撤
+  ALTER DEFAULT PRIVILEGES FOR ROLE postgres REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+  -- 每個 schema：撤以 schema 為單位授給公開角色的部分
+  ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;
+  ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon, authenticated;
+  ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM anon, authenticated;
+  ```
+  做完用非擁有者角色實際查一次確認讀不到（`SET ROLE anon; SELECT … ;`），不要只看指令有沒有成功。
+  服務以 schema 分開時（規則 32），每個服務 schema 都要做同樣的處理。擁有者身分不受影響，而萬一 Data API 被打開或金鑰外流，公開角色也讀不到東西。
+  不要 `FORCE ROW LEVEL SECURITY`（那會連擁有者一起擋）。
 - **`seq`／serial 會跳號**：被唯一約束擋掉的寫入會吃掉號碼，並行寫入時明顯；用 `seq` 當增量書籤的程式
   要知道「比書籤小的號碼可能晚到」。
 

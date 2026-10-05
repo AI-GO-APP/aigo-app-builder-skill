@@ -7,6 +7,35 @@ PROTECTED_FILES = {"src/api.ts", "src/db.ts", "src/action.ts", "src/data.json", 
 # `_template.json` 宣告 required_egress: openai，示範 action 也字面呼叫 openai。與需求無關就兩個一起刪
 # （只刪 action 仍擋；README／manifest 殘留不影響閘門）。2026-09-09 prod 實打。
 STARTER_EGRESS_LEFTOVERS = ("_template.json", "actions/summarize_leads.py")
+# sync_to_cloud() 遇到「遠端有、本機沒有」的 actions/ 檔時怎麼辦。PATCH 是合併、不會刪檔，
+# 而平台只看檔案在不在來決定 action 能不能被呼叫——本機刪掉的 action 會繼續在線上。
+# 這裡刻意沒有 "delete"：sync_to_cloud() 的 files 可能只是部分檔案，拿它當「本機全貌」去刪會把
+# 沒帶進來的 action 全刪掉。要刪，由讀了完整本機專案的 full_deploy() 做，或明確呼叫 delete_remote_files()。
+REMOTE_ONLY_MODES = ("abort", "keep")
+
+
+class RemoteOnlyFilesError(RuntimeError):
+    """遠端還留著本機已經沒有的 actions/ 檔；`paths` 是那些路徑。"""
+
+    def __init__(self, paths: list[str], *, local_has_actions: bool = True):
+        self.paths = list(paths)
+        self.actions = [p for p in self.paths if is_action_file(p)]
+        self.others = [p for p in self.paths if not is_action_file(p)]
+        rows = "\n".join(f"   - {p}" for p in self.actions)
+        if self.others:
+            rows += ("\n   下列不是 actions/<name>.py 形狀（manifest、共用模組等），刪掉可能讓其他 action 壞掉、"
+                     "或改變啟用／webhook 設定，逐條確認用途後才列進刪除清單：\n"
+                     + "\n".join(f"   - {p}" for p in self.others))
+        if not local_has_actions:
+            rows += "\n   ⚠️ 本機沒有任何 actions/ 檔——多半是本機不是完整專案，先確認再決定，不要整批刪。"
+        super().__init__(
+            "同步中止（尚未寫入任何東西）：遠端還有本機沒有的 actions/ 檔，同步不會刪它們，"
+            "發布後照樣可以被呼叫——\n" + rows.lstrip("\n") +
+            "\n   要下架 → 把用戶確認過的路徑帶進 full_deploy(..., on_remote_only=\"delete\", delete_paths=[...])"
+            "（只刪清單內的，其餘保留；發布時平台會回 409 ACTION_REMOVAL，核對後再帶 confirm_removal=True），"
+            "或 delete_remote_files(..., paths=[...]) 後重新同步；"
+            "\n   要保留（本機不是完整專案、只同步部分檔案）→ on_remote_only=\"keep\"。"
+            "\n   這是用戶的決定，先問再帶。")
 
 
 def read_local_files(project_path: str) -> dict[str, str]:
@@ -49,8 +78,8 @@ def get_remote_vfs(base_url: str, token: str, app_id: str) -> tuple[dict, int]:
 
 
 def diff_vfs(local: dict[str, str], remote: dict[str, str]) -> dict:
-    """比較差異。`deleted` 只是「遠端有、本機沒有」的清單——sync_to_cloud() 不會刪它們，
-    要真的刪用 delete_remote_files()。"""
+    """比較差異。`deleted` 只是「遠端有、本機沒有」的清單——sync_to_cloud() 只處理其中
+    actions/ 底下的（見 `on_remote_only`），其餘要刪用 delete_remote_files()。"""
     remote_app = {k: v for k, v in remote.items() if k not in PROTECTED_FILES}
     added = [k for k in local if k not in remote_app]
     deleted = [k for k in remote_app if k not in local]
@@ -59,17 +88,42 @@ def diff_vfs(local: dict[str, str], remote: dict[str, str]) -> dict:
             "unchanged": len(local) - len(added) - len(modified)}
 
 
+def is_action_file(path: str) -> bool:
+    """`actions/<name>.py`（不含子資料夾）——平台以這個形狀的檔在不在決定 action 能不能被呼叫。"""
+    parts = path.split("/")
+    return len(parts) == 2 and parts[0] == "actions" and parts[1].endswith(".py")
+
+
+def remote_only_actions(local: dict[str, str], remote: dict[str, str]) -> list[str]:
+    """遠端有、本機沒有的 actions/ 路徑（排序）。只看 actions/：那是會被呼叫的面，
+    其餘路徑有平台注入檔與本機不掃的檔，不能拿「本機沒有」當成該刪。"""
+    return sorted(k for k in remote
+                  if k.startswith("actions/") and k not in local and k not in PROTECTED_FILES)
+
+
 def sync_to_cloud(base_url: str, token: str, app_id: str, files: dict[str, str],
-                  expected_version: int) -> dict:
-    """PATCH VFS 到雲端；以目標平台限制預檢合併後的完整 VFS。"""
+                  expected_version: int, *, on_remote_only: str = "abort") -> dict:
+    """PATCH VFS 到雲端；以目標平台限制預檢合併後的完整 VFS。
+
+    `on_remote_only` 決定遠端殘留的 actions/ 檔（見 `remote_only_actions`）怎麼處理：
+    "abort"（預設）寫入前中止並列出、"keep" 列出後照常同步。這裡不提供刪除——`files` 可能只是部分檔案。
+    """
     import httpx
     from aigo_limits import get_limits, check_vfs
     from aigo_compile import format_skipped_files
+    if on_remote_only not in REMOTE_ONLY_MODES:
+        raise ValueError(f"on_remote_only 只能是 {REMOTE_ONLY_MODES}，收到 {on_remote_only!r}")
+    remote, version = get_remote_vfs(base_url, token, app_id)
+    if version != expected_version:
+        raise ValueError("VFS 版本衝突：預檢前版本已改變，請重新讀取。")
+    stale = remote_only_actions(files, remote)
+    if stale and on_remote_only == "abort":
+        raise RemoteOnlyFilesError(stale, local_has_actions=any(k.startswith("actions/") for k in files))
+    if stale and on_remote_only == "keep":
+        print("⚠️ 遠端還有本機沒有的 actions/ 檔（on_remote_only=\"keep\"，不刪，發布後仍可被呼叫）：\n"
+              + "\n".join(f"   - {p}" for p in stale))
     limits = get_limits(base_url, token, app_id)
     if limits is not None:
-        remote, version = get_remote_vfs(base_url, token, app_id)
-        if version != expected_version:
-            raise ValueError("VFS 版本衝突：預檢前版本已改變，請重新讀取。")
         skipped = check_vfs({**remote, **files}, limits)
         if skipped:
             print("同步預檢（實際結果以編譯回應為準）：\n" + format_skipped_files(skipped))

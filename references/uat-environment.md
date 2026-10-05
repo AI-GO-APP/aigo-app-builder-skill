@@ -48,7 +48,7 @@ Custom App 的草稿版（`{租戶}.ai-go.app/runtime/version-test/{識別碼}`�
 | 平台自建表 | 同租戶內**另一組表**（表名前綴或 `_uat` 後綴），或走 §2 的外接庫 UAT 專案 | — |
 | 外接 PostgreSQL（dev-rules.md 規則 32 例外） | 租戶的 `<tenant>-uat` 專案（一租戶一顆 UAT，服務以 schema 分） | `<tenant>-uat` |
 | 外部服務（egress slug） | 指向正式後端的 slug 要另建一支指向 UAT | `<slug>-uat` |
-| 平台排程 | UAT **先不建**；要驗排程時另建並指向 UAT 的 action | — |
+| 平台排程 | UAT **先不建**；照 `hosted-apps.md` §2.1「排程最後才開」逐支驗過、owner 確認後才建，指向 UAT 的 action | — |
 | Webhook 接收、通知、LINE、Email | 指向測試用目的地或關閉 | — |
 | 檔案（Storage） | 同租戶 Storage 另開資料夾前綴 | `uat/` |
 | **使用者** | **同一個租戶、同一批成員**——沒有「UAT 租戶」。差別只在 app 的角色白名單（§3 步驟 4、`member-admin.md` §7） | UAT 專用角色 |
@@ -63,10 +63,17 @@ Custom App 的草稿版（`{租戶}.ai-go.app/runtime/version-test/{識別碼}`�
   同顆會共用 compute 與備份範圍，UAT 灌資料會拖慢正式。
 - UAT 資料：用正式 dump 的**去識別化**副本，或合成資料。含真人個資的正式 dump 直接灌 UAT
   要租戶 owner 同意並限制誰能登入（§3 步驟 4 的 UAT 角色就是那道限制）。
+  複本裡若還有使用者授權 token、推播訂閱、聊天綁定、第三方活動 ID 這類「會打到外面」的資料，
+  預設**重建空庫再塞測試資料**，不要原地清——資料分類與步驟見 `hosted-migration-runbook.md` §5。
 
 ## 3. 建置步驟（Hosted + Custom 入口的形狀；其他形狀挑用得到的）
 
 每一步都要冪等（重跑不重複建、不輪替金鑰），最後有 §4 的驗證。端點都在 `/api/v1` 下。
+
+**開始前先擋住寫死的正式資源**（`migration-workflow.md` §2.6 B）：程式裡 env 沒設就退回正式雲端硬碟、正式訊息主題、
+舊站網址的地方，先改成「非正式環境沒設就報錯」，而且**這個修改要先部署到正式的現行版次再 clone**（clone 帶的是正式版次）。
+否則 UAT 一起來就會靜默寫進正式資源——不必等排程打開，使用者上傳一個檔案就會發生。
+另外 clone 會整包帶正式的 env，資源 ID 類的 key 在 UAT 是**明確設成正式值**，fallback 防線擋不到，要在步驟 3 換掉。外部登記項（webhook、OAuth 回呼、推送訂閱）UAT 另用一組測試登記，不要指向正式那一份（同節 A）。
 
 1. **外接庫**（若適用）：開 `<tenant>-uat`，密碼寫進本機 `.aigo/<something>-uat.env`（600，不進 git）。
 2. **Hosted App**：`POST /hosted-apps/{正式id}/clone`，body `{"name": …, "slug": "<slug>-uat"}`；回應的 `slug` 要回讀。
@@ -79,8 +86,10 @@ Custom App 的草稿版（`{租戶}.ai-go.app/runtime/version-test/{識別碼}`�
    - 到平台補上「clone 帶 env 覆寫」之前，這個窗口只能縮短不能消除——寫進計畫。
 3. **env 覆寫**：`PUT /hosted-apps/{id}/runtime-settings` 是**全量替換**（`hosted-apps.md` §4），所以用**白名單重建**，
    不是「改幾個已知的鍵」：逐鍵決定沿用／換值／清空。最少要動的：資料庫連線（指 UAT 庫）、session secret／
-   cron key／換票金鑰（全部新值，正式與 UAT 不共用）、所有回指自己的網址改成 UAT 網址、入口網址改成 UAT 入口、
-   空庫開站門禁只放建置者、通知／推播／第三方金鑰清空；`always_on=false`、`persistent_disk=false`（除非 UAT 真的要驗持久碟）。
+   cron key／換票金鑰（全部新值，正式與 UAT 不共用；**另外**：兼當加密金鑰、而 UAT 庫是正式複本時，
+   換新值的同時預設清掉那些欄位（要保留就由負責人重新加密），`hosted-apps.md` §4「不可隨手換新」）、所有回指自己的網址改成 UAT 網址、入口網址改成 UAT 入口、
+   空庫開站門禁只放建置者、通知／推播／第三方金鑰清空、**資源 ID 類的 key**（雲端硬碟／試算表、訊息主題／訂閱、bucket）
+   一律換成 UAT 值或清空；`always_on=false`、`persistent_disk=false`（除非 UAT 真的要驗持久碟）。
 4. **入口 Custom App**：`POST /builder/apps`（同模板，body 帶 `url_name: "<name>-uat"`）。
    ⚠️ `url_name` **發布後永久凍結**，`-uat` 必須在建立時就帶上；正式 app 的 `url_name` 可能是 `null`（中文名產不出），
    這時自己指定一個全新的 `<something>-uat`，不要從正式的名字推導（`custom-app-dev-guide.md` §26）。
@@ -98,12 +107,17 @@ Custom App 的草稿版（`{租戶}.ai-go.app/runtime/version-test/{識別碼}`�
    要對 UAT 的整合重做 `POST /refs/apps/{整合id}`（`hosted-apps.md` §5），否則 403。走外接庫、不讀平台表的可暫時略過。
 8. **前端 VFS**：打包時把寫死的正式 Hosted 網址與 egress slug 換成 UAT 的（用環境變數注入打包腳本，
    **原始碼不動**，預設值時輸出逐位元組不變）；同步到 UAT 入口、編譯、發布。
-9. **排程**：不建。要驗排程時另建一支指向 UAT 入口 action 的平台排程，驗完停用。
+9. **排程**：不建、app 的排程總開關維持關。要驗排程時照 `hosted-apps.md` §2.1「排程最後才開」：
+   先盤每支工作的對外副作用、把目的地換成**測試帳號**、逐支手動觸發驗過，owner 確認要在 UAT 常態運作才建平台排程；
+   只是驗一次的，驗完停用。
+   ⚠️ **app 端的排程總開關、通知目的地這類 DB 設定列**跟著資料走：UAT 庫是正式**複本**時它們是**開的**
+   （平台排程一建就會照正式設定發通知、打第三方），是**空庫**時通常是**關的**（建了排程也什麼都不做）。
+   建排程前兩種都要先核對並改成 UAT 要的值（`hosted-apps.md` §2.1）。
 
 ### 3.5 使用者：只補測試者，不邀整批人
 
-身分綁在 AI GO——租戶成員＋app 角色是第一道門，app 自己的名單是第二道，兩道門怎麼走依產品線不同，
-正本在 `member-admin.md` §7。UAT 只做三件事：
+**選用 AI GO 登入的 app**：租戶成員＋app 角色是第一道門，app 自己的名單是第二道，兩道門怎麼走依產品線不同，
+正本在 `member-admin.md` §7.1（維持原系統自己登入的 app，UAT 測試帳號建在 UAT 庫即可，本節不適用）。UAT 只做三件事：
 
 - 先確認**指定的測試者**已經是租戶成員、掛了步驟 4 的 UAT 角色；沒有就只為他們補（發角色不寄信；邀請會寄信）。
 - **不要為了 UAT 邀整批人**：租戶只有一個，UAT 與正式入口共用成員——邀進來就是正式上線，那是客戶（租戶管理員）的事。
@@ -119,8 +133,10 @@ Custom App 的草稿版（`{租戶}.ai-go.app/runtime/version-test/{識別碼}`�
 | 磁貼只有測試者看得到 | 用非測試者帳號開 UAT 入口 → 平台「無法存取此應用」 | 被擋 |
 | 入口可進 | `{租戶}.ai-go.app/runtime/<name>-uat` 200，測試者登入後換票成功 | 進得去 |
 | 403 對照 | 用 UAT app 身分讀一張有 `$user.*` 規則的預設表：`POLICY_GATE_MODE` **翻旗後**預期 403；仍 off 時回 200 **不算失敗**（`hosted-apps.md` §5）——UAT 正是翻旗前先看到這條的地方 | 符合當下旗標 |
-| 金鑰隔離 | 拿正式的 cron key 打 UAT 端點 → 403 | 舊值失效 |
-| 排程／通知未動 | UAT 沒有平台排程；通知目的地為空或測試值 | 確認 |
+| 金鑰隔離 | 拿正式的 cron key 打 UAT 端點 → 401／403（與 app 選定的碼一致） | 舊值失效 |
+| 正式與 UAT 不共用密鑰 | `scripts/aigo_env_diff.py` 比對正式與 UAT 的 runtime-settings，看「兩邊值相同」那一欄（不印值） | 密鑰類零筆相同（UAT 庫若是正式資料副本又有加密欄位，照步驟 3 與 `hosted-apps.md` §4「不可隨手換新」處置，建議 UAT 改用測試資料） |
+| 沒有寫死的正式資源 | 在 UAT 觸發上傳、備份、訂閱這類會用到雲端資源的功能，回正式那一側確認沒有新檔案、新訂閱 | 正式那側零變化 |
+| 排程／通知未動 | UAT 沒有平台排程，或只有 owner 確認過的排程（目的地全是測試值）；通知目的地為空或測試值；DB 裡的排程總開關與通知設定列是 UAT 要的值（複本會帶正式值） | 確認 |
 
 ## 5. 維運
 

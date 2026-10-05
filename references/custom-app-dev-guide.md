@@ -288,6 +288,13 @@ POST /api/v1/builder/apps/{app_id}/publish
 動態 slug（`ctx.http.call(ep["service"], …)`）掃不到、只記 log；README 與 `actions/manifest.json` 不在掃描範圍。
 起手式殘留見 §26.2；`platform-behaviors.md` §5.2／§5.3 有回應原文。
 
+**下架一支 action 要刪 VFS 檔，改 manifest 無效。** `confirm_removal=true` 只是放行，**本身不刪任何東西**；
+平台判斷 action 能不能被呼叫只看已發布 VFS 有沒有 `actions/<name>.py`，`actions/manifest.json` 沒登記照樣可呼叫
+（沒登記時 `is_enabled` 預設 true；只有公開 webhook 另外要求 manifest 寫 `"webhook": true`）。同步走 PATCH、不刪遠端檔，
+所以「本機刪檔＋拿掉登記＋重新發布」之後那支 action 還在線上。做法：`full_deploy(..., on_remote_only="delete", delete_paths=[用戶確認過的路徑])`
+（或直接 `delete_remote_files()`）刪掉遠端檔 → 發布回 409 `ACTION_REMOVAL` → 用戶確認後帶 `confirm_removal=true` 重發。
+`scripts/aigo_sync.py` 1.68.0 起偵測到遠端有本機沒有的 `actions/` 檔會在寫入前中止（`troubleshooting.md`「刪掉的 action 還能呼叫」列）。
+
 `scripts/aigo_publish.py publish_app()` 三個參數都可帶，並在 POST 前先跑 `egress_preflight()`
 把宣告、字面 slug 與已授權清單對照列出來；409 回來會把 `code` 翻成下一步，**不會自動帶 confirm**。
 
@@ -395,8 +402,10 @@ app（含 Server Action 的 `ctx.db`）要讀寫某張自建表，**先替 app �
   顯示面每次用 `GET /ext/storage/url` 換短效 URL
 - 圖片欄位（自建表 `image` 型別）**不走本節**——它有自己的上傳端點與 10MB 限制
   （`data-center.md` §6）
-- Hosted App **完全沒有**平台 storage 介面（Open Proxy 無 storage 面）——
-  已回報平台（2026-09-02），現況處置見 `hosted-apps.md` §7.1 與規則 32
+- Hosted App 不走本節：它的 Storage API 是 `/open/storage/*`（容器內 `AIGO_API_TOKEN`，回 `file_id`；
+  平台 v1.16.0 起，2026-10-02 prod 實打），授權、端點與坑見 `hosted-apps.md` §5.2，遷入見 §7.1。
+  檔案只對上傳它的那支 app 可見，所以 Custom 與 Hosted 混合方案（`hosted-apps.md` §5.1）**不能共用同一批檔案**——
+  由一邊負責上傳／讀取，另一邊經它轉手
 
 ## 13. Runtime 全域變數
 
@@ -1280,7 +1289,7 @@ def execute(ctx):
 | 業務 slug 主鍵（`courses.id = 'chinese-a1'`） | slug 存 `legacy_id`，對外 id 一律回 `legacy_id` |
 | 批次建立去重（原靠 advisory lock） | 自然鍵寫進目標表的 unique 欄（`"batch:{kind}|{date}|{start}"`），409 = 略過 |
 | 條件式 `UPDATE … WHERE state=?`（樂觀鎖） | 沒有。目標表加 `version` 數字欄＋一張 `xxx_versions` 自建表，`legacy_id = "{id}:v{n+1}"`：讀當前 → claim 版本列（409 = 有人同時改）→ PATCH 目標列含新 version。寫入方把 version 放進自己的唯一鍵，寫完重讀比對，不同就自刪 |
-| advisory lock | 租約鎖表 `app_locks{legacy_id U, expires_at}`：acquire = claim；409 時讀既有列，過期就刪掉重試一次；仍拿不到回「忙碌」讓呼叫端重送 |
+| advisory lock | 租約鎖表 `app_locks{legacy_id U, expires_at}`：acquire = claim `"{鎖名}|{n}"`；409 時讀該列，未過期回「忙碌」讓呼叫端重送，過期就 claim `n+1`——**不要刪或改舊列**（兩個實例同時讀到過期，後刪的會刪掉先搶到的新列；同 `hosted-apps.md` §2.1） |
 | 計數器（座位數、點數餘額） | **每格一列**：`slot_seat_claims."{slot}#v{ver}#{seat}"`（seat 0..capacity-1，隨機起點掃）、`credit_ledger."{grant}#{seq}"`。超賣在結構上不可能；`booked_count` 變成認領後重算的衍生值；取消 = 刪列 |
 | 交易（webhook 履約多步驟） | **決定性唯一鍵＋inbox 兩階段**：先 claim `webhook_events{legacy_id=event_id, status='received'}`（409 且既有列 done → 直接 ACK；409 且仍 received → 上次中途失敗，重跑）；每個副作用各自用可重算的 legacy_id claim（`orders="session:{id}"`、`unlocks="{user}:{type}:{item}"`），全部做完才 PATCH done。沒有 rollback，但任一步崩潰都可重送重跑而不重複發權益；要讓上游重送就把 inbox 列刪掉 |
 
@@ -1584,7 +1593,8 @@ POST /api/v1/builder/apps          （權限：builder.access）
   什麼都沒改直接發布就 409 `EGRESS_NOT_READY`。清示範時 **`actions/summarize_leads.py` 與 `_template.json`
   兩個都要刪**（只刪 action 仍擋；README、`actions/manifest.json` 的殘留不影響閘門）。刪遠端檔用
   `DELETE /builder/apps/{id}/source/files` 帶 `paths` 與 `expected_version`（缺就 400）——`aigo_sync.py` 的
-  `sync_to_cloud()` 只 PATCH 不會刪，本機清掉遠端還在，要用 `delete_remote_files()`。閘門規則與參數見 §8
+  `sync_to_cloud()` 只 PATCH 不會刪，本機清掉遠端還在：`actions/` 底下的用 `full_deploy(on_remote_only="delete", delete_paths=[用戶確認過的路徑])`，
+  `_template.json` 這類其他路徑用 `delete_remote_files()`。閘門規則與參數見 §8
 - ⚠️ **用業務模板 slug 建 app 會當場 seed 模板定義的自建表與 Data Reference 引用**（起手式兩款不帶）——
   表照模板預設繫結建好，改繫結要事後清，而清自建表有副作用。這正是本 skill 只用 starter 建殼的理由（§26.1）；
   已經這樣建了的 app，先盤 `GET /data-center/tables` 與 `GET /refs/apps/{id}` 再決定清不清，清之前逐張確認
@@ -1751,7 +1761,7 @@ agent 不自行開、也不把「要不要常駐」丟給 owner 選。決策的�
 | **internal** | internal Custom App 前端（登入者） | `__APP_TOKEN__`＝app-scoped JWT（代表登入者；`POST /app-scoped-token/{app_id}`／`app-runtime-session` 發） | `/api/v1/data-center`、`/proxy/{app_id}`、`/actions/apps/{app_id}`、`/storage`、`/approvals`（★ `/refs` 與平台管理面**不在** route catalog 內，今天打得到是 audit 放行，見下） | 登入者的權限（自建表記錄 CRUD 掛 `builder.access`，§7.5；預設表看 Data Reference 授權） |
 | **external** | external／self_built Custom App 前端（app 使用者） | `__APP_TOKEN__`＝`custom-app-auth` 發的使用者 token（claim 帶 `custom_app_id`） | `/api/v1/ext/{data-center,proxy,actions,storage,data,compile,preview-token,runtime-errors}`＋`/custom-app-auth/{slug}/*` | app 脈絡，不驗使用者權限；別種憑證一律 401「無效或已過期的 Token」（實打） |
 | **匿名** | 未登入訪客（只有 external／self_built 可開） | 無 | `/api/v1/pub/{data-center,proxy,data}/{slug}/…`（**唯讀**：只有 GET／`query`） | 表要 `is_public_readable`＋app 開旗標＋**平台核可**（§15.1）；120 次/分/IP |
-| **Hosted／self_built 後端** | Hosted App 容器、第三方自建應用 | `Authorization: Bearer <API key>`（容器內 `AIGO_API_TOKEN`；`X-API-Key` 相容） | `/api/v1/open/{data-center,proxy,data,members}`（`/open/members` 只有 `GET /{user_id}/context`，prod v1.15.4 起） | app 身分（API key 本身沒有 user；internal Hosted 的登入者由 proxy 注入 header 帶進來）；預設表零授權起步，600 次/分/key（`hosted-apps.md` §5） |
+| **Hosted／self_built 後端** | Hosted App 容器、第三方自建應用 | `Authorization: Bearer <API key>`（容器內 `AIGO_API_TOKEN`；`X-API-Key` 相容） | `/api/v1/open/{data-center,proxy,data,members,storage,ai-hub}`（`/open/members` 只有 `GET /{user_id}/context`，prod v1.15.4 起；`storage`／`ai-hub` prod v1.16.0 起，另需 scope 開關，`hosted-apps.md` §5.2） | app 身分（API key 本身沒有 user；internal Hosted 的登入者由 proxy 注入 header 帶進來）；預設表零授權起步，600 次/分/key（`hosted-apps.md` §5） |
 
 同一張表的四條路徑（自建表記錄為例；預設表把 `data-center/tables/{key}/records` 換成 `proxy/{table}` 即可）：
 

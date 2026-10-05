@@ -74,6 +74,7 @@
 
 1.5. **產品線與模式判斷**（Custom App vs Hosted App；登入者一律 internal；★ 結果不可逆）
    - **SSOT 在 `references/product-line-decision.md`**，兩條路共用——判斷前讀它
+   - **先過該檔 §0**：已進正式環境、有既有程式要搬的系統預設 Hosted App 整搬，不適用下面的預設立場
    - **預設立場：一個 Custom App `starter-internal`**。新建 app 絕大多數就是這個答案；只有命中訊號才偏離：
      功能群目的不同 → 多個 Custom App；
      公開 web 資產（自有網域／SEO／整站匿名）→ Hosted App；邊界表命中「Hosted」→ Hosted 或**混合**

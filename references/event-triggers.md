@@ -328,6 +328,9 @@ app 不可見（不在 `access_role_ids` 內）時整組端點回 404「app 不�
 ⚠️ **這對開發流程的直接影響**：unpublish 一個帶排程的 app，或改名／刪掉被排程的 action，
 會在兩次觸發後把排程停掉。**每次 republish 之後，要提醒用戶去 Builder 該 App「排程」分頁（或 `GET /builder/apps/{app_id}/crons`）
 檢查排程狀態並視需要重啟。**
+唯讀檢查可用 `scripts/aigo_cron_health.py --app <app-id>`（暫停、error／timeout、stale、連續錯誤；
+`--expect-action <action>` 斷言排程存在，抓切換後的新 app 沒補排程；UAT 預設不建，對它跑預期零條）——
+它不會 run-now 或 toggle；遇到錯誤只印狀態碼，要看平台原文請到 Builder 的排程頁。
 
 ### 2.9 漏跑語義：coalesce，不補跑
 

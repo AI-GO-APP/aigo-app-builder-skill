@@ -196,6 +196,8 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
 - 其餘前綴走 `/register?token=…&redirect=…`；**不指定落點的受邀者會落在 `/dashboard`**——
   對只有 app 角色的外部人員那是他沒權限的地方，**邀請外部人員一律指定落點**
 - 重寄（`resend-invite`）省略 `redirect_url` 會沿用上一張的落點
+- ⚠ 2026-10-02 prod 實打：`POST /invitations`（`send_email:true`、`redirect_url:/hosted-app-handoff/<slug>`）的**新註冊者**
+  註冊完落在工作區 `/dashboard`，沒有帶到 app——交付時另外給 app 網址，不要只靠落點
 - **`POST /members` 與 `POST /invitations` 在 `send_email:false` 下是同一件事**（★ 實打）：都只建邀請、回
   `token`＋`chat_invite_link`，`POST /members` 回應的 `id`／`user_id` 是 `null`——受邀者註冊完成前**沒有成員列**，
   之後要改角色（`PUT /members/{id}`）或重寄（`resend-invite`）都要先從 `GET /members` 找到他的 id
@@ -259,9 +261,15 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
 - 使用者表上跟著人走的業務欄位（偏好、等級、標籤…）拆出來存自建表，以**平台 user id** 當 key。
 - 原系統的「群組／角色」表 → 對映成平台角色（§5），不要建成自建表。
 
-### 7.1 登入身分綁在 AI GO：兩道門（★ 外接庫的專案也不例外；2026-09-21）
+### 7.1 登入方式二選一；選用 AI GO 登入時要過兩道門（2026-09-21 立；2026-10-02 改為可選）
 
-使用者要進得了 app，要過兩道門，順序固定：
+搬遷案的登入有兩種正當做法，由客戶與 PO 依案決定，**skill 不預設引導任何一種**：
+
+- **維持原系統自己的登入**（例如原本的 Supabase Auth、自家帳密）：app 照舊自己認人，平台不介入登入；
+  本節以下的兩道門與 `dev-rules.md` 規則 34 都不適用。
+- **選用 AI GO 登入**：使用者用 AI GO 帳號進 app，走下面的兩道門；若同時保留自家認證後端，加做規則 34 的即時撤權。
+
+選用 AI GO 登入時，使用者要進得了 app，要過兩道門，順序固定：
 
 1. **平台這道**：是這個租戶的成員，且帳號掛著該 app `access_role_ids` 裡的角色（§3）。沒過這道，看到的是平台的
    「無法存取此應用：您的角色不在此應用的允許名單內」——app 根本還沒被叫到。
@@ -283,6 +291,8 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
   等於正式上線。遷入者交清單、說明兩道門，由客戶決定名單與時機。
 - **名單會漂**：app 之後每新增一個可登入的人，AI GO 那邊也要有帳號與角色。對照做成冪等腳本，切換當天跑一次、之後定期跑。
 - **UAT**：只補測試者，不邀整批人（`uat-environment.md` §3.5）。
+- **移除成員不會通知 app**：平台沒有成員被移除的 webhook，app 若保留自家認證後端（自己發 session／token），
+  被移除者已發出的 token 會續用到期。若選用這種做法，必須做即時撤權：`dev-rules.md` 規則 34。
 
 ## 8. 回應怎麼讀（2026-09-08 測試租戶擁有者帳號實打；★ 標記＝實測字串）
 
