@@ -303,10 +303,14 @@ def full_deploy(base_url: str, token: str, app_id: str, slug: str, project_path:
                 *, on_remote_only: str = "abort", **publish_kwargs: Any) -> dict:
     """完整部署流程：sync → compile → publish（publish_kwargs 透傳給 publish_app）
 
-    `on_remote_only` 透傳給 sync_to_cloud()：遠端還有本機已刪的 actions/ 檔時預設中止。
+    `on_remote_only`：遠端還有本機已刪的 actions/ 檔時怎麼辦——"abort"（預設）寫入前中止並列出、
+    "keep" 列出後照常同步、"delete" 先刪掉它們再同步（只有這裡能刪：本函式讀的是完整本機專案）。
     """
-    from aigo_sync import read_local_files, get_remote_vfs, sync_to_cloud
+    from aigo_sync import (read_local_files, get_remote_vfs, sync_to_cloud,
+                           remote_only_actions, delete_remote_files)
     from aigo_compile import compile_app
+    if on_remote_only not in ("abort", "keep", "delete"):
+        raise ValueError(f"on_remote_only 只能是 abort／keep／delete，收到 {on_remote_only!r}")
 
     result: dict[str, Any] = {"sync": None, "compile": None, "publish": None}
 
@@ -318,7 +322,14 @@ def full_deploy(base_url: str, token: str, app_id: str, slug: str, project_path:
 
     # 1. 同步
     local_files = read_local_files(project_path)
-    _, version = get_remote_vfs(base_url, token, app_id)
+    remote_vfs, version = get_remote_vfs(base_url, token, app_id)
+    if on_remote_only == "delete":
+        stale = remote_only_actions(local_files, remote_vfs)
+        if stale:
+            deleted = delete_remote_files(base_url, token, app_id, stale, version)
+            version = deleted.get("vfs_version") or get_remote_vfs(base_url, token, app_id)[1]
+            print("🗑️ 已刪除遠端殘留的 actions/ 檔（尚未同步、尚未發布）：\n" + "\n".join(f"   - {p}" for p in stale))
+        on_remote_only = "abort"
     result["sync"] = sync_to_cloud(base_url, token, app_id, local_files, version,
                                    on_remote_only=on_remote_only)
 

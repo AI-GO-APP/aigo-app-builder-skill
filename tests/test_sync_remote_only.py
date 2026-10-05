@@ -38,14 +38,18 @@ class RemoteOnlyActionsTest(unittest.TestCase):
     def test_only_actions_paths_missing_locally_are_reported(self):
         self.assertEqual(remote_only_actions(LOCAL, REMOTE), STALE)
 
+    def test_protected_paths_are_never_reported(self):
+        with patch('aigo_sync.PROTECTED_FILES', {'actions/_probe_kb.py'}):
+            self.assertEqual(remote_only_actions(LOCAL, REMOTE), ['actions/_shared/util.py'])
+
     def test_nothing_reported_when_local_covers_remote_actions(self):
         self.assertEqual(remote_only_actions(REMOTE, REMOTE), [])
         self.assertEqual(remote_only_actions(LOCAL, {}), [])
 
 
 class SyncRemoteOnlyTest(unittest.TestCase):
-    def run_sync(self, remote, after_patch, after_delete=None, **kwargs):
-        infos = [app_info(after_patch, 8)] + ([app_info(after_delete, 9)] if after_delete is not None else [])
+    def run_sync(self, remote, after_patch, **kwargs):
+        infos = [app_info(after_patch, 8)]
         with patch('aigo_limits.get_limits', return_value=None), \
                 patch('aigo_sync.get_remote_vfs', return_value=(remote, 7)), \
                 patch('httpx.patch', return_value=response(200, {'vfs_version': 8})) as write, \
@@ -77,17 +81,14 @@ class SyncRemoteOnlyTest(unittest.TestCase):
         delete.assert_not_called()
         self.assertIn('actions/_probe_kb.py', printed)
 
-    def test_delete_writes_then_deletes_exactly_the_stale_paths(self):
-        merged = {**REMOTE, **LOCAL}
-        cleaned = {k: v for k, v in merged.items() if k not in STALE}
-        result, error, write, delete, _ = self.run_sync(REMOTE, merged, cleaned, on_remote_only='delete')
-        self.assertIsNone(error)
-        self.assertEqual(result, {'vfs_version': 8})
-        write.assert_called_once()
-        delete.assert_called_once()
-        self.assertEqual(delete.call_args.args[0], 'DELETE')
-        self.assertEqual(delete.call_args.args[1], f'{BASE}/api/v1/builder/apps/app/source/files')
-        self.assertEqual(delete.call_args.kwargs['json'], {'paths': STALE, 'expected_version': 8})
+    def test_sync_itself_never_deletes(self):
+        # files 可能只是部分檔案；刪除只由讀了完整本機專案的 full_deploy() 做
+        with patch('aigo_sync.get_remote_vfs') as read, patch('httpx.patch') as write, patch('httpx.request') as delete:
+            with self.assertRaises(ValueError):
+                sync_to_cloud(BASE, 't', 'app', LOCAL, 7, on_remote_only='delete')
+            read.assert_not_called()
+            write.assert_not_called()
+            delete.assert_not_called()
 
     def test_no_stale_actions_means_plain_sync(self):
         remote = {k: v for k, v in REMOTE.items() if k not in STALE}
@@ -119,18 +120,48 @@ class FullDeployRemoteOnlyTest(unittest.TestCase):
             self.assertEqual(sync.call_args.kwargs['on_remote_only'], 'abort')
             compile_app.assert_not_called()
 
-    def test_full_deploy_does_not_leak_mode_into_publish_kwargs(self):
+    def deploy(self, remote, **kwargs):
         from aigo_publish import full_deploy
+        calls = []
         with patch('aigo_auth.get_app_info', return_value={'id': 'app', 'name': 'n', 'status': 'published'}), \
                 patch('aigo_sync.read_local_files', return_value=LOCAL), \
-                patch('aigo_sync.get_remote_vfs', return_value=(REMOTE, 7)), \
-                patch('aigo_sync.sync_to_cloud', return_value={'vfs_version': 8}) as sync, \
+                patch('aigo_sync.get_remote_vfs', return_value=(remote, 7)), \
+                patch('aigo_sync.delete_remote_files',
+                      side_effect=lambda *a, **k: calls.append(('delete', a)) or {'vfs_version': 8}), \
+                patch('aigo_sync.sync_to_cloud',
+                      side_effect=lambda *a, **k: calls.append(('sync', a, k)) or {'vfs_version': 9}), \
                 patch('aigo_compile.compile_app', return_value={'success': True, 'skipped_files': []}), \
                 patch('aigo_publish.publish_app', return_value={'status': 'published'}) as publish, \
                 patch('builtins.print'):
-            full_deploy(BASE, 't', 'app', 'slug', '/tmp/project', on_remote_only='delete', confirm_removal=True)
-            self.assertEqual(sync.call_args.kwargs['on_remote_only'], 'delete')
-            self.assertEqual(publish.call_args.kwargs, {'confirm_removal': True})
+            full_deploy(BASE, 't', 'app', 'slug', '/tmp/project', **kwargs)
+        return calls, publish
+
+    def test_delete_removes_exactly_the_stale_paths_before_syncing(self):
+        calls, publish = self.deploy(REMOTE, on_remote_only='delete', confirm_removal=True)
+        self.assertEqual([c[0] for c in calls], ['delete', 'sync'])
+        self.assertEqual(calls[0][1], (BASE, 't', 'app', STALE, 7))
+        self.assertEqual(calls[1][1], (BASE, 't', 'app', LOCAL, 8))
+        self.assertEqual(calls[1][2], {'on_remote_only': 'abort'})
+        self.assertEqual(publish.call_args.kwargs, {'confirm_removal': True})
+
+    def test_delete_with_nothing_stale_only_syncs(self):
+        remote = {k: v for k, v in REMOTE.items() if k not in STALE}
+        calls, _ = self.deploy(remote, on_remote_only='delete')
+        self.assertEqual([c[0] for c in calls], ['sync'])
+        self.assertEqual(calls[0][1], (BASE, 't', 'app', LOCAL, 7))
+
+    def test_keep_is_forwarded_and_nothing_is_deleted(self):
+        calls, _ = self.deploy(REMOTE, on_remote_only='keep')
+        self.assertEqual([c[0] for c in calls], ['sync'])
+        self.assertEqual(calls[0][2], {'on_remote_only': 'keep'})
+
+    def test_unknown_mode_is_rejected_before_any_request(self):
+        from aigo_publish import full_deploy
+        with patch('aigo_auth.get_app_info') as info, patch('aigo_sync.get_remote_vfs') as read:
+            with self.assertRaises(ValueError):
+                full_deploy(BASE, 't', 'app', 'slug', '/tmp/project', on_remote_only='prune')
+            info.assert_not_called()
+            read.assert_not_called()
 
 
 if __name__ == '__main__':
