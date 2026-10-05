@@ -62,7 +62,7 @@ python scripts/check_update.py     # macOS / Linux 用 python3
 
 ## 源頭意圖分流（進入流程前先判讀）
 
-任何工作開始前，先分清用戶的意圖是哪一種——三條線的起手完全不同。**要做 app 的（前兩列）先問：這個專案進正式環境了嗎**（有真實使用者在用，或有不能丟的正式資料）——還沒進（全新，或有程式但沒上線）→ 先看 **Custom App** 做不做得到；已進 → 引導走 **Hosted App**；判準與例外在 `references/product-line-decision.md` §0，拿不準就問用戶，不從 repo 猜：
+任何工作開始前，先分清用戶的意圖是哪一種——三條線的起手完全不同。**要做 app 的（前兩列）先判：這個專案進正式環境了嗎**（有真實使用者在用，或有不能丟的正式資料）——還沒進（全新，或有程式但沒上線）→ 先看 **Custom App** 做不做得到；已進、有既有程式要搬 → 引導走 **Hosted App**；判準與例外在 `references/product-line-decision.md` §0，從零做的視為還沒進，有既有系統而拿不準就問用戶，不從 repo 猜：
 
 | 意圖 | 走法 |
 |------|------|
@@ -152,7 +152,7 @@ uv run --project scripts python scripts/aigo_auth.py app add <alias> --id <uuid>
 ### 1.0 需求盤點 → 四問（★ 缺一不進 1.5）
 
 用戶開場的一句話**是題目不是需求**。一輪問完四問，資訊不足就問、不猜；
-已在對話中講過的不重問；遷入情景這四問由 `migration-workflow.md` §2.0 盤點推導，不另問。四問之前先確認專案有沒有進正式環境（`product-line-decision.md` §0）——已進的不走本節，改走遷入線。
+已在對話中講過的不重問；遷入情景這四問由 `migration-workflow.md` §2.0 盤點推導，不另問。四問之前先確認專案有沒有進正式環境（`product-line-decision.md` §0）——已進、有既有程式要搬的改走遷入線，四問照上句由 §2.0 推導。
 
 | # | 問什麼 |
 |---|---|
