@@ -76,7 +76,9 @@
    - 檔案進平台 App 檔案（`hosted-apps.md` §5.2）；`/data` 只放非業務資料（`hosted-apps.md` §7）
    - 登入沿用 AI GO 或維持自家：由客戶與 PO 決定（`migration-workflow.md` §2.4.5、`member-admin.md` §7.1）。
      自家登入時人員名冊在哪、AI GO 登入時名冊怎麼對到租戶成員，要跟資料落點一起定。原系統登入若是 Supabase Auth
-     這類 BaaS 認證，不在規則 32 例外範圍內（例外不含 Auth），「維持自家登入」要先問平台
+     這類 BaaS 認證，**維持原本的登入是正當選項**（`member-admin.md` §7.1、`dev-rules.md` 規則 34）——它是原系統自己的服務，
+     照舊由 app 認人；不要把它搬進規則 32 例外核准的那顆外接庫專案。資料層若也靠 BaaS（RLS、瀏覽器直連），
+     那部分才是 `migration-workflow.md` §2.0 第 4 類的平台決議事項
    - 選用 AI GO 登入、又保留自家認證後端的，照 `dev-rules.md` 規則 34 做即時撤權
    - **入站路徑**：Hosted 會不會被伺服器對伺服器地打進來（平台排程的轉發 action、webhook、推送訂閱）？
      會的話 Hosted 要 `public`、由 app 自己驗金鑰或簽章（`hosted-apps.md` §2.1、§5.1）；`internal` 會擋掉這些請求
