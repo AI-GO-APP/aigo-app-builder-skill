@@ -276,7 +276,9 @@
       通過的相容性測試，不是「規格已合併」）都要寫進計畫文件
     - 例外的粒度與範圍：**一租戶一顆**（該租戶所有服務共用，服務以 PostgreSQL schema 分開，
       第一個服務佔 `public`）、UAT 另一顆 `<tenant>-uat`；**只限關聯式 PostgreSQL**——
-      不得順帶採用 Supabase Auth、Storage、Realtime、Edge Functions、pg_cron，檔案仍走 Storage API
+      不得在例外核准的那顆外接庫專案上順帶啟用 Supabase Auth、Storage、Realtime、Edge Functions、pg_cron，
+      檔案仍走 Storage API。原系統本來就在用、維持原樣的登入（例如原本的 Supabase Auth）不在此限——登入服務
+      留在原系統自己的專案，不搬進例外核准的那顆（`auth.users` 之類也不搬），見規則 34、`member-admin.md` §7.1
     - 另兩個既有過渡例外（短期暫連原 DB 的 HTTPS 介面、`/data` 放非業務資料）
       見 `hosted-apps.md` §7.1，用了必須在計畫中明寫遷移終點
 33. **每支要上正式的 app 都要有一個「UAT 結論」**（★ 強制，2026-09-21 立；做法見 `uat-environment.md`）

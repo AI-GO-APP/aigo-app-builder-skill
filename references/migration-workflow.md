@@ -107,12 +107,14 @@
 > 可移植性核對逐項攤開（Tailwind、檔案路由、數十顆 npm 依賴、>500 檔，實務上不會過）。
 > **預設走向是 Hosted App 整搬**（§2.1 問題二已列）。
 >
-> **資料層是待決事項，計畫裡不要先承諾任何一條路**：這一型的資料層需要 BaaS 的 Auth、RLS、
+> **資料層是待決事項，計畫裡不要先承諾任何一條路**：這一型的資料層需要 BaaS 的 RLS（以 Auth 發的 JWT 判斷權限）、
 > SQL function 與 DB 內排程，而 **`dev-rules.md` 規則 32 的例外明文只限「關聯式 PostgreSQL」，
 > 不含 Auth／Storage／Realtime／Edge Functions／pg_cron** ⇒ 現行例外**不涵蓋**這一型；
 > 例外的「一租戶一顆、服務以 schema 分」粒度在這一型也不成立（BaaS 的 Auth 是 per-project、
 > Data API 必須開、既有 migration 寫死 `public`）。builder 的動作是**把這個落差連同證據
 > 當成平台／PO 的決議事項提出來**，不是自己選一條、也不是改規則 32。
+> 待決的是**資料層**（RLS、SQL function、DB 內排程、瀏覽器直連）。**登入本身**維持原本的 BaaS Auth 是正當選項
+> （§2.4.5、`member-admin.md` §7.1），不必等這個決議。
 >
 > **前置步驟：先取正式庫的 schema-only dump**（是前置，不是建議）。「拿 repo 裡的 migration
 > 重建一份 schema」在這一型會失敗：某遷入案（2026-09-22 實踩）211 支手動貼上去的 migration 裡，
@@ -148,7 +150,7 @@
 | 純前端 × 公開 web 資產（官網、電商 storefront） | **Hosted App**（zbpack 任意棧含靜態站、`hosted-apps.md` §9 綁自訂網域）——Custom App 的 `/runtime` 網址＋HashRouter 做不了 SEO 與自有網域，`/pub` 只適合少數公開頁，不承載整個公開站 |
 | 有後端、可改寫 | **Custom App**（後端邏輯改寫成 Server Action）；用戶明確不願重構 → 改判 Hosted App |
 | 有後端、整搬 | **1..n 個 Hosted App**（整套原始碼進容器） |
-| BaaS 為後端、瀏覽器直連 | **Hosted App 整搬**（Custom 重寫要 §2.3 可移植性核對**全部**過，實務上不會過）；**資料層：待平台決議**——規則 32 的例外不涵蓋 Auth／RLS／SQL function／DB 內排程（§2.0 第 4 類） |
+| BaaS 為後端、瀏覽器直連 | **Hosted App 整搬**（Custom 重寫要 §2.3 可移植性核對**全部**過，實務上不會過）；**資料層：待平台決議**——規則 32 的例外不涵蓋 Auth／RLS／SQL function／DB 內排程（§2.0 第 4 類）；登入維持原本的 BaaS Auth 不受此限（§2.4.5） |
 
 - stack 形狀給的是**預設值**，最終仍要向用戶確認——特別是「可改寫」與
   「整搬」的邊界：改寫工作量（§2.3 可移植性核對）攤開後用戶不買單，就改判整搬。
