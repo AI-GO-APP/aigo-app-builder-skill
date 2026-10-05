@@ -367,6 +367,7 @@ Data Reference 同構。帶 app 身分的呼叫碰到**沒引用的表**，平�
 1. **API**：`POST /api/v1/refs/apps/{app_id}`（`builder.access`），
    body `{"table_name": "<實體名>", "columns": [<要用的欄位實體名>], "permissions": ["read", ...]}`；
    `permissions` 只給 app 真的要做的動作（`read`／`create`／`update`／`delete`）。
+   🚨 `table_name` **不可是 `dc_` 開頭的平台目錄表**——平台收、但登記後 app 使用者能改刪延伸欄位定義（§10）。
    登記後用 `GET /api/v1/refs/apps/{app_id}` 驗收（**不要看 `db.json`**，見 `platform-behaviors.md` §6）。
    **事前登記一律走這條**。External app 的終端使用者要透過 `/ext/data-center` 讀寫這張表，
    還要再用 `PATCH /api/v1/refs/{ref_id}` 把 `is_end_user_accessible` 設為 `true`（預設不開；
@@ -534,6 +535,8 @@ action `ctx.user_permissions`／可見度 `access_role_ids`）。要員工的 em
 > **PATCH body 少包一層 `values` 會靜默 no-op 回 200**（端點速查）。
 > **2026-09-16 測試租戶走完整生命週期**（建欄 → impact → DELETE `?confirm=` → 表回 `[]`）：
 > 刪欄已實測，且釘死**建欄 body 形狀與實體名不可指定**（下方「建欄」段）。
+> **2026-10-05 測試租戶實測（平台 main 同日原始碼一致）**：Data Reference 直接引用底層兩張表——
+> 值表 proxy 全 500（值仍無旁路）、**定義表 proxy 可讀可寫可刪**（下方「🚨 不要登記 `dc_` 開頭的表」）。
 
 ### 定位：Data Reference 軌的第三種擴充機制
 
@@ -571,10 +574,54 @@ action `ctx.user_permissions`／可見度 `access_role_ids`）。要員工的 em
   | 前端 SDK（`api.ts`／`db.ts`） | 沒有封裝 | 模板未提供；手動 `fetch` 帶 `__APP_TOKEN__` 技術上可行，但下一列 |
   | internal 前端手打 REST | 一般員工 **403** | 端點掛 `builder.access`（§7.5 同一個病），而這裡**沒有「包 action」的解**——action 打不到 |
   | external 線 `/ext/data-center/*` | 端點不存在 | 該 router 只有 `tables`／`records` 五條，無 `ext-*` |
+  | Data Reference 直接引用值表 `dc_ext_values`，走 `/proxy/{app}/dc_ext_values` | 讀寫刪全部 **500** `column "id" does not exist` | 值表主鍵是 `(field_def_id, row_id)`、**沒有 `id` 欄**，proxy 的 SELECT／INSERT … RETURNING／UPDATE／DELETE 一律帶 `id`（2026-10-05 實打） |
 
-  → 結論：延伸欄位的值只有**資料中心 UI**、**持 `builder.access` 的人**、
+  → 結論：延伸欄位的**值**只有**資料中心 UI**、**持 `builder.access` 的人**、
+  **持 `system.data_import` 的人走匯入**（只寫不讀，`api/imports.py`）、
   **遷入用的本地腳本**（§23.8）讀寫得到。**app 內要用的欄位不要放這裡**（issue #71）。
   已經放了才發現要在 app 內讀 → 遷成 `custom_data` 或自建表欄位，沒有旁路可繞。
+
+### 權限分界：定義與值分開管（★ 「有 `builder.access` 就能讀寫延伸欄位」只對一半）
+
+平台把延伸欄位拆成兩層，各掛不同權限（`api/data_center_ext.py` 檔頭明寫
+「管結構的人不自動獲得看資料的權」）：
+
+| 層 | 誰可以 | 誰不行 |
+|---|---|---|
+| **值**（讀、寫） | `builder.access` | 只有 `datacenter.schema_write` 的人（管結構不等於看資料） |
+| **定義**——列出 | `builder.access` **或** `datacenter.schema_write` | — |
+| **定義**——建、改 | `datacenter.schema_write` | **只有 `builder.access` 的人**（會 403） |
+| **定義**——刪（帶走該欄全部值） | `system.admin`＋`?confirm=` | 其他所有人 |
+
+另有一條不經 `builder.access` 的寫入路：匯入（`system.data_import`）可建定義也可寫值。
+`system.admin` 對上面每一格都直通——**擁有者帳號測不出這張表**，判斷一般員工能不能做時看這張表，不要看實打結果。
+
+### 🚨 不要登記 `dc_` 開頭的表（平台目錄表；★ 硬閘）
+
+`GET /refs/available-tables` 會列出 `dc_ext_values`、`dc_ext_field_defs`、`dc_tables`、`dc_fields`，
+`POST /refs/apps/{app_id}` 也接受它們——它們**不在**平台的引用黑名單（`utils/table_inspector.py`
+`BLACKLISTED_TABLES`）裡，`dc_ext_*` 兩張也不在唯讀名單 `PLATFORM_SOLE_WRITE_TABLES`。
+2026-10-05 測試租戶把兩張 `dc_ext_*` 登記給一支 internal app、用 app-scoped token 打 proxy：
+
+| 對象 | 結果 |
+|---|---|
+| `dc_ext_values`（值） | 讀寫刪全部 **500**（沒有 `id` 欄，見上方通道表）——**拿不到值** |
+| `dc_ext_field_defs` 讀 | **200**，整個租戶所有預設表的延伸欄位定義都列得出來 |
+| `dc_ext_field_defs` 改（`display_name`、`is_required`） | **200**，資料中心立即生效——**繞過 `datacenter.schema_write`** |
+| `dc_ext_field_defs` 新增 | **201**，產生的欄位官方 API 當成真欄位、可寫值——**繞過 `datacenter.schema_write`**，也繞過實體名生成規則 |
+| `dc_ext_field_defs` 刪 | **204**，FK `ON DELETE CASCADE` **連帶刪光該欄所有值**——**繞過 `system.admin`＋兩段式 confirm** |
+
+proxy 只認「有引用＋登入」，**不看 `builder.access`**；internal app 的引用預設對 app 使用者生效
+（`is_end_user_accessible` 只管 external 線）。所以一旦登記，**任何打得開這支 app 的員工**
+都能透過 app 改名、改必填、刪除延伸欄位，刪除還會不可逆地帶走資料。
+
+**規則**：
+- `table_name` 以 `dc_` 開頭的表**一律不登記**，不論權限只給 `read` 與否
+  （只給 `read` 也會把整個租戶的欄位定義暴露給 app 使用者）。
+- 要在 app 內知道某張預設表有哪些延伸欄位 → 沒有合規路，照上面選型表改走 `custom_data` 或自建表。
+- 盤點既有 app 時看到引用清單裡有 `dc_` 開頭的表 → 列為風險項，請有 `builder.access` 的人移除
+  （`DELETE /api/v1/refs/{ref_id}`），**不要順手沿用**。
+- 這是平台側的權限缺口，不是可利用的能力——不要寫成「旁路做法」放進任何 app。
 
 ### 端點速查（前綴 `/api/v1/data-center`）
 

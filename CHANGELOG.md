@@ -1,3 +1,22 @@
+## 1.64.0
+
+### 延伸欄位權限分界核實＋不要登記 `dc_` 開頭的表
+
+問題起點：「延伸欄位只開放給有 `builder.access` 的人讀寫」是否為真。對照平台最新原始碼並在測試租戶完整實測：
+
+- **值**：成立。批取／寫值只認 `builder.access`；另有匯入（`system.data_import`）可寫不可讀。
+- **定義**：不成立。建、改要 `datacenter.schema_write`（只有 `builder.access` 會 403），刪要 `system.admin`＋confirm。
+- **旁路**：`dc_ext_values`／`dc_ext_field_defs` 不在引用黑名單，可登記成 app 的資料引用。
+  值表走 proxy 全 500（沒有 `id` 欄），但**定義表可讀、可改、可新增、可刪**（刪會連帶刪光該欄所有值），
+  proxy 不看 `builder.access`，等於任何打得開 app 的員工都能繞過 `datacenter.schema_write` 與 `system.admin`。
+
+變更：
+
+- `data-center.md` §10：通道表補「Data Reference 直接引用值表」一列；新增「權限分界：定義與值分開管」與
+  「🚨 不要登記 `dc_` 開頭的表」兩段（含 2026-10-05 實測結果）；§7 登記段加同一條禁令
+- `default-table-lookup.md`：`available-tables` 相減公式扣掉 `dc_` 開頭的目錄表
+- `dev-rules.md` 規則 18：登記引用時 `dc_` 開頭的表一律不登記
+
 ## 1.63.0
 
 ### Hosted App 遷入作業手冊：從盤點、測試到切換與退場的主流程

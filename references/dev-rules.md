@@ -67,6 +67,7 @@
       引導用戶到資料中心 UI 自建，建完 `GET` 驗收再繼續。
     - **建好或重用的自建表，app 要讀寫前先登記資料引用**（`POST /api/v1/refs/apps/{app_id}`）；
       REST 與資料中心 UI 建表都不會自動登記（Builder AI 建表、套用模板才會），沒登記 `ctx.db` 回「自建表不存在」（`data-center.md` §7）。
+      **`dc_` 開頭的表（資料中心目錄表）一律不登記**——平台收，但登記後 app 使用者能繞過權限改刪延伸欄位定義（`data-center.md` §10）。
       （`aigo_data_center.py` 會把 403 拋成 `PermissionDenied`；`needs == "system.admin"`
       才走建表降級，用 `format_create_spec()` 產出規格表。`needs == "builder.access"`
       是帳號沒有資料中心存取權，該請用戶開權限，不是叫他去建表）

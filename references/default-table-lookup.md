@@ -62,8 +62,12 @@
 ```
 GET /api/v1/data-center/tables      → 本租戶自建表全集（physical_name）
 GET /api/v1/refs/available-tables   → ERP ∪ 自建表
-預設表 = 後者 − 前者
+預設表 = 後者 − 前者 − 以 dc_ 開頭的表
 ```
+
+`dc_tables`／`dc_fields`／`dc_ext_field_defs`／`dc_ext_values` 是資料中心自己的**目錄表**
+（自建表與延伸欄位的定義、EAV 值），也混在 `available-tables` 裡，**不是業務表，一律不當候選、不登記引用**
+（理由與 2026-10-05 實測 → `data-center.md` §10「🚨 不要登記 `dc_` 開頭的表」）。
 
 盤點遷入案時先做這一步再進 §2 的語意判斷，否則整份候選清單是髒的。
 
