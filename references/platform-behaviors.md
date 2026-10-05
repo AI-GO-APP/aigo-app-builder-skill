@@ -265,7 +265,7 @@ const canValidate = moves.length > 0 &&
 400 {"detail": "缺少 expected_version（樂觀鎖必填）"}
 ```
 
-`scripts/aigo_sync.py` 目前只封裝了 PATCH，沒有封裝刪除。
+`scripts/aigo_sync.py` 的 `sync_to_cloud()` 只做 PATCH、不刪檔；刪除用同檔的 `delete_remote_files()`，或 `aigo_publish.py` 的 `full_deploy(on_remote_only="delete")`（只管 `actions/` 底下）。
 
 ### 5.2 發布若會移除既有 action，會回 409
 
