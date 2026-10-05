@@ -1,0 +1,137 @@
+"""Offline contract tests: 本機已刪、遠端還在的 actions/ 檔不得被 sync 安靜地留下。
+
+python -m unittest discover -s tests
+"""
+import sys
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
+import httpx
+from aigo_sync import RemoteOnlyFilesError, remote_only_actions, sync_to_cloud
+
+BASE = 'https://test.invalid'
+LOCAL = {'actions/keep.py': 'new', 'actions/manifest.json': '{"keep": {}}', 'src/App.tsx': ''}
+REMOTE = {
+    'actions/keep.py': 'old',
+    'actions/manifest.json': '{"keep": {}, "_probe_kb": {}}',
+    'actions/_probe_kb.py': 'probe',
+    'actions/_shared/util.py': 'shared',
+    'src/App.tsx': '',
+    'src/old_page.tsx': '',
+    'src/api.ts': '',
+    '_template.json': '{}',
+}
+STALE = ['actions/_probe_kb.py', 'actions/_shared/util.py']
+
+
+def response(status, data):
+    return httpx.Response(status, json=data, request=httpx.Request('GET', BASE))
+
+
+def app_info(vfs, version):
+    return {'vfs_state': vfs, 'vfs_version': version}
+
+
+class RemoteOnlyActionsTest(unittest.TestCase):
+    def test_only_actions_paths_missing_locally_are_reported(self):
+        self.assertEqual(remote_only_actions(LOCAL, REMOTE), STALE)
+
+    def test_nothing_reported_when_local_covers_remote_actions(self):
+        self.assertEqual(remote_only_actions(REMOTE, REMOTE), [])
+        self.assertEqual(remote_only_actions(LOCAL, {}), [])
+
+
+class SyncRemoteOnlyTest(unittest.TestCase):
+    def run_sync(self, remote, after_patch, after_delete=None, **kwargs):
+        infos = [app_info(after_patch, 8)] + ([app_info(after_delete, 9)] if after_delete is not None else [])
+        with patch('aigo_limits.get_limits', return_value=None), \
+                patch('aigo_sync.get_remote_vfs', return_value=(remote, 7)), \
+                patch('httpx.patch', return_value=response(200, {'vfs_version': 8})) as write, \
+                patch('httpx.request', return_value=response(200, {'vfs_version': 9})) as delete, \
+                patch('aigo_auth.get_app_info', side_effect=infos), \
+                patch('builtins.print') as out:
+            try:
+                result = sync_to_cloud(BASE, 't', 'app', LOCAL, 7, **kwargs)
+                error = None
+            except Exception as exc:  # noqa: BLE001 - 測試要看例外型別
+                result, error = None, exc
+        printed = '\n'.join(str(c.args[0]) for c in out.call_args_list if c.args)
+        return result, error, write, delete, printed
+
+    def test_default_aborts_before_writing_and_names_the_files(self):
+        _, error, write, delete, _ = self.run_sync(REMOTE, {**REMOTE, **LOCAL})
+        self.assertIsInstance(error, RemoteOnlyFilesError)
+        self.assertEqual(error.paths, STALE)
+        self.assertIn('actions/_probe_kb.py', str(error))
+        self.assertIn('on_remote_only', str(error))
+        write.assert_not_called()
+        delete.assert_not_called()
+
+    def test_keep_writes_without_deleting_and_still_names_the_files(self):
+        result, error, write, delete, printed = self.run_sync(REMOTE, {**REMOTE, **LOCAL}, on_remote_only='keep')
+        self.assertIsNone(error)
+        self.assertEqual(result, {'vfs_version': 8})
+        write.assert_called_once()
+        delete.assert_not_called()
+        self.assertIn('actions/_probe_kb.py', printed)
+
+    def test_delete_writes_then_deletes_exactly_the_stale_paths(self):
+        merged = {**REMOTE, **LOCAL}
+        cleaned = {k: v for k, v in merged.items() if k not in STALE}
+        result, error, write, delete, _ = self.run_sync(REMOTE, merged, cleaned, on_remote_only='delete')
+        self.assertIsNone(error)
+        self.assertEqual(result, {'vfs_version': 8})
+        write.assert_called_once()
+        delete.assert_called_once()
+        self.assertEqual(delete.call_args.args[0], 'DELETE')
+        self.assertEqual(delete.call_args.args[1], f'{BASE}/api/v1/builder/apps/app/source/files')
+        self.assertEqual(delete.call_args.kwargs['json'], {'paths': STALE, 'expected_version': 8})
+
+    def test_no_stale_actions_means_plain_sync(self):
+        remote = {k: v for k, v in REMOTE.items() if k not in STALE}
+        result, error, write, delete, _ = self.run_sync(remote, {**remote, **LOCAL})
+        self.assertIsNone(error)
+        self.assertEqual(result, {'vfs_version': 8})
+        write.assert_called_once()
+        delete.assert_not_called()
+
+    def test_unknown_mode_is_rejected_before_any_request(self):
+        with patch('aigo_sync.get_remote_vfs') as read, patch('httpx.patch') as write:
+            with self.assertRaises(ValueError):
+                sync_to_cloud(BASE, 't', 'app', LOCAL, 7, on_remote_only='prune')
+            read.assert_not_called()
+            write.assert_not_called()
+
+
+class FullDeployRemoteOnlyTest(unittest.TestCase):
+    def test_full_deploy_forwards_mode_and_stops_on_abort(self):
+        from aigo_publish import full_deploy
+        with patch('aigo_auth.get_app_info', return_value={'id': 'app', 'name': 'n'}), \
+                patch('aigo_sync.read_local_files', return_value=LOCAL), \
+                patch('aigo_sync.get_remote_vfs', return_value=(REMOTE, 7)), \
+                patch('aigo_sync.sync_to_cloud', side_effect=RemoteOnlyFilesError(STALE)) as sync, \
+                patch('aigo_compile.compile_app') as compile_app, \
+                patch('builtins.print'):
+            with self.assertRaises(RemoteOnlyFilesError):
+                full_deploy(BASE, 't', 'app', 'slug', '/tmp/project', on_remote_only='abort')
+            self.assertEqual(sync.call_args.kwargs['on_remote_only'], 'abort')
+            compile_app.assert_not_called()
+
+    def test_full_deploy_does_not_leak_mode_into_publish_kwargs(self):
+        from aigo_publish import full_deploy
+        with patch('aigo_auth.get_app_info', return_value={'id': 'app', 'name': 'n', 'status': 'published'}), \
+                patch('aigo_sync.read_local_files', return_value=LOCAL), \
+                patch('aigo_sync.get_remote_vfs', return_value=(REMOTE, 7)), \
+                patch('aigo_sync.sync_to_cloud', return_value={'vfs_version': 8}) as sync, \
+                patch('aigo_compile.compile_app', return_value={'success': True, 'skipped_files': []}), \
+                patch('aigo_publish.publish_app', return_value={'status': 'published'}) as publish, \
+                patch('builtins.print'):
+            full_deploy(BASE, 't', 'app', 'slug', '/tmp/project', on_remote_only='delete', confirm_removal=True)
+            self.assertEqual(sync.call_args.kwargs['on_remote_only'], 'delete')
+            self.assertEqual(publish.call_args.kwargs, {'confirm_removal': True})
+
+
+if __name__ == '__main__':
+    unittest.main()

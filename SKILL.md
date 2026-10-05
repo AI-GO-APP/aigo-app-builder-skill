@@ -314,6 +314,10 @@ if (file) downloadFile(file);
 1. **同步 VFS**：讀取本地檔案 → PATCH `/api/v1/builder/apps/{id}/source/files`
    - 腳本：`scripts/aigo_sync.py` 的 `sync_to_cloud()`
    - ★ 內建二次驗證：PATCH 後自動 GET 確認 vfs_version 遞增 + 檔案確實寫入
+   - ★ **PATCH 是合併，不會刪檔**：本機刪掉的 `actions/*.py` 還留在遠端，發布後**照樣可以被呼叫**
+     （平台只看檔案在不在，`actions/manifest.json` 拿掉登記不會下架）。所以遠端有本機沒有的 `actions/` 檔時，
+     `sync_to_cloud()`／`full_deploy()` 預設**寫入前中止並列出路徑**（`RemoteOnlyFilesError`）。把清單給用戶看、
+     問清楚再帶 `on_remote_only="delete"`（下架）或 `"keep"`（保留）——不要自己猜（`troubleshooting.md`「刪掉的 action 還能呼叫」列）
 1.5. **語意檢查**（★ 前端有實質修改時必跑）：`uv run --project scripts python scripts/aigo_typecheck.py <專案目錄>`
    - **compile 走 esbuild，只轉譯不驗型別**：`const` 宣告前被使用（TDZ）、找不到名稱、重複宣告
      這類錯誤 compile 全綠、發布後 runtime 白畫面，且堆疊只有 minified 名稱與 esm.sh 的

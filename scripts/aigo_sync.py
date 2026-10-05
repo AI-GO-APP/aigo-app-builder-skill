@@ -7,6 +7,22 @@ PROTECTED_FILES = {"src/api.ts", "src/db.ts", "src/action.ts", "src/data.json", 
 # `_template.json` 宣告 required_egress: openai，示範 action 也字面呼叫 openai。與需求無關就兩個一起刪
 # （只刪 action 仍擋；README／manifest 殘留不影響閘門）。2026-09-09 prod 實打。
 STARTER_EGRESS_LEFTOVERS = ("_template.json", "actions/summarize_leads.py")
+# sync_to_cloud() 遇到「遠端有、本機沒有」的 actions/ 檔時怎麼辦。PATCH 是合併、不會刪檔，
+# 而平台只看檔案在不在來決定 action 能不能被呼叫——本機刪掉的 action 會繼續在線上。
+REMOTE_ONLY_MODES = ("abort", "keep", "delete")
+
+
+class RemoteOnlyFilesError(RuntimeError):
+    """遠端還留著本機已經沒有的 actions/ 檔；`paths` 是那些路徑。"""
+
+    def __init__(self, paths: list[str]):
+        self.paths = list(paths)
+        rows = "\n".join(f"   - {p}" for p in self.paths)
+        super().__init__(
+            "同步中止：遠端還有本機沒有的 actions/ 檔，同步不會刪它們，發布後照樣可以被呼叫——\n" + rows +
+            "\n   要下架 → on_remote_only=\"delete\"（發布時平台會回 409 ACTION_REMOVAL，再帶 confirm_removal=True）；"
+            "\n   要保留（本機不是完整專案、只同步部分檔案）→ on_remote_only=\"keep\"。"
+            "\n   這是用戶的決定，先問再帶。")
 
 
 def read_local_files(project_path: str) -> dict[str, str]:
@@ -49,8 +65,8 @@ def get_remote_vfs(base_url: str, token: str, app_id: str) -> tuple[dict, int]:
 
 
 def diff_vfs(local: dict[str, str], remote: dict[str, str]) -> dict:
-    """比較差異。`deleted` 只是「遠端有、本機沒有」的清單——sync_to_cloud() 不會刪它們，
-    要真的刪用 delete_remote_files()。"""
+    """比較差異。`deleted` 只是「遠端有、本機沒有」的清單——sync_to_cloud() 只處理其中
+    actions/ 底下的（見 `on_remote_only`），其餘要刪用 delete_remote_files()。"""
     remote_app = {k: v for k, v in remote.items() if k not in PROTECTED_FILES}
     added = [k for k in local if k not in remote_app]
     deleted = [k for k in remote_app if k not in local]
@@ -59,17 +75,35 @@ def diff_vfs(local: dict[str, str], remote: dict[str, str]) -> dict:
             "unchanged": len(local) - len(added) - len(modified)}
 
 
+def remote_only_actions(local: dict[str, str], remote: dict[str, str]) -> list[str]:
+    """遠端有、本機沒有的 actions/ 路徑（排序）。只看 actions/：那是會被呼叫的面，
+    其餘路徑有平台注入檔與本機不掃的檔，不能拿「本機沒有」當成該刪。"""
+    return sorted(k for k in remote if k.startswith("actions/") and k not in local)
+
+
 def sync_to_cloud(base_url: str, token: str, app_id: str, files: dict[str, str],
-                  expected_version: int) -> dict:
-    """PATCH VFS 到雲端；以目標平台限制預檢合併後的完整 VFS。"""
+                  expected_version: int, *, on_remote_only: str = "abort") -> dict:
+    """PATCH VFS 到雲端；以目標平台限制預檢合併後的完整 VFS。
+
+    `on_remote_only` 決定遠端殘留的 actions/ 檔（見 `remote_only_actions`）怎麼處理：
+    "abort"（預設）寫入前中止並列出、"keep" 列出後照常同步、"delete" 同步後刪掉它們。
+    """
     import httpx
     from aigo_limits import get_limits, check_vfs
     from aigo_compile import format_skipped_files
+    if on_remote_only not in REMOTE_ONLY_MODES:
+        raise ValueError(f"on_remote_only 只能是 {REMOTE_ONLY_MODES}，收到 {on_remote_only!r}")
+    remote, version = get_remote_vfs(base_url, token, app_id)
+    if version != expected_version:
+        raise ValueError("VFS 版本衝突：預檢前版本已改變，請重新讀取。")
+    stale = remote_only_actions(files, remote)
+    if stale and on_remote_only == "abort":
+        raise RemoteOnlyFilesError(stale)
+    if stale and on_remote_only == "keep":
+        print("⚠️ 遠端還有本機沒有的 actions/ 檔（on_remote_only=\"keep\"，不刪，發布後仍可被呼叫）：\n"
+              + "\n".join(f"   - {p}" for p in stale))
     limits = get_limits(base_url, token, app_id)
     if limits is not None:
-        remote, version = get_remote_vfs(base_url, token, app_id)
-        if version != expected_version:
-            raise ValueError("VFS 版本衝突：預檢前版本已改變，請重新讀取。")
         skipped = check_vfs({**remote, **files}, limits)
         if skipped:
             print("同步預檢（實際結果以編譯回應為準）：\n" + format_skipped_files(skipped))
@@ -91,6 +125,9 @@ def sync_to_cloud(base_url: str, token: str, app_id: str, files: dict[str, str],
     for path in files:
         if path not in remote_vfs:
             raise RuntimeError(f'VFS 同步驗證失敗：檔案 {path} 未出現在遠端 VFS')
+    if stale and on_remote_only == "delete":
+        delete_remote_files(base_url, token, app_id, stale, v_after)
+        print("🗑️ 已刪除遠端殘留的 actions/ 檔：\n" + "\n".join(f"   - {p}" for p in stale))
     return resp.json()
 
 

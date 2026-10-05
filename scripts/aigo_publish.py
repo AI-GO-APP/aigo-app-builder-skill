@@ -300,8 +300,11 @@ def check_publish_status(base_url: str, token: str, app_id: str) -> str:
 
 
 def full_deploy(base_url: str, token: str, app_id: str, slug: str, project_path: str,
-                **publish_kwargs: Any) -> dict:
-    """完整部署流程：sync → compile → publish（publish_kwargs 透傳給 publish_app）"""
+                *, on_remote_only: str = "abort", **publish_kwargs: Any) -> dict:
+    """完整部署流程：sync → compile → publish（publish_kwargs 透傳給 publish_app）
+
+    `on_remote_only` 透傳給 sync_to_cloud()：遠端還有本機已刪的 actions/ 檔時預設中止。
+    """
     from aigo_sync import read_local_files, get_remote_vfs, sync_to_cloud
     from aigo_compile import compile_app
 
@@ -316,7 +319,8 @@ def full_deploy(base_url: str, token: str, app_id: str, slug: str, project_path:
     # 1. 同步
     local_files = read_local_files(project_path)
     _, version = get_remote_vfs(base_url, token, app_id)
-    result["sync"] = sync_to_cloud(base_url, token, app_id, local_files, version)
+    result["sync"] = sync_to_cloud(base_url, token, app_id, local_files, version,
+                                   on_remote_only=on_remote_only)
 
     # 2. 編譯
     compile_result = compile_app(base_url, token, slug)
