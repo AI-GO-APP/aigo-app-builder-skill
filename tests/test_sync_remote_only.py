@@ -133,7 +133,7 @@ class FullDeployRemoteOnlyTest(unittest.TestCase):
                 patch('aigo_compile.compile_app', return_value={'success': True, 'skipped_files': []}), \
                 patch('aigo_publish.publish_app', return_value={'status': 'published'}) as publish, \
                 patch('builtins.print'):
-            full_deploy(BASE, 't', 'app', 'slug', '/tmp/project', **kwargs)
+                self.result = full_deploy(BASE, 't', 'app', 'slug', '/tmp/project', **kwargs)
         return calls, publish
 
     def test_delete_removes_only_the_approved_paths_before_syncing(self):
@@ -150,6 +150,16 @@ class FullDeployRemoteOnlyTest(unittest.TestCase):
         calls, _ = self.deploy(REMOTE, on_remote_only='delete', delete_paths=['actions/_probe_kb.py'])
         self.assertEqual(calls[0][1], (BASE, 't', 'app', ['actions/_probe_kb.py'], 7))
         self.assertEqual(calls[1][2], {'on_remote_only': 'keep'})
+        self.assertEqual(self.result['remote_only_kept'], ['actions/_shared/util.py'])
+
+    def test_delete_paths_as_a_bare_string_is_rejected_before_any_request(self):
+        from aigo_publish import full_deploy
+        with patch('aigo_auth.get_app_info') as info, patch('aigo_sync.get_remote_vfs') as read:
+            with self.assertRaises(TypeError):
+                full_deploy(BASE, 't', 'app', 'slug', '/tmp/project', on_remote_only='delete',
+                            delete_paths='actions/_probe_kb.py')
+            info.assert_not_called()
+            read.assert_not_called()
 
     def test_delete_requires_approved_paths(self):
         for kwargs in ({}, {'delete_paths': []}):
