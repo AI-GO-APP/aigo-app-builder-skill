@@ -1,3 +1,31 @@
+## 1.68.0
+
+### 修正：本機刪掉的 action 同步後還留在平台，發布後照樣可以被呼叫
+
+租戶回報：本機刪掉 `actions/<name>.py`、從 `actions/manifest.json` 拿掉登記後跑 `full_deploy()`，發布回 `published`，
+那支 action 仍回 200、跑的是舊程式碼；帶 `confirm_removal=True` 重發也一樣。對照平台原始碼與該 App 的發布快照核實：
+
+- `sync_to_cloud()` 走 PATCH，只新增或覆寫，**不刪遠端檔**；`full_deploy()` 沒有接上既有的 `diff_vfs()`／`delete_remote_files()`
+- 平台判斷 action 能不能被呼叫**只看 VFS 有沒有那個檔**，manifest 沒登記不會擋（`is_enabled` 預設 true）
+- `confirm_removal=true` 只放行 409 `ACTION_REMOVAL`，本身不刪檔；遠端檔沒少，那道守門也不會觸發
+
+變更：
+
+- `scripts/aigo_sync.py`：新增 `remote_only_actions()` 與 `RemoteOnlyFilesError`；`sync_to_cloud()` 加 `on_remote_only` 參數——
+  `"abort"`（**預設**）遠端有本機沒有的 `actions/` 檔時**寫入前中止並列出路徑**、`"keep"` 列出後照常同步。
+  只看 `actions/` 底下：其他路徑有平台注入檔與本機不掃的檔，不拿「本機沒有」當成該刪
+- `scripts/aigo_publish.py`：`full_deploy()` 加同名參數，多一個 `"delete"`——先刪掉遠端殘留再同步。
+  `"delete"` 必須帶 `delete_paths`（用戶確認過的路徑）：只刪清單內的，清單外的殘留保留並列出（回傳 `remote_only_kept`）；
+  清單內混進本機還有的、`actions/` 以外的路徑就整個拒絕。確認之後別人才加的 action 不會被順手刪掉
+  刪除只放在這裡：`sync_to_cloud()` 收到的 `files` 可能只是部分檔案，拿它當本機全貌去刪會誤刪
+- 中止訊息把 `actions/<name>.py` 與其他檔（`manifest.json`、`_shared/` 共用模組）分開列，
+  後者提醒刪掉可能讓其他 action 壞掉；本機完全沒有 `actions/` 檔時另外警告不要整批刪
+- ⚠️ **行為變更**：既有專案只要遠端留著本機沒有的 `actions/` 檔（最常見是起手式的 `actions/summarize_leads.py`），
+  更新後第一次同步會中止。把清單給用戶確認，再用 `full_deploy(on_remote_only="delete", delete_paths=[…])`／`delete_remote_files()` 或 `"keep"`；只同步部分檔案的呼叫端要明確帶 `"keep"`
+- `SKILL.md` Phase 4.1、`troubleshooting.md`（新增「刪掉的 action 還能呼叫」列）、`custom-app-dev-guide.md` §8／§26.2：
+  寫明下架 action 要刪 VFS 檔、改 manifest 無效、`confirm_removal` 不刪檔
+- `tests/test_sync_remote_only.py`：18 條離線測試
+
 ## 1.67.0
 
 ### 產品線判斷先問：專案進正式環境了嗎

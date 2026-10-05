@@ -288,6 +288,13 @@ POST /api/v1/builder/apps/{app_id}/publish
 動態 slug（`ctx.http.call(ep["service"], …)`）掃不到、只記 log；README 與 `actions/manifest.json` 不在掃描範圍。
 起手式殘留見 §26.2；`platform-behaviors.md` §5.2／§5.3 有回應原文。
 
+**下架一支 action 要刪 VFS 檔，改 manifest 無效。** `confirm_removal=true` 只是放行，**本身不刪任何東西**；
+平台判斷 action 能不能被呼叫只看已發布 VFS 有沒有 `actions/<name>.py`，`actions/manifest.json` 沒登記照樣可呼叫
+（沒登記時 `is_enabled` 預設 true；只有公開 webhook 另外要求 manifest 寫 `"webhook": true`）。同步走 PATCH、不刪遠端檔，
+所以「本機刪檔＋拿掉登記＋重新發布」之後那支 action 還在線上。做法：`full_deploy(..., on_remote_only="delete", delete_paths=[用戶確認過的路徑])`
+（或直接 `delete_remote_files()`）刪掉遠端檔 → 發布回 409 `ACTION_REMOVAL` → 用戶確認後帶 `confirm_removal=true` 重發。
+`scripts/aigo_sync.py` 1.68.0 起偵測到遠端有本機沒有的 `actions/` 檔會在寫入前中止（`troubleshooting.md`「刪掉的 action 還能呼叫」列）。
+
 `scripts/aigo_publish.py publish_app()` 三個參數都可帶，並在 POST 前先跑 `egress_preflight()`
 把宣告、字面 slug 與已授權清單對照列出來；409 回來會把 `code` 翻成下一步，**不會自動帶 confirm**。
 
@@ -1569,7 +1576,8 @@ POST /api/v1/builder/apps          （權限：builder.access）
   什麼都沒改直接發布就 409 `EGRESS_NOT_READY`。清示範時 **`actions/summarize_leads.py` 與 `_template.json`
   兩個都要刪**（只刪 action 仍擋；README、`actions/manifest.json` 的殘留不影響閘門）。刪遠端檔用
   `DELETE /builder/apps/{id}/source/files` 帶 `paths` 與 `expected_version`（缺就 400）——`aigo_sync.py` 的
-  `sync_to_cloud()` 只 PATCH 不會刪，本機清掉遠端還在，要用 `delete_remote_files()`。閘門規則與參數見 §8
+  `sync_to_cloud()` 只 PATCH 不會刪，本機清掉遠端還在：`actions/` 底下的用 `full_deploy(on_remote_only="delete", delete_paths=[用戶確認過的路徑])`，
+  `_template.json` 這類其他路徑用 `delete_remote_files()`。閘門規則與參數見 §8
 - 模板會一併 seed 模板定義的自訂表與 Data Reference 引用（起手式兩款不帶）
 - 金鑰**刻意不在建立時收**——建立後由使用者在 Builder「服務」tab **手動**設定：這是人工確認用途與憑證使用的安全步驟，**AI 不代為寫入**（§25.2 人工設定政策）。人工維運用的寫入 API 見 `uat-environment.md` 附錄 A
 - 複製既有 app：`POST /apps/{app_id}/duplicate` → 201
