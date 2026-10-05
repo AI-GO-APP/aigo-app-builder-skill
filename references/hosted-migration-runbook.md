@@ -127,7 +127,7 @@
 3. 依 env 對帳表設定 runtime-settings（**［負責人］**填密鑰值）；要沿用原值的密鑰照 `hosted-apps.md` §4「不可隨手換新」
 4. 有排程的：照 `hosted-apps.md` §2.1 建好轉發鏈的前置——入口 Custom App 與轉發 action、Hosted 的端點與共享金鑰驗證
    （Hosted 必須 `public`，`internal` 會擋掉轉發，見第 2 步）；
-   **外部服務 slug 與 `ctx.secrets` 的金鑰由［負責人］設定**（`custom-app-dev-guide.md` §25.2）。平台排程本身先不建（本檔 §8 第 8 步）
+   **外部服務 slug 與 `ctx.secrets` 的金鑰照 `custom-app-dev-guide.md` §25.2 確認流程設定**（AI 說明目的地與資料、用戶同意後代設；金鑰值由［負責人］填本機檔或自己貼上）。平台排程本身先不建（本檔 §8 第 8 步）
 5. 階段 A 第 5 項的防線（非正式環境沒設就報錯）**先部署到新正式的現行版次**，再 clone 出 UAT
    （`uat-environment.md` §3：clone 帶的是正式版次與正式 env）
 6. 依 `uat-environment.md` 建 UAT（`UAT＝無` 的略過）；資料照本檔 §5。

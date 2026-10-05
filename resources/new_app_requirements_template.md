@@ -141,6 +141,23 @@ Custom App 的 action 是 request/response，沒有 A 的前兩題（平台排�
 - 建表走**兩步命名法**：先用英文實體名當 `display_name` 建，再 `PATCH` 把顯示名改成中文
   ——`dev-rules.md` 規則 18.5、`references/data-center.md` §1
 
+## 六、效果繫結表（從模板起手才填；`references/template-workflow.md` §4）
+
+只在計畫第 1.3 項的模板盤點結論是 (a)／(b) 時填（盤點結論本身寫在計畫，不寫在這裡）。
+每個 I/O 效果一列：有 `_template_meta.json` 的 `effects` 宣告就照宣告列，沒有就從 `aigo_template.py effects <slug>`
+推斷的清單列（自建表、預設表引用、`ctx.http.call` slug、`setup_schema`、其他 `ctx.*` 效果面）。
+
+| 效果 | 預設繫結 | 本次採用 | 落實動作 |
+|---|---|---|---|
+| | | | |
+
+- 「本次採用」∈ `owned_table`／`platform_table`／`http`／`frontend`／`approval`／`messaging`／`knowledge`／`erp`／`none`，
+  或「同預設」；用業務語言問用戶，由 agent 換算
+- **落實動作寫成可執行的步驟**（端點或 code 變更）：`owned_table` → 建表＋登記引用；`http` → 建外部服務、
+  設金鑰（都要先經用戶確認，dev-guide §25.2）；**非預設繫結一律含「改 ports 實作」**（寫出檔案與函式）
+- 每一列的落實動作都要在實作計畫裡有對應項目——表上有、計畫沒有，不得進 Phase 2
+- 第一題先定 `access_mode`（建殼用哪支 starter，建立後不可改），結論抄進下方 app 分配表
+
 ## app 分配表（`product-line-decision.md` §7；計畫確認後照表建 app）
 
 | alias | 產品線（Custom / Hosted） | 模式（模板 slug / visibility） | 負責的功能群 | 拆分理由 |

@@ -157,9 +157,9 @@ APScheduler、框架啟動鉤子裡掛的 loop）在 app 閒置縮到零後就�
 平台排程（App Cron）**只能綁 Custom App 的 action**，不能直接打 Hosted App（`event-triggers.md` §2）。所以：
 
 1. 一支 Custom App（通常就是入口 App）放一支轉發 action，例如 `run_tick`：用 `ctx.http.call(<slug>, …)`
-   打 Hosted 的排程端點，帶共享金鑰 header。**前置同 §5.1**：Hosted 設 `visibility=public`；Hosted 網域由**用戶**
-   在 Builder「外部服務」以同名 slug 建立並授權本 App；共享金鑰由負責人在「服務」tab 設進 `ctx.secrets`——
-   AI 只列出 slug／網域／`key_name`，**不代設**（`custom-app-dev-guide.md` §25.2）
+   打 Hosted 的排程端點，帶共享金鑰 header。**前置同 §5.1**：Hosted 設 `visibility=public`；Hosted 網域以同名 slug
+   建成外部服務並授權本 App，共享金鑰寫進 `ctx.secrets`——AI 先說明 slug、網域、`key_name` 與會送出的資料，
+   用戶同意後由 AI 代設；金鑰的值由負責人填本機檔或自己貼到「服務」tab，不在對話裡傳（`custom-app-dev-guide.md` §25.2 確認流程）
 2. Hosted 那支端點驗金鑰（驗不過就拒絕；§5.1 用 401，`uat-environment.md` §4「金鑰隔離」的預期值照你選的碼）、
    **在這個請求裡**把到期的工作做完、回報每支工作的結果
 3. 平台排程綁這支 action；Hosted 端依**排程給的時間**決定哪些工作到期——轉發 action 把 `ctx.params["scheduled_at"]`（`event-triggers.md` §2.5）
@@ -171,12 +171,12 @@ APScheduler、框架啟動鉤子裡掛的 loop）在 app 閒置縮到零後就�
 
 | 上限 | 值 | 出處 |
 |---|---|---|
-| egress 閘道 `timeout_ms` | 預設 10 秒，**最高 30 秒**；要調高請**用戶**在 Builder「外部服務」改（AI 不代設） | `custom-app-dev-guide.md` §25.4 |
+| egress 閘道 `timeout_ms` | 預設 10 秒，**最高 30 秒**；要調高屬於修改外部服務，照 §25.2 確認流程先取得用戶同意再改 | `custom-app-dev-guide.md` §25.4 |
 | 轉發 action 的 manifest `timeout_ms` | 生效值＝min（自己的值, 120 秒 ceiling）；要設得**比 egress 的 `timeout_ms` 大**（例如 35000），否則它先斷 | `custom-app-dev-guide.md` §7、`event-triggers.md` §2.6 |
 | 排程 action 執行上限 | **120 秒** | `event-triggers.md` §2.6 |
 | Hosted 單一請求 | 300 秒 | §2 |
 
-經 egress 轉發時，天花板＝那支外部服務的 `timeout_ms`（**預設 10 秒**，最高 30 秒；要拿滿 30 秒得請用戶調整，計畫裡寫明）。
+經 egress 轉發時，天花板＝那支外部服務的 `timeout_ms`（**預設 10 秒**，最高 30 秒；要拿滿 30 秒得調高該服務的 `timeout_ms`（先經用戶同意），計畫裡寫明）。
 Hosted 端的預算＝該值 − 冷啟動 − 往返裕度，用完就停手、把剩下的留給下一次 tick。
 
 **冷啟動要算進去**：實例在最後一個請求後要等一段平台內部延遲才縮到零（目前約 15 分鐘，**不是契約**）。
@@ -537,15 +537,17 @@ Hosted App 容器**只帶平台注入的 `AIGO_*`**，原系統的 env 一顆都
    清單只放目標位置是 runtime-settings、處置不是不搬／退役的列；`--a <prod-id> --b <uat-id>` 比兩個 app，
    列出兩邊值相同的 key。只打 GET、不印值）
 3. **把「尚缺」逐顆列給用戶**，說明缺了哪個功能會壞，請負責人到對應位置設定（Hosted：「環境變數」tab）。
-   遷入與其 UAT 的密鑰值一律**由負責人設定**；AI 只提供設定規格、盤點與驗證，**不代填密鑰**、
-   值不在對話裡傳（人工設定政策）。尚缺未清空時，只能給**進度／阻塞說明**（列出缺項與影響），
+   遷入與其 UAT 的密鑰**值**一律由負責人提供：填進本機檔（600、不進 git）由 AI 讀檔寫入（只限 Custom App 的 `ctx.secrets`，
+   用 `scripts/aigo_secrets.py set`）、或自己到設定頁貼上；**Hosted env 的密鑰一律由負責人在「環境變數」tab 設**——
+   `PUT runtime-settings` 是全量替換，等於經手所有密鑰值，AI 不代做；
+   AI 不向人要值、不自己編值，值不在對話裡傳、不印出（dev-guide §25.2 確認流程）。尚缺未清空時，只能給**進度／阻塞說明**（列出缺項與影響），
    **不得對外交付、不得回報遷入完成**
 4. **驗證**：依 `env_availability` 分開——`runtime` 等滿傳播窗後驗（§3.4「只改 env」列）；
    **`build`／`both` 要設定後重新建置部署**（改設定不會觸發重建，舊 bundle 裡還是舊值），
    確認 version marker，並驗證瀏覽器實際拿到新值。每列的「用途」都實際跑一次——排程類手動觸發一次、
    看**工作本身的執行結果**，不是平台排程的「成功」
 
-**Custom App 線**同樣要盤點、對帳，但落點不同：後端密鑰由負責人在 Builder「服務」tab 設定、
+**Custom App 線**同樣要盤點、對帳，但落點不同：後端密鑰照 dev-guide §25.2 寫入（值由負責人填 600 本機檔、AI 用 `aigo_secrets.py set`，或負責人自己貼到 Builder「服務」tab）、
 action 以 `ctx.secrets` 讀取（Builder 沒有 runtime-settings 這支 GET，已設與否在「服務」tab 核對，
 `custom-app-dev-guide.md` §26、§28）；前端公開設定與打包時注入的值另列落點與驗證方式，不套用上面的 Hosted GET。
 
@@ -639,7 +641,7 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
   302、fetch 401 `hosted_app_auth_required`），Server Action 端看到的是 401／HTML，不是資料
 - **app 自驗簽章**：Custom 端把共享金鑰存 `ctx.secrets`，action 自組 `Authorization: Bearer …`
   （egress 閘道原樣轉送 `Authorization`，dev-guide §25）；Hosted 端每個請求驗證，驗不過 401
-- Hosted 的網域要先由**用戶**在 Builder「外部服務」以同名 slug 建成 egress 白名單，AI 列出 slug 與網域交給用戶，不代設（SKILL.md 計畫第 4.6 項、dev-guide §25.2 人工設定政策）
+- Hosted 的網域要先以同名 slug 建成 egress 外部服務並授權本 App：AI 說明 slug、網域與會送出的資料，用戶同意後由 AI 建立（SKILL.md 計畫第 4.6 項、dev-guide §25.2 確認流程）
 - **使用者身分由 Custom 端帶**：action 內用 `ctx.user_id`／`ctx.user_permissions` 分流後，把需要的
   身分欄位放進 request body；Hosted 不自行認人、不另建使用者表
 - 前端**不要**跨來源直打 Hosted：帶憑證的 CORS 平台不支援（proxy 只處理同站 cookie）
