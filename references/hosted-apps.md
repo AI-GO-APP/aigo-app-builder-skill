@@ -438,7 +438,7 @@ Custom App 線每次變更都要過 SKILL.md Phase 4.2 的驗證閘門；Hosted 
 | **常駐設定**（首次部署、改 runtime-settings、接手既有 app 的第一次驗證都要做） | — | ① `GET /{id}/runtime-settings` 讀回 `always_on`，**必須等於 §3.0 的決策**（沒過閘＝`false`）② 讀到 `true` 就要拿得出計畫裡那句「常駐＝開，理由 X；退場條件 Y」，拿不出來視同未通過 |
 | **程式碼變更**（deploy／redeploy） | 建置完成 | ① `deployments/{id}` 狀態 `active`（不是 `queued`／`building`／`failed`／`superseded`）② **version marker**：回應帶得到本次版本識別 ③ 主要路由各打一次拿 200 ④ `runtime-logs` **看得到請求進來**——pod `Running`、框架顯示 Ready 卻整段沒有請求 = 探針連不上（§2 綁定介面陷阱）。⚠️ **生產模式不逐筆印請求的框架**（Next standalone 即是，某遷入案 2026-09-22 實踩）拿不到這個證據：④ 改由**回應**舉證——version marker ＋ 一個「非打到資料層生不出來」的動態內容，兩者都要，不可用「日誌沒錯誤」交差 |
 | **首次部署／遷入既有系統** | 同上 | 上列全部（**含常駐設定列**）＋ §4「遷入 env 清單」**對帳表的「尚缺」清空**（未清空＝只能給進度／阻塞說明、列出缺項與影響，不得交付）＋ 持久化落點（§7：容器檔案不持久，資料要落平台）＋ 取平台資料的路徑（§5：容器內要 `/open` 前綴、隨附整合要加引用） |
-| **自訂網域** | DNS／憑證 | `POST /{id}/domains/{domain_id}/verify` 走到 `active`（§9；**session-only，Deploy Token 打不了**），再用**該網域**重跑一次主要路由，不是只驗 `*.ai-go.app` |
+| **自訂網域** | DNS／憑證；轉 `active` 後再等 **1–2 分鐘**（§9 步驟 5） | `POST /{id}/domains/{domain_id}/verify` 走到 `active`（§9；**session-only，Deploy Token 打不了**），再用**該網域**重跑一次主要路由，不是只驗 `*.ai-go.app`；憑證 subject 要是該網域 |
 
 **驗證後決策**：
 
@@ -955,15 +955,86 @@ Hosted App 讓其他 App 打 HTTP 過去——這是明文禁止的反模式，�
 
 ## 9. 自訂網域（session-only）
 
+> 核對自平台原始碼（`schemas/hosted_app.py`、`hosted_app_domain_service.py`、`hosted_app_domain_sweep.py`），
+> 2026-10-09 prod 與 UAT 各以一個子網域實打「綁定 → 設 DNS → `active`」整條。標「實測」的時間數字原始碼核不到。
+> 以下端點**全部 session-only**：Deploy Token 打會 403「Deploy Token 不可管理自訂網域，請從 Dashboard 操作」。
+
 ```
-POST /{id}/domains {domain, kind: bind|redirect|gateway}
-  → 回 records[]（要設的 DNS 記錄）→ 用戶去 DNS 商設定
-POST /{id}/domains/{domain_id}/verify   → pending_dns → pending_cert → active
+POST /{id}/domains {"hostname": "app.example.com"}      → 201，status=pending_dns，帶 records[]
+  （body 欄位是 hostname，不是 domain；kind 預設 bind）
+GET  /{id}/domains                                        → 列出本 App 的網域與目前 records[]／status
+POST /{id}/domains/{domain_id}/verify                     → 立即探測一次
+DELETE /{id}/domains/{domain_id}                          → 202，轉 releasing（⚠️ 目前會卡住，見末段）
 ```
 
-- 不可用 `ai-go.app` 樹、不支援萬用字元、不可含路徑或埠號
-- 要先有 active 版次才會啟用（「版次轉為運行中後才會啟用自訂網域」）
-- 「平台憑證名額已滿，請聯絡管理員」= ACM 憑證容量（平台側上限），不是你的配額
+**`kind`**：`bind`（預設，指向本 App）／`redirect`（轉址，必帶 `https://` 開頭的 `redirect_url`）。
+送 `gateway` 回 **422「請改用 Gateway API 建立網域」**——多 App 共用一個 hostname 走
+`/api/v1/hosted-app-gateways`，不是這支。
+
+**hostname 規則**：會被拒（422）的有平台網域樹（`ai-go.app`、`uat-ai-go.app` 及其子網域）、單一 label（如 `localhost`）、
+IP、萬用字元、含路徑或埠號。hostname **全平台唯一**：已綁在別的 App（含別的租戶）回 **409 `DOMAIN_HOSTNAME_TAKEN`**。
+一個 App 可以綁多個網域；平台網址 `{slug}.deploy.ai-go.app` 照常可用，兩個網址並存。
+
+**前提**：App 要有 `active` 版次。沒有時狀態停在 `pending_cert`，`error_message`＝「版次轉為運行中後才會啟用自訂網域」。
+
+#### 步驟 1–2：建立綁定、取得 DNS 記錄
+
+`records[]` 依網域型態不同（**憑證驗證記錄與流量記錄是分開的兩筆**，可以分開加，切換法見 `hosted-migration-runbook.md` §7）：
+
+| 網域型態 | 要加的記錄 |
+|---|---|
+| **子網域**（`app.example.com`，建議） | ① 流量 CNAME：`app.example.com` → `{slug}.deploy.ai-go.app` ② 憑證驗證 CNAME：`_xxxx.app.example.com` → `_yyyy.….acm-validations.aws` |
+| **根網域**（`example.com`） | ① 流量 **ALIAS**（DNS 商要支援 ALIAS／ANAME 或 CNAME Flattening）② 所有權 TXT：`_aigo-verify.example.com`（值與租戶綁定；**僅 UAT**，見下方部署落差）③ 憑證驗證 CNAME |
+| 平台判定不了（查不到 SOA；僅 UAT） | CNAME 與 ALIAS 並列（同一個目標），照 DNS 商能力擇一；也會帶所有權 TXT |
+
+- 憑證驗證 CNAME 剛建立時 `name`／`value` 是 `null`，**約 10 秒後**（實測）再 `GET …/domains` 或 `verify` 才會出現
+- ⚠️ **部署落差**（2026-10-09，prod＝v1.16.2）：prod 的回應**沒有** `dns_classification`／`dns_zone_name`，改帶 `is_apex`，
+  而且只用「兩段＝根網域」判定（`example.co.uk` 這類會被當成根網域）；**prod 沒有所有權 TXT**。UAT 跟 main，有上述兩項。
+  子網域 CNAME 綁定兩邊行為一致、都實測過。發版後拿掉這條
+
+#### 步驟 3：到「實際負責 DNS 的地方」加記錄
+
+- **看名稱伺服器，不看網域在哪註冊**：`nslookup -type=NS example.com 8.8.8.8`。網域在 A 註冊、NS 指到 B，記錄就要加在 B；
+  加在 A 不會生效，狀態會一直停在 `pending_dns`
+- **Cloudflare：每一筆都設 Proxy status＝DNS only（灰雲）**。開橘雲時解析出來的是 Cloudflare 的 IP，平台看不到指向，
+  會**永遠停在 `pending_dns`**。Name 欄只填前綴（`app`、`_xxxx.app`），TTL 用 Auto
+- 加完自己確認：`nslookup -type=CNAME app.example.com 1.1.1.1` 要回 CNAME，不是 IP
+
+#### 步驟 4：探測直到 `active`
+
+平台每分鐘自動探測一次，不按 `verify` 也會前進；`verify` 同步最多約 3 秒（實測）。
+
+| 狀態 | 意義 | 處置 |
+|---|---|---|
+| `pending_dns` | 流量記錄還沒指對；根網域則也可能是所有權 TXT 缺／錯（看 `error_message`） | 回步驟 3 |
+| `pending_cert` | 流量已指對，等憑證簽發 | 等；`error_message` 是「版次轉為運行中後才會啟用自訂網域」＝App 沒有 `active` 版次 |
+| `active` | 已生效 | 步驟 5 |
+| `failed` | 「憑證驗證失敗或逾時」（驗證記錄 **72 小時**內沒加好）、「平台憑證名額已滿，請聯絡管理員」（平台側憑證容量，不是你的配額）、無權限 | **逾時那種無法自行恢復**：同一筆綁定不會重新申請憑證，補記錄也沒用，要解除重綁——而解除目前會卡住（末段），所以回報平台。名額已滿會被背景探測持續重試，名額釋出後可能自己恢復。**建綁定後當天就加驗證記錄** |
+| `releasing` | 解除中 | ⚠️ 目前會卡住，見末段 |
+
+實測：DNS 加好後約 **5 分鐘**轉 `active`（2026-10-09，prod、UAT 各一次）。
+
+#### 步驟 5：用自訂網域本身驗收
+
+```
+curl -sSI https://app.example.com/
+echo | openssl s_client -connect app.example.com:443 -servername app.example.com 2>/dev/null | openssl x509 -noout -subject
+```
+
+- 憑證 subject 要是 `CN = app.example.com`；`http://` 會 301 到 `https://`
+- ⚠️ **轉 `active` 後約 1 分鐘內**（實測），連線可能還拿到平台萬用憑證 `*.deploy.ai-go.app`，瀏覽器／curl 報憑證名稱不符。
+  等 1–2 分鐘再驗，**不要當成失敗**
+- internal App 在兩個網址各要登入一次（session cookie 綁 host）
+- 接著照 §3.4「自訂網域」列：用該網域重跑主要路由；OAuth redirect URI 加上這個網域
+
+#### ⚠️ 已知問題：解除綁定卡在 `releasing`（2026-10-09，prod 與 UAT 都可重現）
+
+`DELETE` 回 202、轉 `releasing` 後，背景清理每一輪都失敗，`error_message` 一直是「解除綁定尚未完成，將自動重試」；
+網域不會從列表消失，**該 hostname 也無法再綁到任何 App**。平台已開票處理。修好前：
+
+- **不要用「先綁、解除、再綁」試錯**：綁之前先定案 hostname、子網域或根網域、要綁哪個 App
+- 綁錯了回報平台，不要反覆重試 `DELETE`
+- 要試流程就用一次性的子網域（如 `aigo-test-YYYYMMDD.example.com`），不要拿正式要用的名字試
 
 ## 10. 錯誤碼對照（★ 分清「重試會好」與「不會好」）
 
@@ -984,6 +1055,11 @@ POST /{id}/domains/{domain_id}/verify   → pending_dns → pending_cert → act
 | 「Knative Service 未能就緒…ksvc ready 逾時（2m0s）」但 runtime-logs 顯示 Ready | 框架綁到 pod 名稱不綁 loopback | `ENV HOSTNAME=0.0.0.0`（§2 綁定介面陷阱）；訊息裡的「未聽 PORT」是錯方向 |
 | 容器內打 `/api/v1/data-center/...` 回 401 `Invalid authentication token` | 路徑少了 `/open` 前綴 | 改 `/api/v1/open/data-center/...`（§5），不是憑證問題 |
 | `/open/proxy/{table}` 403「App 未被授權存取表」 | 整合尚未引用該預設表 | `POST /refs/apps/{整合 id}` 或 UI 加引用（§5），立即生效 |
+| 409 `DOMAIN_HOSTNAME_TAKEN`「此網域已被使用」（`POST /{id}/domains`） | hostname 全平台唯一，已綁在別的 App（含別的租戶）；也可能是自己解除後卡在 `releasing` 的那筆 | 重試無用；查是誰綁的，或換 hostname（§9） |
+| 422「請改用 Gateway API 建立網域」 | `POST /{id}/domains` 送了 `kind: gateway` | 改走 `/api/v1/hosted-app-gateways`（§11 末） |
+| 422（`POST /{id}/domains`，訊息提到 hostname） | body 欄位寫成 `domain`，或 hostname 是平台網域／IP／萬用字元／單一 label | 欄位是 `hostname`；換成自己的網域（§9） |
+| 自訂網域一直停在 `pending_dns` | 記錄加錯地方（看 NS 不看註冊商）、Cloudflare 開了橘雲、根網域缺所有權 TXT | §9 步驟 3 逐項查 |
+| 自訂網域解除後一直是 `releasing`、「解除綁定尚未完成，將自動重試」 | 平台已知問題（2026-10-09） | 不要重試 `DELETE`；回報平台（§9 末段） |
 
 ## 11. API 端點速查（前綴 `/api/v1/hosted-apps`）
 
