@@ -70,6 +70,7 @@
 | **Hosted App 搬進來後排程完全不跑／偶爾少跑一次，沒有錯誤** | 不跑：排程器寫在容器裡（`setInterval`／node-cron），縮到零就停——改成平台排程 → 轉發 action → Hosted 端點；少跑：工作在「先回 202、背景跑」或佔用列沒有到期時間，實例被終止後那格永遠不重跑；冷啟動吃掉 egress 的 `timeout_ms`（預設 10 秒），action 回 `timeout`（排程分頁顯示 `timeout`（錯誤色），但不計入連續錯誤、不會暫停，下一發成功就蓋掉）；排程漏跑只補一次、不逐格補（`event-triggers.md` §2.9）。另核 DB 裡的排程總開關 → `hosted-apps.md` §2.1 |
 | **平台排程顯示成功，但工作其實沒做成** | 平台的成功只代表轉發 action 有回應；看 Hosted 端的執行結果表／健康檢查。轉發 action 是否吞錯誤要刻意決定 → `hosted-apps.md` §2.1 |
 | **Hosted App 使用者「登入後一半請求變未登入」、in-process 佇列處理一半消失** | max-scale 2、無 sticky session，行程內狀態不跨實例。session／佇列／快取落平台的表或 `/data` → `hosted-apps.md` §2 |
+| **Hosted App 自訂網域一直停在 `pending_dns`** | 依序查：① 記錄加在**名稱伺服器**那邊，不是註冊商（`nslookup -type=NS <網域> 8.8.8.8`）② Cloudflare 每筆都要灰雲（DNS only），橘雲會解析成 Cloudflare IP ③ `nslookup -type=CNAME <網域> 1.1.1.1` 要回 CNAME 不是 IP ④ 根網域看 `error_message` 是否缺所有權 TXT（僅 UAT）。轉 `active` 後 1–2 分鐘內報憑證名稱不符是正常的。**不要解除重綁試錯**——解除目前會卡在 `releasing` → `hosted-apps.md` §9 |
 | **Hosted App 沒人用卻一直有實例在跑** | `always_on` 被開了。照 `hosted-apps.md` §3.0 決策閘問一次業務問題，皆否就 `PUT runtime-settings` 關掉（五欄一起送） |
 | **匯入 job `completed` 但 `imported_count: 0`，`sources[].status: "parked"`、無錯誤訊息** | 目標是自建表（`self_built_table`／`new_table`）——prod 的 import-worker 沒有 tier-3 旗標，靜默 park（API 回的 `tier3_write_enabled: true` 是另一顆 pod 的值）。改走本地腳本逐筆寫自建表；**已回報平台（2026-09-08）**，不必重複開單 → `data-operations.md` §5 |
 | **匯入 job `failed`、每列「寫入失敗：必填欄位缺值（非空約束）」** | 目標預設表的必填欄沒對到來源欄——定稿前看 mapping 回應的 `table_required_columns`；已定稿改不了（PUT／retarget 409），補欄後重新上傳。CHECK 值域用 `aigo_data.py meta table` 查 → `data-operations.md` §5 |

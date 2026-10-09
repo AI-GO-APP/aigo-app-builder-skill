@@ -1,3 +1,28 @@
+## 1.70.0
+
+### 修正：Hosted App 自訂網域的請求欄位寫錯；補上綁定到生效的完整流程與解除卡住的已知問題
+
+對應 skill issue #119。內容對照平台原始碼（main 與 prod 的 v1.16.2 tag）核過；2026-10-09 在 prod 與 UAT 各用一個子網域實打整條流程。
+
+**改正**（`references/hosted-apps.md` §9）
+- `POST /{id}/domains` 的 body 欄位是 **`hostname`**，不是 `domain`——照舊寫法送一定 422
+- `kind` 只收 `bind`／`redirect`（`redirect` 要帶 `https://` 的 `redirect_url`）；`gateway` 回 422「請改用 Gateway API 建立網域」
+- 狀態除了 `pending_dns → pending_cert → active`，還有 `failed` 與 `releasing`
+
+**補上**
+- §9 改寫成五步：建立綁定 → 依網域型態看 `records[]`（子網域 CNAME／根網域 ALIAS＋所有權 TXT／判定不了兩者並列）→
+  到名稱伺服器那邊加記錄（看 NS 不看註冊商、Cloudflare 一律灰雲）→ 探測到 `active`（狀態表）→ 用自訂網域本身驗收
+- 實測時間：DNS 加好後約 5 分鐘 `active`；轉 `active` 後約 1 分鐘內還會拿到平台萬用憑證，不要當成失敗（§3.4 自訂網域列同步）
+- 憑證驗證 72 小時沒過會轉 `failed`，而且**同一筆不會自己恢復**（不會重新申請憑證）——建綁定當天就要加驗證記錄
+- ⚠️ 已知問題：解除綁定會一直卡在 `releasing`，hostname 也無法再綁。修好前不要用「綁、解除、再綁」試錯
+- ⚠️ 部署落差：prod（v1.16.2）沒有 `dns_classification`／所有權 TXT，根網域只用「兩段」判定；UAT 有
+- §10 錯誤碼表補 409 `DOMAIN_HOSTNAME_TAKEN`、兩種 422、一直 `pending_dns`、卡在 `releasing`；`troubleshooting.md` 補「一直 `pending_dns`」一列
+
+**搬遷切換**（`references/hosted-migration-runbook.md` §7、`migration-workflow.md`）
+- 「憑證驗證記錄與流量記錄是否分開」改為已核實（分開的兩筆），拿掉「先問平台」
+- 補「先簽憑證、切換當下才改流量」的做法：凍結時段只算兩三分鐘＋TTL。依原始碼推得、**尚未實測**，要保留退路
+- 改正舊說法：先簽憑證時狀態會停在 `pending_dns`，`pending_cert` 要流量指對才會出現，不能拿它當「憑證已簽好」的訊號
+
 ## 1.69.0
 
 ### 模板當素材、Phase 1.5 加模板盤點與效果繫結；AI 可代設外部服務與金鑰（先確認再動手）
