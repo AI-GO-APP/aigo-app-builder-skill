@@ -1,3 +1,28 @@
+## 1.72.0
+
+### 前端資料畫面要做完四態（載入中／有資料／空資料／錯誤），送出中要鎖按鈕
+
+原本只有「啟動先渲染 skeleton」一條（為了避開平台 8 秒空渲染偵測），換頁、篩選、送出時的載入中與錯誤畫面都沒有規範，
+新專案範本的頁面也沒有抓資料的寫法可以照抄。
+
+**核心規則 30 擴大**（`references/dev-rules.md`、`SKILL.md` 速查表）
+- 每一個會抓資料的畫面（換頁、切篩選、翻頁、重新整理、開明細都算）都要明確處理載入中／有資料／空資料／錯誤
+- 載入中不沿用舊資料；空資料不和載入中共用畫面；錯誤要渲染出來並給「重試」，不能只 `console.error`
+- 送出中按鈕停用、回應回來才解鎖——命中簽核時連點兩下就是兩筆記錄＋兩張簽核單（規則 24）
+
+**寫法**（`references/custom-app-dev-guide.md` §30，新）
+- 哪些畫面要做與常見漏法、四態分法（`runAction` 失敗會 throw `Error`，已對照平台 SDK 模板）、丟掉過期回應、
+  送出中與簽核 pending 的處理、共用元件 `DataState`、交付前自查清單
+- §17 常見問題補「停在載入中／一進頁面就沒有資料」與「按一次建出兩筆」兩列；`platform-behaviors.md` §11 指向 §30
+
+**新專案腳手架**（`scripts/aigo_scaffold.py`）
+- 新增 `src/components/DataState.tsx`；`App.css` 補 `.skeleton`、`.state-box`、`.state-error`、`.btn:disabled`、`.sr-only`
+- `DashboardPage` 改成四態示範（資料來源留 TODO），單頁與多頁範本都通過 `aigo_typecheck.py`
+- 新增 `tests/test_scaffold.py`
+
+**驗證**（`references/verification-details.md`、`SKILL.md` 驗證流程快速參照）
+- Phase 5 新增第 10 項「資料畫面四態與送出中」：在瀏覽器實開逐頁看，API 層驗證全綠也測不出這一項
+
 ## 1.70.0
 
 ### 修正：Hosted App 自訂網域的請求欄位寫錯；補上綁定到生效的完整流程與解除卡住的已知問題

@@ -105,4 +105,9 @@ verify_server_action(base_url, token, app_id, action_name, params)
      （平台鎖的，`locked_reason: "messaging_trigger"`），不算違反——兩個欄位要一起讀，
      只看 `always_on` 會誤判成冷啟動
 
+10. **資料畫面四態與送出中**（每次里程碑必做；核心規則 30）— 在瀏覽器實開測試網址，逐頁照
+   `custom-app-dev-guide.md` §30.5 的清單看一次：啟動不是空白、每個抓資料的畫面看得到載入中／空資料／錯誤
+   （錯誤可把 action 名稱暫改錯或斷網試）、換篩選時舊資料會清掉、送出按鈕送出中會停用。
+   API 層的驗證（第 1–5 項）全綠也測不出這一項——它只看得到回應，看不到畫面
+
 可使用 `scripts/aigo_e2e.py` 和 `scripts/aigo_runtime_verify.py`。
