@@ -1,21 +1,18 @@
 """Offline contracts for shared rules and their on-demand reference index."""
 import json
 import re
+import sys
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'scripts'))
+from builder_entry import extract_shared_rules
+
 BEGIN = "<!-- shared-rules:begin -->"
 END = "<!-- shared-rules:end -->"
 TOPICS = {"hashrouter", "protected_sdk", "python_action", "data_reference", "shadow_dom"}
-
-
-def extract_shared_rules(text: str) -> str:
-    """Return the content between the shared-rules markers."""
-    begin = text.index(BEGIN) + len(BEGIN)
-    end = text.index(END, begin)
-    return text[begin:end].strip()
 
 
 def parse_reference_index(text: str) -> list[dict[str, str]]:

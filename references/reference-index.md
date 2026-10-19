@@ -37,3 +37,8 @@
 
 Builder 入口不載入 `SKILL.md` 的 Phase -1 自我更新、Phase 1 憑證與工作區設定，
 也不載入 `scripts/` 的任何腳本；這些由 Builder 端的 ContextSnapshot 與操作契約取代（T14 實作）。
+
+## Builder 入口
+
+入口模板：[builder/ENTRY.md](../builder/ENTRY.md)，由知識包載入。
+展開器：[scripts/builder_entry.py](../scripts/builder_entry.py) 的 `render_entry(root)` 將共用規則 include 展開；供 CLI／知識包產生器使用，模型不執行腳本。
