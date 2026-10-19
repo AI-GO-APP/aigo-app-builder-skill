@@ -218,6 +218,7 @@ Custom 過 `custom-app-dev-guide.md` §28.1（答案幾乎一律是「關」，�
 
 ## Phase 3：開發指引
 
+<!-- shared-rules:begin -->
 ### 核心規則（必須嚴格遵守）
 
 1. **框架**：React 18 + TypeScript
@@ -303,6 +304,7 @@ import { runAction, downloadFile } from "../action";
 const { data, file } = await runAction("my_action", { key: "value" });
 if (file) downloadFile(file);
 ```
+<!-- shared-rules:end -->
 ## Phase 4：部署 + 自動驗證（★ 每次 code 變更後必須執行）
 
 > **原則：每次 code 變更後，都必須完成「同步 → 編譯 → 驗證」循環。**
@@ -477,11 +479,10 @@ timeout／連不出去＝raw `httpx` 直連（改 `ctx.http.call`）或 slug 沒
 | 檔案 | 內容 |
 |------|------|
 | `CONTEXT.md` | ★ 術語表——預設表／自建表兩大類＋四個機制詞（含稱謂對照與禁用詞：舊稱 SaaS 表與外部產品名都不出現） |
+| `references/reference-index.md` | 外部 IDE 與 Builder 共用的參考章節索引：逐檔標示用途、載入時機、入口與資料邊界 |
 | `references/dev-rules.md` | **Phase 3 規則 18–34 的完整版**（資料雙軌分流、自建表命名、app_domain、冪等、排程限制、角色沿用、簽核攔截、分頁排序、時間、租戶網址、skeleton、builder.access 破口、Hosted 不承載 DB 與外接庫的唯一例外、UAT 結論、即時撤權）——主檔只有速查表，動手前讀原文 |
-| `references/planning.md` | **Phase 1.5 的完整版**：§1.0 四問的理由與選項、計畫十二項逐項展開、閘門七條的理由與踩坑紀錄 |
-| `references/template-workflow.md` | **Phase 1.5 §1.0.5 模板盤點與「模板當素材」動線**：查詢端點與 slug 前綴分類、a／b／c 結論、`preview` 取碼與效果清單、效果繫結表、starter 建殼與自行 provision、端點權限表 |
-| `references/environment.md` | **Phase 1 的完整版**：租戶網址規則的推導與 401 同形成因、三層模型、`config.json` schema 2 與 `base_url` 三層來源、設定六步、憑證規則 |
-| `references/review-workflow.md` | **Phase 0 的完整版**：九步各自打哪個端點、Review 報告要列什麼、哪些情況標「必改」 |
+| `references/planning.md`<br>`references/template-workflow.md` | **Phase 1.5 的完整版**：§1.0 四問的理由與選項、計畫十二項逐項展開、閘門七條的理由與踩坑紀錄；**Phase 1.5 §1.0.5 模板盤點與「模板當素材」動線**：查詢端點與 slug 前綴分類、a／b／c 結論、`preview` 取碼與效果清單、效果繫結表、starter 建殼與自行 provision、端點權限表 |
+| `references/environment.md`<br>`references/review-workflow.md` | **Phase 1 的完整版**：租戶網址規則的推導與 401 同形成因、三層模型、`config.json` schema 2 與 `base_url` 三層來源、設定六步、憑證規則；**Phase 0 的完整版**：九步各自打哪個端點、Review 報告要列什麼、哪些情況標「必改」 |
 | `references/custom-app-dev-guide.md` | 核心 API 規格與架構理念；**§6.0 SDK 依模式分流表**、**§29 四條存取通道端點總表（internal／external／匿名／open）**、**§15.1 匿名存取的平台核可三態**、§12 Storage 坑表、**§27 租戶資料存取規則（Auth gate：403 帶 `reason` 的來源）**、§28 冷啟動／常駐（`always_on`）＋**§28.1 Custom 線常駐決策閘（預設關）** |
 | `references/data-center.md` | 自建表完整規格（型別、配額、權限、SDK）＋ 延伸欄位（§10） |
 | `references/default-table-lookup.md` | **判「平台有沒有同語意實體」時（Phase 1.5 第 3 項、遷入 §2.4 每張表必查）**：業務語言→預設表速查、表名前綴讀法、Meta 面↔引用面對照、必填欄與唯讀表、遷入常見誤判 |
@@ -493,8 +494,7 @@ timeout／連不出去＝raw `httpx` 直連（改 `ctx.http.call`）或 slug 沒
 | `references/uat-environment.md` | **規則 33 的做法**：UAT 結論怎麼下、`version-test` 為何不算、鏡像拓撲、`-uat` 命名、獨立資料庫與憑證、clone Hosted 的正式設定窗口與可見度重設、egress／secrets／Open Proxy 引用、只補測試者、驗證表、維運與退場 |
 | `references/verification-details.md` | **要執行驗證時**：四項驗證的完整定義、Phase 5 里程碑 |
 | `references/troubleshooting.md` | **出錯時**：錯誤速查表 |
-| `references/pre-report-self-grill.md` | **回報平台問題前（必走）**：預設平台正確、六輪自審排除樹、送出條件、已排除清單 |
-| `references/issue-reporting.md` | **回報平台問題時**：BDD 撰寫規範、指令、進度追蹤 |
+| `references/pre-report-self-grill.md`<br>`references/issue-reporting.md` | **回報平台問題前（必走）**：預設平台正確、六輪自審排除樹、送出條件、已排除清單；**回報平台問題時**：BDD 撰寫規範、指令、進度追蹤 |
 | `references/platform-behaviors.md` | **實測行為補遺**：DB Proxy 分頁與筆數上限、`custom_data` 不可伺服器端過濾、TIMESTAMP 格式、seed 表唯讀、`ctx.erp` 白名單、**app 執行期網址總表（§6.2：internal／external × 正式／測試）**、深連結與「找不到此應用」三層（§6.2）、空渲染偵測、API 權限閘（app 軸；人軸見 dev-guide §27） |
 | `references/hosted-apps.md` | **Hosted App（「自訂 App」）產品線**：與 Custom App 的邊界、應用形狀硬規則、部署 API、**部署後驗證閘門（§3.4＝Phase 4.2 的等價物）**、env 規則、錯誤碼對照——Phase 1.5 判斷走這條線或混合方案時讀 |
 | `references/data-operations.md` | **資料操作模式（不開發 app）**：四條使用者身分資料面與權限閘、**寫入閘門（§3.5，正式資料不可逆）**、模組 REST 慣例、匯出白名單、Meta 值域、出錯與回報出口（§7）——源頭意圖判成「資料操作」時讀 |

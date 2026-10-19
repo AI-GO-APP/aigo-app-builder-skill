@@ -4,6 +4,21 @@
 
 ---
 
+## 資料結構與業務資料：邊界
+
+**資料結構**是表、欄位、資料引用、權限、外部服務、排程的定義；包含自建表定義、
+預設表欄位、Data Reference 登記、角色與 app 存取設定、外部服務與金鑰名稱、排程設定。
+定義與操作規格依工作需要載入 `references/data-center.md`、`references/event-triggers.md` 等章節。
+
+**業務資料**是表內記錄與個資；包含所有預設表／自建表記錄、成員個資，以及金鑰值。
+業務資料不自動讀取，任何寫入都必須先向用戶具體說明目標、內容與影響並取得確認；
+操作閘門見 `references/data-operations.md`。
+
+IDE 入口由開發者自行用腳本讀取；Builder 入口只自動取得平台 ContextSnapshot 的資料結構摘要，
+且 status 不是 `ready` 的 scope 不能當成不存在。Builder 不自動讀取業務資料。
+
+---
+
 ## 資料承載體：六個詞，別混用
 
 > 分流決策的 SSOT 在 `references/custom-app-dev-guide.md` §19；本節只管「詞是什麼」。
