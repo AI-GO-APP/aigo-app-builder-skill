@@ -262,7 +262,7 @@ Custom 過 `custom-app-dev-guide.md` §28.1（答案幾乎一律是「關」，�
 | 27 | **`ctx.erp.validate_picking` 的冪等要看明細，不能看單據 state** | ★ 強制 |
 | 28 | **原生 TIMESTAMP／DATE 是 offset-naive 的 UTC，解析前必須補 `Z`** | ★ 強制；⚠️ 靜默出錯 |
 | 29 | **所有 API 一律走租戶空間 `https://[tenant].ai-go.app/*`** | ★ 強制 |
-| 30 | **啟動先渲染 skeleton，不要讓長 API 擋住首次渲染** | ★ 強制 |
+| 30 | **資料畫面要做完四態（載入中／有資料／空資料／錯誤），送出中要鎖按鈕；啟動先渲染 skeleton** | ★ 強制 |
 | 31 | **Internal app 前端禁止直呼自建表 SDK** | ★ 強制 |
 | 32 | **禁止以 Hosted App 承載資料庫或 storage** | ★ 強制 |
 | 33 | **每支要上正式的 app 都要有一個「UAT 結論」** | ★ 強制 |
@@ -419,6 +419,7 @@ if (file) downloadFile(file);
     （Builder 線沒有 `GET /runtime-settings`），必須等於計畫那列的結論；寫「開」才在 publish 後
     `PATCH .../runtime-settings {"always_on": true}` 並確認回 `effective_mode: "always_on"`
   + 交付連結實開（照 `platform-behaviors.md` §6.2 組**正式版**網址，用非開發者帳號／external 使用者開一次；`verification-details.md` 第 8 項）
+  + 資料畫面四態實看（規則 30；`custom-app-dev-guide.md` §30.5 清單、`verification-details.md` 第 10 項）
   + UAT 結論對帳（`dev-rules.md` 規則 33）：計畫寫「有」的，`uat-environment.md` §4 驗證表要全過；寫「無」的，理由與風險要在交付說明裡
 
 Hosted App 線（不走 Phase 2–4）：
@@ -477,7 +478,7 @@ timeout／連不出去＝raw `httpx` 直連（改 `ctx.http.call`）或 slug 沒
 | 檔案 | 內容 |
 |------|------|
 | `CONTEXT.md` | ★ 術語表——預設表／自建表兩大類＋四個機制詞（含稱謂對照與禁用詞：舊稱 SaaS 表與外部產品名都不出現） |
-| `references/dev-rules.md` | **Phase 3 規則 18–34 的完整版**（資料雙軌分流、自建表命名、app_domain、冪等、排程限制、角色沿用、簽核攔截、分頁排序、時間、租戶網址、skeleton、builder.access 破口、Hosted 不承載 DB 與外接庫的唯一例外、UAT 結論、即時撤權）——主檔只有速查表，動手前讀原文 |
+| `references/dev-rules.md` | **Phase 3 規則 18–34 的完整版**（資料雙軌分流、自建表命名、app_domain、冪等、排程限制、角色沿用、簽核攔截、分頁排序、時間、租戶網址、資料畫面四態與送出中、builder.access 破口、Hosted 不承載 DB 與外接庫的唯一例外、UAT 結論、即時撤權）——主檔只有速查表，動手前讀原文 |
 | `references/planning.md` | **Phase 1.5 的完整版**：§1.0 四問的理由與選項、計畫十二項逐項展開、閘門七條的理由與踩坑紀錄 |
 | `references/template-workflow.md` | **Phase 1.5 §1.0.5 模板盤點與「模板當素材」動線**：查詢端點與 slug 前綴分類、a／b／c 結論、`preview` 取碼與效果清單、效果繫結表、starter 建殼與自行 provision、端點權限表 |
 | `references/environment.md` | **Phase 1 的完整版**：租戶網址規則的推導與 401 同形成因、三層模型、`config.json` schema 2 與 `base_url` 三層來源、設定六步、憑證規則 |

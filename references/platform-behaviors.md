@@ -589,7 +589,8 @@ export function currentIdentity(): { userId: string; email: string; tenantId: st
   平台的 window 層攔截不到，以前只會一片空白）
 - **反面效應**：app 若「先跑長 API、成功後才第一次渲染」，超過 8 秒就會被誤報一次
 - **對策（開發規則）**：啟動時立刻渲染 skeleton／loading 佔位，資料到了再替換。
-  這同時也是正確的 UX——不要讓使用者對著空白等
+  這同時也是正確的 UX——不要讓使用者對著空白等。啟動以外的畫面（換頁、篩選、送出）同樣要做，
+  寫法見 `custom-app-dev-guide.md` §30（核心規則 30）
 
 ## 12. App API 權限閘（通用權限 gate）：現況 audit，enforce 前要做的準備
 
