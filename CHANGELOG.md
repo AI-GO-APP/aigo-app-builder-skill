@@ -1,3 +1,27 @@
+## 1.71.0
+
+### 本機開發班次 5：共享知識來源、Builder 專用入口與可驗證知識包（T13–T15）
+
+**T13：共享知識來源**
+- 在 `SKILL.md` 建立可抽取的 shared-rules 區塊，讓 IDE 與 Builder 共用同一份核心規則。
+- 新增 `references/reference-index.md`，明確列出核心／按需載入、入口與資料邊界。
+- 以契約測試守住規則標記、引用來源與索引完整性。
+
+**T14：Builder 專用入口**
+- 新增 `builder/ENTRY.md`，定義 ContextSnapshot、停止條件、操作 envelope 與發布邊界。
+- 新增 `scripts/builder_entry.py`，以 `render_entry(root)` 展開共享規則，不修改來源檔。
+- 加入離線 scenario fixtures 與回歸測試，確保外部 IDE 流程維持不變。
+
+**T15：可驗證知識包與相容資訊**
+- 新增零相依 `scripts/aigo_knowledge.py`，提供固定版本的 `export`／`verify`。
+- 新增 `builder/compat.json` 作為協定、scope、capability 與操作 envelope 的相容資訊 SSOT。
+- `manifest.json` 的整包 digest 綁定整份 manifest（不只檔案清單），輸出可重現。
+- 驗證拒絕缺檔、額外檔、digest 不符、逃逸路徑與 symlink，並保留原始 `LICENSE`。
+
+**⚠️ 對既有使用者的影響**
+- 外部 IDE 流程不變；新增 `builder/`、`scripts/builder_entry.py`、`scripts/aigo_knowledge.py`、`references/reference-index.md`。
+- 知識包不經 `check_update.py`，不更新或重設任何安裝目錄；既有 Phase -1 自我更新只管理 IDE 安裝。
+
 ## 1.70.0
 
 ### 修正：Hosted App 自訂網域的請求欄位寫錯；補上綁定到生效的完整流程與解除卡住的已知問題

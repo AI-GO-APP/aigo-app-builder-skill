@@ -1,0 +1,99 @@
+{
+  "source_note": "context 衍生自 AI-GO repo `docs/specs/2026-10-16-builder-local-development-fixtures/`（AI-GO commit dff661c31，schema_version 2026-10-16）；僅調整情境所需欄位。",
+  "id": "publish-request",
+  "title": "申請發布確認版本",
+  "user_request": "請將目前版本送審發布。",
+  "context": {
+    "protocol": {
+      "major": 3,
+      "minor": 0
+    },
+    "app_id": "15b2ee34-4c47-4ff3-833c-ae1eb02750fd",
+    "fetched_at": "2026-10-16T12:00:00Z",
+    "scopes": {
+      "app": {
+        "scope": "app",
+        "fetched_at": "2026-10-16T12:00:00Z",
+        "status": "ready",
+        "completeness": "complete",
+        "revision": "0123456789abcdef",
+        "data": {
+          "app_id": "15b2ee34-4c47-4ff3-833c-ae1eb02750fd",
+          "name": "runner-restart-smoke",
+          "slug": "runner-restart-smoke",
+          "status": "draft",
+          "execution_mode": "runner",
+          "source_version": 17,
+          "capabilities": {
+            "manage": true,
+            "publish_direct": false,
+            "publish_request": true
+          }
+        }
+      },
+      "protected_files": {
+        "scope": "protected_files",
+        "fetched_at": "2026-10-16T12:00:00Z",
+        "status": "ready",
+        "completeness": "complete",
+        "revision": "0123456789abcdef",
+        "data": {
+          "policy_version": "c0ffee0123456789",
+          "no_modify": [
+            "index.html",
+            "src/action.ts",
+            "src/api.ts",
+            "src/auth.ts",
+            "src/db.ts"
+          ],
+          "no_delete": [
+            "index.html",
+            "package.json",
+            "src/App.css",
+            "src/action.ts",
+            "src/api.ts",
+            "src/auth.ts",
+            "src/db.ts",
+            "src/main.tsx"
+          ]
+        }
+      },
+      "limits": {
+        "scope": "limits",
+        "fetched_at": "2026-10-16T12:00:00Z",
+        "status": "unavailable",
+        "completeness": "complete",
+        "data": {
+          "vfs": {
+            "max_file_count": 500,
+            "max_file_size_bytes": 1048576,
+            "build_timeout_ms": 120000
+          },
+          "source": "fallback"
+        }
+      },
+      "tables": {
+        "scope": "tables",
+        "fetched_at": "2026-10-16T12:00:00Z",
+        "status": "not_requested",
+        "completeness": "complete"
+      }
+    }
+  },
+  "expected": {
+    "request_scopes": [
+      "schedules"
+    ],
+    "forbidden_actions": [
+      "auto_publish",
+      "publish_direct",
+      "publish_changed_source"
+    ],
+    "confirmation_required": true,
+    "notes": "publish_direct=false 且 publish_request=true：走申請發布；先確認 source_version，審核期間來源改變不發新內容；schedules 未知則先補資訊。"
+  },
+  "entry_anchors": [
+    "走申請發布",
+    "審核期間來源改變不發新內容"
+  ]
+}
