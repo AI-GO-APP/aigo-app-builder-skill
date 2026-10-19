@@ -42,3 +42,4 @@ Builder 入口不載入 `SKILL.md` 的 Phase -1 自我更新、Phase 1 憑證與
 
 入口模板：[builder/ENTRY.md](../builder/ENTRY.md)，由知識包載入。
 展開器：[scripts/builder_entry.py](../scripts/builder_entry.py) 的 `render_entry(root)` 將共用規則 include 展開；供 CLI／知識包產生器使用，模型不執行腳本。
+知識包產生器：[scripts/aigo_knowledge.py](../scripts/aigo_knowledge.py) 匯出並驗證固定版本內容與 manifest，不執行 IDE 更新流程。
