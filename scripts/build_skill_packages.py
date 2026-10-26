@@ -19,7 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 LOCK = "learning/sources.lock.json"
 LEARNING_INPUTS = ("SKILL.md", "VERSION", "references/teaching.md", "references/practice-area.md",
                    "references/technical-use.md", "references/operations.md", "exercises/practice-sequence.md",
-                   "scripts/check_update.py", "scripts/learning_scope.py")
+                   "references/outputs.md", "scripts/check_update.py", "scripts/learning_scope.py",
+                   "scripts/learning_pdf.py", "scripts/requirements-pdf.txt")
 TOOLS = ("aigo_auth.py", "aigo_cli_check.py", "aigo_limits.py", "aigo_scaffold.py", "aigo_sync.py",
          "aigo_compile.py", "aigo_publish.py", "aigo_typecheck.py", "pyproject.toml", "uv.lock")
 # Only these technical sections are exported. Workflow/admin/report/updater files never enter learning.

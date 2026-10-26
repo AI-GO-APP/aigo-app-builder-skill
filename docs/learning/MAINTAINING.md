@@ -32,6 +32,20 @@ python -m unittest discover -s tests -p 'test_learning*.py' -v
 它可能進行登入／刷新及寫入本機 token 快取，但不修改平台 App、群組或業務資料。
 尚未在指定租戶實打前，不宣稱 runtime/存取隔離驗收完成。
 
+## 學生閱讀材料與 PDF 輸出（0.1.1）
+
+學生閱讀材料統一為「AI GO 學員開始手冊」PDF，合併安裝、設定、練習、教材輸出與三頁學習計畫。
+可編輯來源是 docs/learning/student-handbook.json；租戶、email 與群組的實際值須由內勤提供，不猜測填入。
+技能程式仍由課程平台提供學生 ZIP；PDF 是閱讀材料，不是可執行安裝包。
+
+```powershell
+python learning/scripts/learning_pdf.py docs/learning/student-handbook.json --output <工作區>/output/pdf/AI_GO_學員開始手冊_v0.1.1.pdf --expected-pages 6 --render-dir <新的暫存目錄>
+```
+
+PDF 選用相依在 learning/scripts/requirements-pdf.txt，不改根 scripts/pyproject.toml 或一般版更新器。
+學生套件含產生器、相依清單與輸出指引。教材存 output/pdf/，來源存 output/source/，不放技能目錄。
+需使用相容繁體字型，產生後核對頁數、文字及逐頁圖片；工具不會把渲染成功誤報為人工視覺驗收。
+
 ## 更新
 
 一般版 VERSION 與強制更新器不改；學生版有獨立 learning/VERSION，自己的 check_update 只做離線完整性檢查。
