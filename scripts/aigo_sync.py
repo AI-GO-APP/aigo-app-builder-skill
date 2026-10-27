@@ -108,6 +108,8 @@ def sync_to_cloud(base_url: str, token: str, app_id: str, files: dict[str, str],
     `on_remote_only` 決定遠端殘留的 actions/ 檔（見 `remote_only_actions`）怎麼處理：
     "abort"（預設）寫入前中止並列出、"keep" 列出後照常同步。這裡不提供刪除——`files` 可能只是部分檔案。
     """
+    from aigo_learning_scope import guard_learning_write
+    guard_learning_write(base_url, token, app_id=app_id)
     import httpx
     from aigo_limits import get_limits, check_vfs
     from aigo_compile import format_skipped_files
@@ -154,6 +156,8 @@ def delete_remote_files(base_url: str, token: str, app_id: str, paths: list[str]
 
     `expected_version` 必填（樂觀鎖，缺就 400）；回應帶新的 `vfs_version`。刪後二次 GET 驗證檔案真的不在。
     """
+    from aigo_learning_scope import guard_learning_write
+    guard_learning_write(base_url, token, app_id=app_id)
     import httpx
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     resp = httpx.request("DELETE", f"{base_url}/api/v1/builder/apps/{app_id}/source/files",

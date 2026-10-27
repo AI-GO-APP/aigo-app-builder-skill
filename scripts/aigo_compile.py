@@ -5,6 +5,8 @@ from typing import Any
 
 def compile_app(base_url: str, token: str, slug: str, dev: bool = True) -> dict:
     """觸發編譯"""
+    from aigo_learning_scope import guard_learning_write
+    guard_learning_write(base_url, token, slug=slug)
     import httpx
     headers = {"Authorization": f"Bearer {token}"}
     url = f"{base_url}/api/v1/compile/compile/{slug}"
