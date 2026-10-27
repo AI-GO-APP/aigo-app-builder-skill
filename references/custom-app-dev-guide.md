@@ -254,13 +254,14 @@ app 仍帶舊的 30 秒 ceiling，**要 republish 一次**才會換上 manifest 
 
 依權限分流（前端隱藏不算數，這裡才是強制點）：
 
+以下只示範模組權限檢查，不含學生／客戶逐筆資料範圍。實作時仍須依已確認規格加上伺服端的資料範圍檢查；不要把可讀某模組等同於可讀全租戶資料。
+
 ```python
 def execute(ctx):
     perms = ctx.user_permissions or []
-    if "system.admin" in perms or "hr.read" in perms:
-        rows = ctx.db.query("sale_orders", limit=100)
-    else:
-        rows = [strip_sensitive(r) for r in ctx.db.query("sale_orders", limit=100)]
+    if "system.admin" not in perms and "sale.read" not in perms:
+        raise PermissionError("無銷售資料讀取權限")
+    rows = ctx.db.query("sale_orders", limit=100)
     ctx.response.json({"rows": rows})
 ```
 
