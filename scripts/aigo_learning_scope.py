@@ -7,6 +7,21 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import UUID
+from contextvars import ContextVar
+from functools import wraps
+
+_COURSE_WORKSPACE=ContextVar('aigo_course_workspace',default=None)
+
+def course_project_operation(function):
+    """Carry an explicit project scope through nested helpers without changing CWD/env."""
+    @wraps(function)
+    def wrapped(*args,**kwargs):
+        project=kwargs.get('project_path') or (args[4] if len(args)>4 else None)
+        root=course_workspace(project)
+        state=_COURSE_WORKSPACE.set(root)
+        try:return function(*args,**kwargs)
+        finally:_COURSE_WORKSPACE.reset(state)
+    return wrapped
 
 
 def tenant_url(value: str) -> str:
@@ -135,18 +150,20 @@ def main(argv: list[str] | None = None) -> int:
 def course_workspace(workspace=None):
     """Course policy is opt-in; ordinary workspaces perform no extra API calls."""
     import os
-    start=Path.cwd().resolve()
-    found=None
-    for candidate in (start,*start.parents):
-        marker=candidate/'AGENTS.md'
-        if (candidate/'.aigo/learning.json').exists() or (marker.is_file() and '<!-- aigo-learning-workspace -->' in marker.read_text(encoding='utf-8')):
-            found=candidate; break
-    explicit=workspace or os.environ.get('AIGO_PROJECT_ROOT')
+    def locate(start):
+        start=Path(start).resolve()
+        for candidate in (start,*start.parents):
+            marker=candidate/'AGENTS.md'
+            if (candidate/'.aigo/learning.json').exists() or (marker.is_file() and '<!-- aigo-learning-workspace -->' in marker.read_text(encoding='utf-8',errors='replace')):
+                return candidate
+        return None
+    found=locate(Path.cwd())
+    explicit=workspace or _COURSE_WORKSPACE.get() or os.environ.get('AIGO_PROJECT_ROOT')
     if explicit:
-        chosen=Path(explicit).resolve()
+        chosen=locate(explicit)
         if found is not None and chosen!=found:
             raise ValueError('目前課程工作區與指定工作區不同；停止操作，先核對目標')
-        if (chosen/'.aigo/learning.json').exists(): found=chosen
+        if chosen is not None: found=chosen
     return found
 
 

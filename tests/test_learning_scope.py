@@ -50,6 +50,23 @@ class LearningScopeTests(unittest.TestCase):
             with mock.patch.object(Path,'cwd',return_value=root),mock.patch('httpx.get',return_value=self.response({'email':'student@example.test'})),mock.patch('aigo_auth.get_app_info',return_value=info):
                 result=scope.guard_learning_write(BASE,'fake',slug='practice')
                 self.assertEqual(result['scope_check'],'passed');self.assertFalse(result['data_isolation_verified'])
+    def test_explicit_marker_only_subdirectory_stops_without_network(self):
+        with tempfile.TemporaryDirectory() as temp,mock.patch.dict('os.environ',{},clear=True):
+            base=Path(temp);ordinary=base/'ordinary';ordinary.mkdir();course=base/'course';child=course/'apps/practice';child.mkdir(parents=True)
+            (course/'AGENTS.md').write_text('<!-- aigo-learning-workspace -->')
+            with mock.patch.object(Path,'cwd',return_value=ordinary),mock.patch('httpx.get') as get:
+                with self.assertRaises(FileNotFoundError):scope.guard_learning_write(BASE,'fake',app_id=APP,workspace=child)
+                get.assert_not_called()
+    def test_full_deploy_preserves_scope_between_helpers_and_resets_after_error(self):
+        with tempfile.TemporaryDirectory() as temp,mock.patch.dict('os.environ',{},clear=True):
+            base=Path(temp);ordinary=base/'ordinary';ordinary.mkdir();course=base/'course';course.mkdir();valid=self.fixture(course);child=course/'apps/practice';child.mkdir(parents=True)
+            wrong={**valid,'access_role_ids':[]}
+            with mock.patch.object(Path,'cwd',return_value=ordinary),mock.patch('httpx.get',return_value=self.response({'email':'student@example.test'})) as get,mock.patch('aigo_auth.get_app_info',side_effect=[valid,valid,wrong]),mock.patch('httpx.patch') as patch,mock.patch('httpx.post') as post:
+                with self.assertRaises(ValueError):publish.full_deploy(BASE,'fake',APP,'practice',str(child))
+                self.assertEqual(get.call_count,2);patch.assert_not_called();post.assert_not_called()
+                self.assertIsNone(scope._COURSE_WORKSPACE.get())
+                self.assertEqual(scope.guard_learning_write(BASE,'fake',app_id=APP),{'course_scope':'not-applicable'})
+                self.assertEqual(get.call_count,2)
     def test_all_custom_mutation_helpers_recheck_group_including_skip_preflight(self):
         for name,call in [
             ('publish',lambda:publish.publish_app(BASE,'fake',APP)),

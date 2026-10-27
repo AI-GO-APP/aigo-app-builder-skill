@@ -301,6 +301,9 @@ def check_publish_status(base_url: str, token: str, app_id: str) -> str:
     return resp.json().get("status", "unknown")
 
 
+from aigo_learning_scope import course_project_operation
+
+@course_project_operation
 def full_deploy(base_url: str, token: str, app_id: str, slug: str, project_path: str,
                 *, on_remote_only: str = "abort", delete_paths: list[str] | None = None,
                 **publish_kwargs: Any) -> dict:
@@ -313,7 +316,7 @@ def full_deploy(base_url: str, token: str, app_id: str, slug: str, project_path:
     （確認之後別人才加的 action 不會被順手刪掉）。清單內有不是「遠端有、本機沒有的 actions/ 檔」的路徑就整個拒絕。
     """
     from aigo_learning_scope import guard_learning_write
-    guard_learning_write(base_url, token, app_id=app_id)
+    guard_learning_write(base_url, token, app_id=app_id, workspace=project_path)
     from aigo_sync import (read_local_files, get_remote_vfs, sync_to_cloud,
                            remote_only_actions, delete_remote_files)
     from aigo_compile import compile_app
