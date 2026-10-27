@@ -62,7 +62,8 @@ class LearningScopeTests(unittest.TestCase):
             base=Path(temp);ordinary=base/'ordinary';ordinary.mkdir();course=base/'course';course.mkdir();valid=self.fixture(course);child=course/'apps/practice';child.mkdir(parents=True)
             wrong={**valid,'access_role_ids':[]}
             with mock.patch.object(Path,'cwd',return_value=ordinary),mock.patch('httpx.get',return_value=self.response({'email':'student@example.test'})) as get,mock.patch('aigo_auth.get_app_info',side_effect=[valid,valid,wrong]),mock.patch('httpx.patch') as patch,mock.patch('httpx.post') as post:
-                with self.assertRaises(ValueError):publish.full_deploy(BASE,'fake',APP,'practice',str(child))
+                with contextlib.redirect_stdout(io.StringIO()),self.assertRaisesRegex(ValueError,'群組'):
+                    publish.full_deploy(BASE,'fake',APP,'practice',str(child))
                 self.assertEqual(sum(c.args[0].endswith('/auth/me') for c in get.call_args_list),2);patch.assert_not_called();post.assert_not_called()
                 before=get.call_count
                 self.assertIsNone(scope._COURSE_WORKSPACE.get())
