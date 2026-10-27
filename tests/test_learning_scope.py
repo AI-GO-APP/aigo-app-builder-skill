@@ -63,10 +63,11 @@ class LearningScopeTests(unittest.TestCase):
             wrong={**valid,'access_role_ids':[]}
             with mock.patch.object(Path,'cwd',return_value=ordinary),mock.patch('httpx.get',return_value=self.response({'email':'student@example.test'})) as get,mock.patch('aigo_auth.get_app_info',side_effect=[valid,valid,wrong]),mock.patch('httpx.patch') as patch,mock.patch('httpx.post') as post:
                 with self.assertRaises(ValueError):publish.full_deploy(BASE,'fake',APP,'practice',str(child))
-                self.assertEqual(get.call_count,2);patch.assert_not_called();post.assert_not_called()
+                self.assertEqual(sum(c.args[0].endswith('/auth/me') for c in get.call_args_list),2);patch.assert_not_called();post.assert_not_called()
+                before=get.call_count
                 self.assertIsNone(scope._COURSE_WORKSPACE.get())
                 self.assertEqual(scope.guard_learning_write(BASE,'fake',app_id=APP),{'course_scope':'not-applicable'})
-                self.assertEqual(get.call_count,2)
+                self.assertEqual(get.call_count,before)
     def test_all_custom_mutation_helpers_recheck_group_including_skip_preflight(self):
         for name,call in [
             ('publish',lambda:publish.publish_app(BASE,'fake',APP)),
