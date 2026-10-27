@@ -111,7 +111,8 @@ uv run --project scripts python scripts/aigo_auth.py status   # 1. 找工作區�
 1. **所有 API 一律打租戶空間 `https://[tenant].ai-go.app/*`**。apex `https://ai-go.app` 推不出租戶，
    ★ 實測回 `401 帳號或密碼錯誤`——**與密碼真的打錯完全同形**，會把你帶去查錯方向。
    `*.apps.ai-go.app` 是 app 執行期網域，不是 API host
-2. **憑證由用戶自己填**：`~/.aigo/.env`（機器級）或 `<工作區>/.aigo/.env`（覆寫）。
+2. **登入由用戶自己來，兩種方式擇一**：**瀏覽器登入**（`aigo_auth.py login --browser`，用戶在租戶登入頁輸入密碼，
+   Token 寫進工作區 `.aigo/token.json`）；或**帳密檔**由用戶自己填 `~/.aigo/.env`（機器級）或 `<工作區>/.aigo/.env`（覆寫）。
    agent 不得代填密碼、不得把 token 印出來、不得寫進 repo
 3. **工作區不能放在 skill 安裝目錄裡**——更新會整個資料夾重建，憑證與登錄表會被清光
 
@@ -122,6 +123,7 @@ uv run --project scripts python scripts/aigo_auth.py setup                 # 建
 uv run --project scripts python scripts/aigo_auth.py setup-workspace <目錄>  # 建工作區 .aigo/config.json
 uv run --project scripts python scripts/aigo_auth.py status                # 確認實際生效的租戶空間與憑證
 uv run --project scripts python scripts/aigo_auth.py login                 # 驗證憑證（不印 token）
+uv run --project scripts python scripts/aigo_auth.py login --browser       # 或：瀏覽器登入，不必把密碼寫進 .env
 uv run --project scripts python scripts/aigo_auth.py app add <alias> --id <uuid>   # 登錄 app
 ```
 

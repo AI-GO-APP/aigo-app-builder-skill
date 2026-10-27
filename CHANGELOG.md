@@ -1,3 +1,17 @@
+## 1.73.0
+
+### Custom App 線支援瀏覽器登入（`aigo_auth.py login --browser`）
+
+原本 Custom App 線只能把帳密寫進 `~/.aigo/.env`；非技術使用者（例：用 aigo-client-collab 協作的客戶）要自己編輯隱藏資料夾裡的檔案，
+也不是每個人都願意把密碼存成檔案。
+
+- `scripts/aigo_auth.py`：新增 `browser_login()`、`verify_token()` 與 `login --browser` 指令——開租戶的 `/auth/cli?port=<埠>` 登入頁，
+  接 `http://127.0.0.1:<埠>/callback` 的 Token（與 Hosted 線 `aigo login` 同一套協定與環境變數），用 `GET /api/v1/auth/me`
+  確認屬於這個租戶後寫進工作區 `.aigo/token.json`；`expires_in` 沒給就讀 JWT 的 `exp`；回呼只收 `*.ai-go.app` 來源、只綁 127.0.0.1
+- `get_token()` 找不到帳密時的錯誤訊息改成列出兩種登入方式
+- `SKILL.md` Phase 1 硬規則 2、最短設定路徑與 `references/environment.md` 補瀏覽器登入；帳密檔照舊可用
+- 新增 `tests/test_browser_login.py`（本機回呼、CORS／Private Network 預檢、缺 Token、外部來源、逾時）
+
 ## 1.72.0
 
 ### 前端資料畫面要做完四態（載入中／有資料／空資料／錯誤），送出中要鎖按鈕
