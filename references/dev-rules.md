@@ -229,6 +229,10 @@
       連是否跑滿一次 bcrypt 都一樣）。看到 401 **先跑 `aigo_auth.py status` 確認租戶空間**，
       不要往密碼、Token、權限方向深掘
     - 租戶前綴 = 用戶登入時網址列的第一段；不確定就直接問用戶，別猜
+    - **外部 API 金鑰**：action 使用前須攔下空值、空白與 `PENDING_PASTE_VALUE`，不得帶佔位值外呼。
+      預設先建 key 再請用戶貼值；既有 action 先部署防護才建佔位值。名稱存在或發布成功不代表已設定。
+      未設定的互動操作顯示「尚未設定」；排程可明確跳過，但不可記為完成或推進游標。
+      Webhook 需保留事件／重試，不能吞掉事件。完整流程與範例見 `custom-app-dev-guide.md` §25.1–25.2。
     - 細節見 `references/platform-behaviors.md` §6.1
     - **例外：app 的執行期網址不受本條管**——external Custom App 本來就在 `*.apps.ai-go.app`
       （有 `subdomain` 走 `{subdomain}.apps.ai-go.app/ext-runtime`，沒有走 `runtime.apps.ai-go.app/ext-runtime/{slug}`），

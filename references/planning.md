@@ -192,7 +192,8 @@
      - 權限：`builder.access`＋本 App 擁有者或 `system.admin`；403 → 請租戶管理員操作
    - 外部服務沒建立或沒授權，寫完的 code 一律連不出去——**等部署才發現等於整段白做**
    - 金鑰歸 app 自管：為每個 API 金鑰開 `ctx.secrets` 欄位，action 自組
-     `Authorization` header——閘道只驗域名，不代管憑證（ADR 0010）。金鑰值由用戶填本機檔（600）、AI 用 `aigo_secrets.py` 讀檔寫入，不經對話
+     `Authorization` header——閘道只驗域名，不代管憑證（ADR 0010）。照 dev-guide §25.2 先防護 action、建 key，
+     再請用戶到 Builder 貼值；備案是指定環境變數或 POSIX 600 檔案，值不經對話。只查名稱不可判定已設定
    - 詳見 `references/custom-app-dev-guide.md` §25
 
 4.7. **平台 API 權限面盤點**（權限 gate 目前 audit，enforce 後前端呼叫會 403）

@@ -101,8 +101,9 @@ Custom App 的草稿版（`{租戶}.ai-go.app/runtime/version-test/{識別碼}`�
    UAT 入口 App 建立並授權（附錄 A；`custom-app-dev-guide.md` §25.2 確認流程）。完成後用 `egress_preflight()` 回讀確認。
    **不做這步，發布會 409 `EGRESS_NOT_READY`**——那是設定缺口，不是 bug。
 6. **Secrets（★ AI 代設，值不經對話）**：AI 列出必要的 `key_name` 與配對需求（與 UAT Hosted **同值**的換票金鑰與 cron key），
-   說明用途並取得同意；值由用戶填進本機檔（600、不進 git），AI 用 `scripts/aigo_secrets.py set` 讀檔寫進
-   **UAT 入口 App** 的 secrets，不印值（用戶也可自己到 Builder「服務」tab 貼）。兩邊不同值＝換票一律 401。寫入 API 見附錄 A。
+   說明用途並取得同意；照 dev-guide §25.2 先防護 action、在 **UAT 入口 App** `create-key`，再請用戶到
+   Builder「服務」貼值；備案 `set --from-env` 或 POSIX 600 檔案，不印值。兩邊不同值＝換票一律 401。
+   只查名稱不能確認已設定；驗證換票成功後才啟用相關功能。寫入 API 見附錄 A。
 7. **Open Proxy 引用**：clone 建的是**新的**隨附整合，預設表引用**不會**帶過去；UAT Hosted 若走 Open Proxy 讀預設表，
    要對 UAT 的整合重做 `POST /refs/apps/{整合id}`（`hosted-apps.md` §5），否則 403。走外接庫、不讀平台表的可暫時略過。
 8. **前端 VFS**：打包時把寫死的正式 Hosted 網址與 egress slug 換成 UAT 的（用環境變數注入打包腳本，
@@ -154,7 +155,8 @@ Custom App 的草稿版（`{租戶}.ai-go.app/runtime/version-test/{識別碼}`�
   授權 `PUT /builder/apps/{id}/authorized-egress-services` **body `{"services": [{"service_id": "<uuid>"}]}`**
   （送 id 字串陣列會 422，CHANGELOG 1.39.1；**整份覆寫**，要先讀回既有清單再加）。權限：`builder.access` 且本 App 擁有者或 `system.admin`。
   停用後重新啟用：`PATCH /builder/apps/{id}/egress-services/{service_id}` `{"is_active": true}`（`builder.access` 且同租戶任一 App 擁有者或 `system.admin`）。
-- **Secrets**：用 `scripts/aigo_secrets.py set <app> <KEY> --from-file <600 權限的檔>`（同名自動改用更新；刪除要 `delete … --confirm`）。
+- **Secrets**：照 dev-guide §25.2 先防護 action，再 `scripts/aigo_secrets.py create-key <app> <KEY> --description "用途與 action"`，請用戶到 Builder 貼值。
+  備案 `set <app> <KEY> --from-env <VAR>`（Windows 可用）或 `--from-file <POSIX 600 權限的檔>`；`set` 同名會更新，`create-key` 同名不動；刪除要 `delete … --confirm`。
   對應端點：`POST /actions/apps/{uat入口id}/secrets` `{"key_name": …, "value": …, "description": …}`；已存在就 `PUT /actions/secrets/{secret_id}` `{"value": …}`；`DELETE /actions/secrets/{secret_id}`。
   權限：`builder.access`（且看得到這支 app）。回應只有 `key_name`，不回值；**不要**打 `GET /actions/secrets/{id}/value` 讀值。
 - 租戶級 `/egress-services`（非 Builder 範圍）掛 `system.admin`，是平台 provision 腳本與緊急維運用，不在本 skill 的路徑上。
