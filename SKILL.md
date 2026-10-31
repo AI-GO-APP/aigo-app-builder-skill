@@ -305,7 +305,7 @@ def execute(ctx):
 4. **`ctx.db` 沒有結構操作**：執行期不能建表改欄，這是刻意的能力邊界
 5. **★ 外部服務與金鑰：AI 可代設，先講清楚再動手**：建立／授權外部服務、寫入 secrets 之前，用白話告訴用戶
    **連到哪個網域、會送出哪些資料、哪支 action 用**，**單獨取得同意**（不併進計畫同意；網域或資料變了要重問）；
-   金鑰值由用戶填進 600 權限的本機檔、`aigo_secrets.py` 讀檔寫入，**不在對話裡傳、不印出、不讀回**。權限：外部服務 `builder.access`＋本 App 擁有者或 `system.admin`；金鑰 `builder.access`＋看得到該 app（dev-guide §25.2）。缺口**不是 bug**、不回報
+   金鑰預設由 AI 先建 key（`aigo_secrets.py create-key`，同名不動），再附 Builder 連結請用戶貼值；**先確保 action 攔下空值與 `PENDING_PASTE_VALUE`**，不得外呼或誤報完成。備案用 `set --from-env <VAR>`（Windows 可用）或 POSIX 600 檔案；值**不進對話、不印出、不讀回**。`status` 只確認名稱，不能證明已設定。權限與完整流程見 dev-guide §25.2；設定缺口**不是 bug**、不回報
 
 > 逾時有兩道且原文同形：manifest `timeout_ms`（1000～120000，舊 app 要 republish 才換上新值）
 > 與 egress 閘道的服務 `timeout_ms`（預設 10000、硬上限 30000）。走 `ctx.http.call` 的 action

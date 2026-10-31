@@ -1387,14 +1387,25 @@ def execute(ctx):
 Server-Side Action 要打第三方 API，**一律走 `ctx.http.call(<egress-slug>, <path>)` 閘道**：
 
 ```python
+def _secret(ctx, key):
+    value = ctx.secrets.get(key)
+    if not value or not value.strip() or value.strip() == "PENDING_PASTE_VALUE":
+        return None
+    return value
+
+
 def execute(ctx):
     # slug 對應租戶註冊的「外部服務」（EgressService）——純域名白名單，
     # base_url 鎖定可打的 host。金鑰由 app 自己帶：存 ctx.secrets、自組 header。
+    key = _secret(ctx, "EXAMPLE_API_KEY")
+    if key is None:
+        ctx.response.json({"status": "not_configured", "message": "請先在 Builder 貼上金鑰值"})
+        return  # 不外呼、不寫入業務資料、不推進進度
     resp = ctx.http.call(
         "example-api",
         "/v1/orders",
         method="GET",
-        headers={"Authorization": f"Bearer {ctx.secrets.get('EXAMPLE_API_KEY')}"},
+        headers={"Authorization": f"Bearer {key}"},
     )
     if int(resp.get("status") or 500) >= 400:
         ctx.response.json({"error": "外部服務暫時無法使用", "status": resp.get("status")})
@@ -1447,16 +1458,41 @@ def execute(ctx):
 > 2. **這是獨立的一步，不併進計畫同意**：用戶說「計畫同意」不等於同意這張表——要單獨問、單獨得到明確同意。
 >    沒回覆、回覆含糊或只同意其中幾列 → 只做同意的那幾列。**網域或送出的資料一有變動就重新確認那一列**
 >    （含 Pending host 核准 `egress-pending-hosts/{id}/approve`，它會建立並授權一支共用池服務）
-> 3. **金鑰的值不經過對話**：請用戶自己填進本機檔（**一顆金鑰一個檔、檔裡只放值本身，不是 `KEY=value`**；例：`<工作區>/.aigo/secrets/<KEY_NAME>`，權限必須 600，
->    `.aigo/` 已在 `.gitignore`），再用 `scripts/aigo_secrets.py set <app> <KEY> --from-file <檔>` 寫入——
->    值只放在 HTTPS 請求本體，**不印出、不寫進 log／repo／指令列**；用戶也可以選擇自己到 Builder「服務」tab 貼上（**Windows 一律這樣做**：檔案無法設成 600，腳本會拒絕；金鑰檔也不可以是 symlink）。
->    不向用戶要金鑰值、不代為產生第三方的金鑰。**永遠不讀金鑰值**：平台有 `GET /actions/secrets/{id}/value`
->    （只要 `builder.access`），本 skill 不呼叫它，回讀只看 `key_name`（`aigo_secrets.py list`）
-> 4. 寫完回讀驗證（`available-egress-services` 看 `is_active` 與授權清單、`aigo_secrets.py list` 看 `key_name`），
->    再重試發布或呼叫
+> 3. **預設先建 key，再請用戶貼值**：先核對所有使用該 key 的 action（含 webhook／排程）已部署 §25.1 的防護，
+>    將空值、空白與 `PENDING_PASTE_VALUE` 視為未設定；尚未防護的既有 action 不可先塞佔位值。
+>    用 `scripts/aigo_secrets.py create-key <app> <KEY> --description "用途與使用的 action"` 建立；
+>    值先填固定佔位值 `PENDING_PASTE_VALUE`（空字串不能建立），**同名已存在不改值也不改說明**。
+>    隨即通知「請到 Builder → 這支 App →『服務』→ `<KEY>` 貼上 value」，附目前租戶的 `/builder/{app_id}` 連結。
+>    不向用戶要值、不代為產生第三方金鑰，**值不進對話、不印出、不讀回**。替代輸入見下方。
+> 4. 回讀驗證：外部服務看 `available-egress-services` 的 `is_active` 與授權清單；金鑰用 `status` 只查名稱。
+>    現有列表不提供安全的「是否仍為佔位值」資訊，所以只能回報「已存在，設定狀態未確認」，不能報「已設定」。
+>    **永遠不呼叫 `GET /actions/secrets/{id}/value`** 來判斷。名稱存在、`updated_at` 有變、發布成功都不代表憑證有效。
+>    用戶確認貼值後，再驗證實際功能；通過前保持排程停用，不把這一步當成業務已完成。
 >
 > **刪除**外部服務（租戶共用池，別的 App 可能在用）與刪除金鑰（`aigo_secrets.py delete … --confirm`）要另外逐項確認。
 > 設定缺口不是平台 bug（→ §25.3 第 6 點、`issue-reporting.md`）——經確認後補上即可。
+
+**替代輸入（不需經對話傳值）**：
+
+```bash
+# 用戶先在本機設定該程序可繼承的環境變數；指令只放變數名稱，Windows 也可用
+uv run --project scripts python scripts/aigo_secrets.py set <app> <KEY> --from-env MY_API_KEY
+# POSIX 備案：用戶填一顆金鑰的純值檔，不是 KEY=value；一般檔、非 symlink、權限 600
+uv run --project scripts python scripts/aigo_secrets.py set <app> <KEY> --from-file <工作區>/.aigo/secrets/<KEY>
+uv run --project scripts python scripts/aigo_secrets.py status <app>
+```
+
+AI 不自行掃描環境變數、讀取整份 `.env` 或代填值；只使用用戶指定的變數。環境變數必須在
+**執行工具的同一程序或其父程序**中設定，另一個終端設定不會自動傳給目前 agent。
+不要把值放進 shell 指令（會留在 history）、對話或除錯輸出；`--from-env` 不載入 `.env`，
+本版不提供 `--from-dotenv`。檔案路徑在 Windows 仍拒絕，改用環境變數或 Builder 貼值。
+本機金鑰檔不得進版控（先確認工作區 `.aigo/` 已被忽略）。
+
+**未設定時的行為**：§25.1 範例回 `not_configured`，前端要顯示「尚未設定」，不可顯示成功。
+排程可回 `{"status": "skipped", "reason": "secret_not_configured"}` 而不拋出重試例外，
+但必須顯示待設定狀態，不記為已送出／已完成，不推進游標或消耗任務。
+Webhook 不可只吞掉事件後回成功：要保留事件供補值後重放，或沿用來源端可重試的回應策略。
+佔位值可能通過只看名稱的發布檢查；**發布成功不等於可啟用外呼**。
 
 > 一律用**相對路徑**指引用戶，不要寫死主機名稱——子網域日後可能變動。
 > 用戶自己登入的後台網域是什麼就接在前面。
@@ -1541,7 +1577,7 @@ def execute(ctx):
 
 Phase 1.5 實作計畫裡就該**列出所有要打出去的外部服務（egress slug + base_url + 會送出的資料）**。
 計畫同意之後、寫 code 之前，把這張表當成**獨立的一步**照 §25.2 再確認一次，同意的列才由 AI 建立外部服務並授權本 App、
-請用戶把金鑰值填進本機檔再用 `aigo_secrets.py` 寫進 `ctx.secrets`——等到部署後才發現連不出去，等於整段開發白做。
+依 §25.2 先防護 action、建立 key，再請用戶貼值（或指定環境變數輸入），驗證後才啟用外呼——等到部署後才發現連不出去，等於整段開發白做。
 
 ## 26. 建立與刪除 App（API，不必走 UI）
 
@@ -1602,7 +1638,7 @@ POST /api/v1/builder/apps          （權限：builder.access）
 - ⚠️ **用業務模板 slug 建 app 會當場 seed 模板定義的自建表與 Data Reference 引用**（起手式兩款不帶）——
   表照模板預設繫結建好，改繫結要事後清，而清自建表有副作用。這正是本 skill 只用 starter 建殼的理由（§26.1）；
   已經這樣建了的 app，先盤 `GET /data-center/tables` 與 `GET /refs/apps/{id}` 再決定清不清，清之前逐張確認
-- 金鑰**不在建立時收**——建立後照 §25.2 確認流程寫入（值由用戶填本機檔或自己貼到 Builder「服務」tab）。寫入 API 見 `uat-environment.md` 附錄 A
+- 金鑰**不在建立時收**——建立後照 §25.2 確認流程先建 key，再請用戶到 Builder「服務」貼值（備案：指定環境變數或 POSIX 600 檔案）。寫入 API 見 `uat-environment.md` 附錄 A
 - 複製既有 app：`POST /apps/{app_id}/duplicate` → 201
 
 ### 26.3 刪除
