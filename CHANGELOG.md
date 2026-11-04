@@ -1,4 +1,47 @@
-# 1.75.0
+# 1.77.0
+
+### 對齊 AI-GO v1.20.2（origin/main 25cb09c75，2026-11-04）的 API 與行為變更
+
+> 版本號預留 1.77.0；若 draft PR #121（1.76.0）晚於本版進 main，#121 需重排版本號。
+> 盤點方法：6 組平行審查，對 `SKILL.md`、`CONTEXT.md`、`references/*.md`、`scripts/*.py` 的 553 條平台宣稱逐條找 AI-GO 原始碼證據（path:line）；
+> 找到 53 條漂移（19 條會讓 agent 寫錯 code）全部修正，另補 36 條新功能中直接影響 agent 動作的部分。完整清單附在 PR。
+
+**權限層（AI-GO 1.20.0 #2150／#2154／#2179，2026-10-29 起）**
+- 存檔（sync VFS）、publish、secrets、`POST /refs/apps/{id}`、egress 服務建立／授權多一道**管理者層**：只放行建立者、per-app 協作者、`system.admin`，其他人即使持 `builder.publish` 也回 404「App 不存在」（同形），只留 log 事件 `custom_app_save_denied`；只收登入 session，app-scoped token 403。
+  `SKILL.md` Phase 0 新增「接手既有 app 先讀 `GET /builder/apps/{id}` 的 `is_manager`／`is_owner`」；`CONTEXT.md`、`review-workflow.md`、`pre-report-self-grill.md`、`template-workflow.md`、`custom-app-dev-guide.md` §4／§15.1／§17／§25.2、`member-admin.md` §2／§3.7（新增管理者層 vs 擁有者層對照、協作者端點 `GET/POST/DELETE /builder/apps/{id}/collaborators`、`POST …/transfer-ownership`）、`troubleshooting.md` 同步。
+- `PATCH /builder/apps/{id}/settings`、匿名申請、刪除、轉移屬**擁有者層**（建立者或 `system.admin`），協作者也 404（`member-admin.md`、`custom-app-dev-guide.md` §15.1）。
+- Hosted App 同樣分管理者層／擁有者層；移除協作者撤銷其 Deploy Token；刪 app 後服務權杖立即撤銷（#2168）（`hosted-apps.md` §3.1／§6／§11）。
+
+**action 呼叫期錯誤碼（AI-GO #1581，2026-09-10 起）**
+- 未發布回 409 `App 尚未發布`（`retryable: false`）、首次發布的部署窗口回 409 `App 部署中`（`Retry-After: 15`）；503 只剩 runner 不可達（`Retry-After: 30`、`quota_hint`）。原文把「沒 publish」列為 503 成因是錯的。
+  `SKILL.md` 發布步驟 2 與錯誤處理段、`troubleshooting.md` 503 列拆三列、`pre-report-self-grill.md` Q4.3。
+
+**Custom App 開發面（`custom-app-dev-guide.md`、`platform-behaviors.md`、`dev-rules.md`）**
+- IMPORT_MAP 釘精確版：`react@18.3.1`、`react-router-dom@7.18.4`（**v7**，原寫 `^6.x`）、`lucide-react@0.468.0`、`react-hot-toast@2.4.1`（`frontend/src/lib/appRuntime.ts`）。
+- `custom_data` 伺服器端可篩：`{column:"custom_data", op:"jsonb_eq", value:{key, value}}`／`jsonb_ne`／`jsonb_contains`，前提 `custom_data` 在引用 `columns` 內（原寫一律 400）；註明 `db.ts` `FilterCondition.op` 型別與 `ctx.db.query(**filters)` 尚未涵蓋。
+- `ctx.erp` 白名單 6 → **10** 個方法：新增 `create_invoice`、`create_bill`、`reconcile_payment`、`cancel_payroll_run`；後兩者不套 approval pre-guard（`core/scope_map.py`）。
+- DB Proxy 單次上限 500 → **1000**（`PROXY_MAX_LIMIT`，預設 100），分頁結束條件改「回傳數 < 自己帶的 limit」。
+- `/ext/actions/run` 未發布時讀草稿 `vfs_state`（`effective_vfs`）；external 前綴補 `/ext/ai-hub`；`ctx.http.fetch(service, url, headers)` 補簽名；CustomObject 結構端點 2026-09-11 起 410 Gone；ADR 編號修正；Storage 整包上限依入口 103／109 MiB；空渲染偵測補相依下載三態。
+
+**資料中心（`data-center.md`、`data-operations.md`、`default-table-lookup.md`、`event-triggers.md`）**
+- relation → 預設表**已支援**：建欄前 `GET /api/v1/data-center/relation-targets` 取可用 `target_erp_key`（原寫「無法事先查詢、一律假設不支援」）。
+- `PATCH records/{id}` 裸物件是**靜默 no-op**（當成 `data={}`，回 200），一律包 `{"data": {...}}`。
+- 付費檔每租戶排程上限 100 → **150**（#2039）；`receive_webhook` 預設端點須有 `actions/receive_webhook.py` 在發布快照否則 404；webhook body > 256 KiB 回 413、slug→app 解析快取 30 秒（#2174）。
+- `hr_timesheets` 必填補 `employee_id`；薪資明細黑名單 3 → 5 張；唯讀表補 `ir_sequence_date_ranges`／`country_groups`／`decimal_precisions`；§3 補三組別名；Meta 表數 85 → 86；地板名檢查已生效。
+- 新增：`GET /tables/{key}/title-options`、自建表 records 受租戶資料存取規則約束（403 帶 `reason`／`rule_id`）、pub 線 `page_size` ≤ 100、run-now 回應形狀、成員欄位一律填 `users.id`（#2230）。
+
+**Hosted App（`hosted-apps.md`、`hosted-migration-runbook.md`、`uat-environment.md`）**
+- `runtime-settings` 第六欄 `env_sensitive`（AI-GO 1.17.0 #1867）：缺漏＝機密；機密 key 標 `build`／`both` 422；GET 對機密 key 回 `********`；PUT 送遮罩只對現存機密 key 表示保留。`NEXT_PUBLIC_*` 標 `both` 必須 `env_sensitive[key]=false`。
+- 檔頭核對版本改 v1.20.2；`releasing` 卡住已於 main 修（#2213／#2215／#2220）；`dns_classification` 落差段移除；`apply_state` 補兩態；`logs/download`；interpret 限流 10 次/分；slug 保留前綴 `aihub-`／`svc-`／`hs-`；邀請 `send_email:true` 每租戶每小時 60 封；WebSocket 自訂網域修復需重新部署；`HOSTED_PLATFORM_V1`／`TENANT_POSTGRES` 僅 UAT 一行註記。
+
+**scripts**
+- `aigo_env_diff.py`：GET 回遮罩後 `same_value` 對機密 key 會恆為 True 誤報——改讀 `env_sensitive`，遮罩 key 不比雜湊、`same_value=null` 並列入 `summary.masked`；docstring 改寫。新增測試 `test_masked_keys_are_not_compared`。
+- `aigo_secrets.py` docstring 改為管理者層語意；`aigo_compile.py` 對 `{"kind":"cdn"}` 回應不再誤印「未提供 skipped_files」。
+
+未修（UNVERIFIED，36 條，清單在 PR）：多為環境層數值（冷啟 60 秒、session 24 小時、`APP_SCOPED_TOKEN_MODE` 現役值等）與 CLI 私有行為，平台 repo 無法核。
+`SKILL.md` 維持 518 行（既有紅，未增行）。
+
+## 1.75.0
 
 - 金鑰工具新增 `create-key`：先建立 `PENDING_PASTE_VALUE`，同名存在不覆蓋，含同時建立的 409 處理。
 - 新增 `set --from-env <VAR>`，支援 Windows；POSIX 的 600 權限檔案輸入維持，未新增 `.env` 解析。

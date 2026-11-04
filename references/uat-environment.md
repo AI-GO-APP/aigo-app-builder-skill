@@ -84,8 +84,9 @@ Custom App 的草稿版（`{租戶}.ai-go.app/runtime/version-test/{識別碼}`�
    - 緊接著 `PUT /hosted-apps/{id}/access-settings` `{"visibility": "internal", "access_role_ids": [<UAT 角色>]}`
      ——正式若是 `public`，clone 出來的 UAT 第一天就是全網可達（`member-admin.md` §3）；
    - 到平台補上「clone 帶 env 覆寫」之前，這個窗口只能縮短不能消除——寫進計畫。
-3. **env 覆寫**：`PUT /hosted-apps/{id}/runtime-settings` 是**全量替換**（`hosted-apps.md` §4），所以用**白名單重建**，
-   不是「改幾個已知的鍵」：逐鍵決定沿用／換值／清空。最少要動的：資料庫連線（指 UAT 庫）、session secret／
+3. **env 覆寫**：`PUT /hosted-apps/{id}/runtime-settings` 是**全量替換**（六欄一起送，含 `env_sensitive`；`hosted-apps.md` §4），所以用**白名單重建**，
+   不是「改幾個已知的鍵」：逐鍵決定沿用／換值／清空。⚠️ `GET` 讀回的機密值是 `********`，照送＝**保留正式的值**，
+   所以要換新值的密鑰由負責人填新值，不能拿讀回的 body 改幾鍵就送。最少要動的：資料庫連線（指 UAT 庫）、session secret／
    cron key／換票金鑰（全部新值，正式與 UAT 不共用；**另外**：兼當加密金鑰、而 UAT 庫是正式複本時，
    換新值的同時預設清掉那些欄位（要保留就由負責人重新加密），`hosted-apps.md` §4「不可隨手換新」）、所有回指自己的網址改成 UAT 網址、入口網址改成 UAT 入口、
    空庫開站門禁只放建置者、通知／推播／第三方金鑰清空、**資源 ID 類的 key**（雲端硬碟／試算表、訊息主題／訂閱、bucket）
@@ -135,7 +136,7 @@ Custom App 的草稿版（`{租戶}.ai-go.app/runtime/version-test/{識別碼}`�
 | 入口可進 | `{租戶}.ai-go.app/runtime/<name>-uat` 200，測試者登入後換票成功 | 進得去 |
 | 403 對照 | 用 UAT app 身分讀一張有 `$user.*` 規則的預設表：`POLICY_GATE_MODE` **翻旗後**預期 403；仍 off 時回 200 **不算失敗**（`hosted-apps.md` §5）——UAT 正是翻旗前先看到這條的地方 | 符合當下旗標 |
 | 金鑰隔離 | 拿正式的 cron key 打 UAT 端點 → 401／403（與 app 選定的碼一致） | 舊值失效 |
-| 正式與 UAT 不共用密鑰 | `scripts/aigo_env_diff.py` 比對正式與 UAT 的 runtime-settings，看「兩邊值相同」那一欄（不印值） | 密鑰類零筆相同（UAT 庫若是正式資料副本又有加密欄位，照步驟 3 與 `hosted-apps.md` §4「不可隨手換新」處置，建議 UAT 改用測試資料） |
+| 正式與 UAT 不共用密鑰 | `scripts/aigo_env_diff.py --a <正式> --b <UAT>` 列出「遮罩不可比」的 key（機密 key 讀回是 `********`，工具比不了值）；負責人在 Dashboard 逐顆核對這些 key 在 UAT 已換新值；非機密 key 看「兩邊值相同」那一欄 | 遮罩不可比的 key 逐顆確認已換；非機密 key 相同的只剩網址／開關類（UAT 庫若是正式資料副本又有加密欄位，照步驟 3 與 `hosted-apps.md` §4「不可隨手換新」處置，建議 UAT 改用測試資料） |
 | 沒有寫死的正式資源 | 在 UAT 觸發上傳、備份、訂閱這類會用到雲端資源的功能，回正式那一側確認沒有新檔案、新訂閱 | 正式那側零變化 |
 | 排程／通知未動 | UAT 沒有平台排程，或只有 owner 確認過的排程（目的地全是測試值）；通知目的地為空或測試值；DB 裡的排程總開關與通知設定列是 UAT 要的值（複本會帶正式值） | 確認 |
 

@@ -139,11 +139,11 @@ uv run --project scripts python scripts/aigo_template.py effects <slug>         
 | `GET /api/v1/pub/templates` | 匿名快速瀏覽（白名單欄位） | 無 |
 | `POST /api/v1/builder/apps` | 建 starter 空殼 | `builder.access` |
 | `POST /api/v1/data-center/tables`、`POST …/tables/{key}/fields` | 建自建表、加欄 | `datacenter.schema_write`（`system.admin` 直通） |
-| `POST /api/v1/refs/apps/{app_id}` | 登記資料引用 | `builder.access` |
-| `POST /api/v1/builder/apps/{app_id}/egress-services`、`PUT …/authorized-egress-services` | 建外部服務（預設授權本 App）、改授權清單（整份覆寫） | `builder.access` ＋ 本 App 擁有者或 `system.admin` |
+| `POST /api/v1/refs/apps/{app_id}` | 登記資料引用 | `builder.access` ＋ app 管理者（建立者／協作者／`system.admin`），否則 404「App 不存在」；只收登入 session |
+| `POST /api/v1/builder/apps/{app_id}/egress-services`、`PUT …/authorized-egress-services` | 建外部服務（預設授權本 App）、改授權清單（整份覆寫） | `builder.access` ＋ 本 App 管理者（建立者／協作者／`system.admin`；2026-10-29 起協作者也過），否則 403 |
 | `PATCH`／`DELETE /api/v1/builder/apps/{app_id}/egress-services/{service_id}` | 改／停用／刪除共用池服務 | `builder.access` ＋ 同租戶任一 App 擁有者或 `system.admin` |
-| `POST /api/v1/builder/apps/{app_id}/egress-pending-hosts/{pending_id}/approve` | 核准待審網域：重用或**建立**共用池服務並授權本 App | `builder.access`（App 擁有者檢查） |
-| `POST /api/v1/actions/apps/{app_id}/secrets`、`PUT`／`DELETE /api/v1/actions/secrets/{secret_id}` | 設／改／刪金鑰（`aigo_secrets.py`） | `builder.access`（且看得到這支 app） |
+| `POST /api/v1/builder/apps/{app_id}/egress-pending-hosts/{pending_id}/approve` | 核准待審網域：重用或**建立**共用池服務並授權本 App | `builder.access` ＋ 本 App 管理者（建立者／協作者／`system.admin`） |
+| `POST /api/v1/actions/apps/{app_id}/secrets`、`PUT`／`DELETE /api/v1/actions/secrets/{secret_id}` | 設／改／刪金鑰（`aigo_secrets.py`） | `builder.access` ＋ app 管理者（建立者／協作者／`system.admin`），非管理者 404「App 不存在」；只收真人 JWT（app 憑證、opaque token 一律拒，1.17.0 起） |
 
 外部服務與金鑰的寫入（上表後四列）一律先過 `custom-app-dev-guide.md` §25.2 的確認流程；**不讀金鑰值**
 （`GET /api/v1/actions/secrets/{secret_id}/value` 存在，本 skill 不呼叫）。

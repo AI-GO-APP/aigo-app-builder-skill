@@ -6,7 +6,8 @@
 **不印出、不寫 log、不放指令列**。刻意**沒有**讀值的指令——平台雖有 `GET /actions/secrets/{id}/value`，
 本 skill 一律不讀金鑰值。
 
-端點（v1.15.4 核對，權限皆 `builder.access` 且看得到這支 app）：
+端點（v1.20.2 核對；四條都要 `builder.access` **且**是這支 app 的建立者／協作者／`system.admin`，
+其他人回 404「App 不存在」——不是 app_id 打錯；Deploy Token、PAT 等 opaque token 與 app 憑證回 403）：
   GET    /api/v1/actions/apps/{app_id}/secrets     列表（回應只有 key_name 等中繼資料，不含值）
   POST   /api/v1/actions/apps/{app_id}/secrets     建立 {key_name, value, description}；同名 409
   PUT    /api/v1/actions/secrets/{secret_id}       更新 {value?, description?}

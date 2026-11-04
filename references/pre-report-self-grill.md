@@ -71,12 +71,16 @@
 - **Q2.1 租戶網址**：`aigo_auth.py status` 印出的生效租戶是不是目標租戶？
   401「帳號或密碼錯誤」與打錯租戶**平台刻意同形**（`platform-behaviors.md` §6.1）。
 - **Q2.2 token 狀態**：401＝過期、403＝權限。重新登入後症狀是否消失？
+  管理面（secrets、refs 授權、collaborators）只收登入 session：用 app-scoped JWT／opaque token 打
+  恆為 403 `CUSTOM_APP_MANAGE_*_DENIED`，換使用者 JWT 即可，不是平台 bug。
   ★ **從 Server Action 內打使用者面 REST（`/api/v1/data-center/*` 等）恆為 401**——
   runner 沒有使用者身分，這不是權限不足，提權到 `system.admin` 也一樣；
   `ctx` 白名單沒封裝的能力在 action 裡就是做不到（`data-center.md` §7.5、§10）。
   把「401 → 也許提權就能打」當推論起點，會把能力限制誤判成權限 bug。
 - **Q2.3 權限層級**：這步需要 `system.admin`、`builder.access` 還是 `datacenter.schema_write`？
   這顆帳號有沒有？一般員工帳號的 403 是否其實是 `builder.access` 破口（`data-center.md` §7.5）？
+  **存檔／發布／secrets 回 404「App 不存在」≠ app_id 錯**：先看 `GET /builder/apps/{id}` 的 `is_manager`——
+  非建立者／協作者／`system.admin` 一律同形 404，請擁有者加協作者後再試。
   **403 body 有沒有 `reason`／`rule_id`**？有＝租戶「資料存取規則」（Auth gate）擋的，不是
   權限字串問題、app 端改 code 無解（`custom-app-dev-guide.md` §27；UAT on／prod off）。
 - **Q2.4 產品線與模式**：打的是 Custom App 還是 Hosted App 的端點？`internal`／`external`／
@@ -123,7 +127,8 @@
 - **Q4.1 發布快照**：sync／compile 都不會讓 action 上線，有 publish 嗎？改 manifest 後有 republish 嗎？
 - **Q4.2 簽核攔截**：回傳有無 `approval_status: "pending"`／「需要簽核審批」？
   有 → 既非成功也非失敗，不是 bug，也不可重試（`custom-app-dev-guide.md` §24）。
-- **Q4.3 鎖與衝突**：409 是 `vfs_version` 衝突還是配額？423 是有待審發布？
+- **Q4.3 鎖與衝突**：409 是 `vfs_version` 衝突、配額、還是 action 的 `App 尚未發布`（先 publish）／
+  `App 部署中`（首次發布，等 `Retry-After: 15`）？423 是有待審發布？
 - **Q4.4 非同步延遲**：排程 `nextcall` 計算中、draft runner 冷啟約 60 秒、Hosted App env 傳播 1–6 分鐘、
   rollout 失敗時對外仍是舊 revision。等過了再判斷。
 - **Q4.5 平台刻意設計**：`__CURRENT_USER__` 任何模式都不存在、`__IS_AUTHENTICATED__` 恆 false、
