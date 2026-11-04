@@ -5,22 +5,20 @@ import json
 import os
 import subprocess
 import sys
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from builder_entry import render_entry
 
 FORMAT = "aigo-knowledge-manifest/1"
-
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
 def json_bytes(value):
     return (json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()
 def safe_path(value):
-    if not isinstance(value, str) or not value or "\\" in value:
-        return False
-    path = PurePosixPath(value)
-    return not path.is_absolute() and ".." not in path.parts
+    return (isinstance(value, str) and bool(value) and ":" not in value and "\\" not in value
+            and not value.startswith(("/", "\\"))
+            and all(segment and segment != ".." for segment in value.split("/")))
 def reject_source_links(root, paths):
     for path in paths:
         current = path
@@ -101,6 +99,8 @@ def export_package(root, out, commit=None):
     }
     for source in reference_paths:
         content[source.relative_to(root).as_posix()] = source.read_bytes()
+    if not all(safe_path(relative) for relative in content):
+        raise ValueError("unsafe export path")
     files = [{"path": path, "sha256": digest(data), "bytes": len(data)}
              for path, data in sorted(content.items())]
     manifest = {
@@ -193,6 +193,8 @@ def verify_package(directory):
     for relative in sorted(listed - (actual - {"manifest.json"})):
         if not any(error == f"missing file: {relative}" for error in errors):
             errors.append(f"missing file: {relative}")
+    if safe_path(entry := manifest.get("entry")) and entry not in listed:
+        errors.append(f"entry {entry} is not listed in files")
     if manifest.get("package_digest") != package_digest(manifest):
         errors.append("package_digest mismatch")
 

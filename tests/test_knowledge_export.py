@@ -116,6 +116,22 @@ class KnowledgeExportTest(unittest.TestCase):
         manifest_path.write_text(json.dumps(manifest))
         self.verify_fails(out, "../x.md")
 
+    def test_windows_drive_manifest_path_with_valid_digest_fails(self):
+        out = self.export()
+        manifest_path = out / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["files"][0]["path"] = "C:/outside.md"
+        self.rewrite_manifest_digest(manifest_path, manifest)
+        self.verify_fails(out, "C:/outside.md")
+
+    def test_unlisted_entry_with_valid_digest_fails(self):
+        out = self.export()
+        manifest_path = out / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["entry"] = "other.md"
+        self.rewrite_manifest_digest(manifest_path, manifest)
+        self.verify_fails(out, "entry")
+
     def test_symlink_in_package_fails(self):
         out = self.export()
         link = out / "link"

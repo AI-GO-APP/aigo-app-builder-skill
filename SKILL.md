@@ -498,7 +498,7 @@ timeout／連不出去＝raw `httpx` 直連（改 `ctx.http.call`）或 slug 沒
 |------|------|
 | `CONTEXT.md` | ★ 術語表——預設表／自建表兩大類＋四個機制詞（含稱謂對照與禁用詞：舊稱 SaaS 表與外部產品名都不出現） |
 | `references/reference-index.md` | 外部 IDE 與 Builder 共用的參考章節索引：逐檔標示用途、載入時機、入口與資料邊界 |
-| `references/dev-rules.md` | **Phase 3 規則 18–34 的完整版**（資料雙軌分流、自建表命名、app_domain、冪等、排程限制、角色沿用、簽核攔截、分頁排序、時間、租戶網址、skeleton、builder.access 破口、Hosted 不承載 DB 與外接庫的唯一例外、UAT 結論、即時撤權）——主檔只有速查表，動手前讀原文 |
+| `references/dev-rules.md` | **Phase 3 規則 18–34 的完整版**（資料雙軌分流、自建表命名、app_domain、冪等、排程限制、角色沿用、簽核攔截、分頁排序、時間、租戶網址、資料畫面四態與送出中、builder.access 破口、Hosted 不承載 DB 與外接庫的唯一例外、UAT 結論、即時撤權）——主檔只有速查表，動手前讀原文 |
 | `references/planning.md`<br>`references/template-workflow.md` | **Phase 1.5 的完整版**：§1.0 四問的理由與選項、計畫十二項逐項展開、閘門七條的理由與踩坑紀錄；**Phase 1.5 §1.0.5 模板盤點與「模板當素材」動線**：查詢端點與 slug 前綴分類、a／b／c 結論、`preview` 取碼與效果清單、效果繫結表、starter 建殼與自行 provision、端點權限表 |
 | `references/environment.md`<br>`references/review-workflow.md` | **Phase 1 的完整版**：租戶網址規則的推導與 401 同形成因、三層模型、`config.json` schema 2 與 `base_url` 三層來源、設定六步、憑證規則；**Phase 0 的完整版**：九步各自打哪個端點、Review 報告要列什麼、哪些情況標「必改」 |
 | `references/custom-app-dev-guide.md` | 核心 API 規格與架構理念；**§6.0 SDK 依模式分流表**、**§29 四條存取通道端點總表（internal／external／匿名／open）**、**§15.1 匿名存取的平台核可三態**、§12 Storage 坑表、**§27 租戶資料存取規則（Auth gate：403 帶 `reason` 的來源）**、§28 冷啟動／常駐（`always_on`）＋**§28.1 Custom 線常駐決策閘（預設關）** |
