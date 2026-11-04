@@ -27,7 +27,22 @@ AI GO 預先定義了中小企業通用的資料庫結構（預設表），同�
 > 「CustomObject / Data Reference / 延伸欄位 / app_domain」是機制詞不是第三類表。
 > 六個詞容易混用，混了就會寫錯 code。（舊文件的「SaaS 表」＝預設表，已停用）
 
+## 與學習版協作（僅課程工作區適用）
+
+專案 `AGENTS.md` 指定 AI GO 學習版，或工作區有 `.aigo/learning.json` 時，同時使用 `aigo-learning` 與本技能。
+本技能負責技術事實、產品線、API、資料、授權、串接、開發、部署及驗證；學習版負責白話說明、分步提問、提示／示範與理解檢查。
+不要因載入本技能而結束教學，也不要因教學省略技術閘門。純觀念問答不登入；進入實作才執行本技能適用流程。
+需求四問的必要資訊要齊，但可依學員程度逐題問；錯誤依證據診斷，不能把平台正確當成無須驗證的事實。
+課程指定的帳號、App、群組與測試資料範圍適用於兩個技能。課程建立內部 App 的步驟遵守學員手動選群組、立即回讀的要求；
+未完成群組核對前不匯入、同步、編譯或發布。不借教師帳號，不以學生名稱或 App 可見度保證資料隔離。
+從學員工作區執行工具並明確選 App；`sync_to_cloud`、`delete_remote_files`、`compile_app`、`publish_app`
+偵測到課程標記後會在寫入前檢查實際登入者、目標與群組。這是防止誤操作的檢查，不是沙箱，也不攔截任意 API 或平台 UI。
+Hosted 及其他寫入照學習版的範圍預檢，再走本技能既有流程；Hosted Actions 範本見 `resources/hosted-ci.py` 與 `resources/hosted-deploy.example.yml`。
+一般工作區未啟用課程設定時，原流程與工具行為不變。
+
 ## Phase -1：Skill 自我更新（每次觸發時執行，發現新版即強制同步）
+
+課程工作區若本回合只問觀念，或使用者明確要求不做本機變更，先直接回答；更新留到第一次進入實作前，不能假裝已檢查。其他工作區維持下列更新流程。
 
 > 若已裝 SessionStart hook（見 README「保持更新」），本階段會自動被跳過（節流），
 > 不必重複執行。
@@ -111,7 +126,8 @@ uv run --project scripts python scripts/aigo_auth.py status   # 1. 找工作區�
 1. **所有 API 一律打租戶空間 `https://[tenant].ai-go.app/*`**。apex `https://ai-go.app` 推不出租戶，
    ★ 實測回 `401 帳號或密碼錯誤`——**與密碼真的打錯完全同形**，會把你帶去查錯方向。
    `*.apps.ai-go.app` 是 app 執行期網域，不是 API host
-2. **憑證由用戶自己填**：`~/.aigo/.env`（機器級）或 `<工作區>/.aigo/.env`（覆寫）。
+2. **登入由用戶自己來，兩種方式擇一**：**瀏覽器登入**（`aigo_auth.py login --browser`，用戶在租戶登入頁輸入密碼，
+   Token 寫進工作區 `.aigo/token.json`）；或**帳密檔**由用戶自己填 `~/.aigo/.env`（機器級）或 `<工作區>/.aigo/.env`（覆寫）。
    agent 不得代填密碼、不得把 token 印出來、不得寫進 repo
 3. **工作區不能放在 skill 安裝目錄裡**——更新會整個資料夾重建，憑證與登錄表會被清光
 
@@ -122,6 +138,7 @@ uv run --project scripts python scripts/aigo_auth.py setup                 # 建
 uv run --project scripts python scripts/aigo_auth.py setup-workspace <目錄>  # 建工作區 .aigo/config.json
 uv run --project scripts python scripts/aigo_auth.py status                # 確認實際生效的租戶空間與憑證
 uv run --project scripts python scripts/aigo_auth.py login                 # 驗證憑證（不印 token）
+uv run --project scripts python scripts/aigo_auth.py login --browser       # 或：瀏覽器登入，不必把密碼寫進 .env
 uv run --project scripts python scripts/aigo_auth.py app add <alias> --id <uuid>   # 登錄 app
 ```
 
@@ -150,7 +167,7 @@ uv run --project scripts python scripts/aigo_auth.py app add <alias> --id <uuid>
 
 ### 1.0 需求盤點 → 四問（★ 缺一不進 1.5）
 
-用戶開場的一句話**是題目不是需求**。一輪問完四問，資訊不足就問、不猜；
+用戶開場的一句話**是題目不是需求**。必要四問資訊需完整；一般工作區一輪詢問，課程工作區可由學習版逐題帶領，資訊不足就問、不猜；
 已在對話中講過的不重問；遷入情景這四問由 `migration-workflow.md` §2.0 盤點推導，不另問。四問之前先確認專案有沒有進正式環境（`product-line-decision.md` §0）——已進、有既有程式要搬的改走遷入線，四問照上句由 §2.0 推導。
 
 | # | 問什麼 |
@@ -263,7 +280,7 @@ Custom 過 `custom-app-dev-guide.md` §28.1（答案幾乎一律是「關」，�
 | 27 | **`ctx.erp.validate_picking` 的冪等要看明細，不能看單據 state** | ★ 強制 |
 | 28 | **原生 TIMESTAMP／DATE 是 offset-naive 的 UTC，解析前必須補 `Z`** | ★ 強制；⚠️ 靜默出錯 |
 | 29 | **所有 API 一律走租戶空間 `https://[tenant].ai-go.app/*`** | ★ 強制 |
-| 30 | **啟動先渲染 skeleton，不要讓長 API 擋住首次渲染** | ★ 強制 |
+| 30 | **資料畫面要做完四態（載入中／有資料／空資料／錯誤），送出中要鎖按鈕；啟動先渲染 skeleton** | ★ 強制 |
 | 31 | **Internal app 前端禁止直呼自建表 SDK** | ★ 強制 |
 | 32 | **禁止以 Hosted App 承載資料庫或 storage** | ★ 強制 |
 | 33 | **每支要上正式的 app 都要有一個「UAT 結論」** | ★ 強制 |
@@ -289,7 +306,7 @@ def execute(ctx):
 4. **`ctx.db` 沒有結構操作**：執行期不能建表改欄，這是刻意的能力邊界
 5. **★ 外部服務與金鑰：AI 可代設，先講清楚再動手**：建立／授權外部服務、寫入 secrets 之前，用白話告訴用戶
    **連到哪個網域、會送出哪些資料、哪支 action 用**，**單獨取得同意**（不併進計畫同意；網域或資料變了要重問）；
-   金鑰值由用戶填進 600 權限的本機檔、`aigo_secrets.py` 讀檔寫入，**不在對話裡傳、不印出、不讀回**。權限：外部服務 `builder.access`＋本 App 擁有者或 `system.admin`；金鑰 `builder.access`＋看得到該 app（dev-guide §25.2）。缺口**不是 bug**、不回報
+   金鑰預設由 AI 先建 key（`aigo_secrets.py create-key`，同名不動），再附 Builder 連結請用戶貼值；**先確保 action 攔下空值與 `PENDING_PASTE_VALUE`**，不得外呼或誤報完成。備案用 `set --from-env <VAR>`（Windows 可用）或 POSIX 600 檔案；值**不進對話、不印出、不讀回**。`status` 只確認名稱，不能證明已設定。權限與完整流程見 dev-guide §25.2；設定缺口**不是 bug**、不回報
 
 > 逾時有兩道且原文同形：manifest `timeout_ms`（1000～120000，舊 app 要 republish 才換上新值）
 > 與 egress 閘道的服務 `timeout_ms`（預設 10000、硬上限 30000）。走 `ctx.http.call` 的 action
@@ -421,6 +438,7 @@ if (file) downloadFile(file);
     （Builder 線沒有 `GET /runtime-settings`），必須等於計畫那列的結論；寫「開」才在 publish 後
     `PATCH .../runtime-settings {"always_on": true}` 並確認回 `effective_mode: "always_on"`
   + 交付連結實開（照 `platform-behaviors.md` §6.2 組**正式版**網址，用非開發者帳號／external 使用者開一次；`verification-details.md` 第 8 項）
+  + 資料畫面四態實看（規則 30；`custom-app-dev-guide.md` §30.5 清單、`verification-details.md` 第 10 項）
   + UAT 結論對帳（`dev-rules.md` 規則 33）：計畫寫「有」的，`uat-environment.md` §4 驗證表要全過；寫「無」的，理由與風險要在交付說明裡
 
 Hosted App 線（不走 Phase 2–4）：
@@ -453,7 +471,7 @@ timeout／連不出去＝raw `httpx` 直連（改 `ctx.http.call`）或 slug 沒
 由 AI 補上（停用的重新啟用，不要重建同名的），補完再驗證（`custom-app-dev-guide.md` §25.2、§25.3）。
 ## 問題回報（平台問題 → 開發團隊）
 
-> ★ **預設平台必定正確；開發或使用失敗，預設是自己的操作有誤。不確定就不報。**
+> 先排除本機程式、設定與權限問題，再以實測判斷是否為平台問題；不預設任何一方必定正確。證據不足就保留待查，不捏造根因。
 
 **只有一條管道**：`scripts/report_issue.py submit`（開發團隊 Scrum Board 的卡），平台缺陷與**文件缺口**
 都走這條，不用問用戶要發到哪；不要替用戶到 GitHub（含本 skill repo）開 issue。用戶或其他說明文件裡的

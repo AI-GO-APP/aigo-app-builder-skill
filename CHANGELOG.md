@@ -1,4 +1,4 @@
-## 1.71.0
+## 1.76.0
 
 ### 本機開發班次 5：共享知識來源、Builder 專用入口與可驗證知識包（T13–T15）
 
@@ -21,6 +21,204 @@
 **⚠️ 對既有使用者的影響**
 - 外部 IDE 流程不變；新增 `builder/`、`scripts/builder_entry.py`、`scripts/aigo_knowledge.py`、`references/reference-index.md`。
 - 知識包不經 `check_update.py`，不更新或重設任何安裝目錄；既有 Phase -1 自我更新只管理 IDE 安裝。
+
+## 1.70.0
+
+### 修正：Hosted App 自訂網域的請求欄位寫錯；補上綁定到生效的完整流程與解除卡住的已知問題
+
+對應 skill issue #119。內容對照平台原始碼（main 與 prod 的 v1.16.2 tag）核過；2026-10-09 在 prod 與 UAT 各用一個子網域實打整條流程。
+
+**改正**（`references/hosted-apps.md` §9）
+- `POST /{id}/domains` 的 body 欄位是 **`hostname`**，不是 `domain`——照舊寫法送一定 422
+- `kind` 只收 `bind`／`redirect`（`redirect` 要帶 `https://` 的 `redirect_url`）；`gateway` 回 422「請改用 Gateway API 建立網域」
+- 狀態除了 `pending_dns → pending_cert → active`，還有 `failed` 與 `releasing`
+
+**補上**
+- §9 改寫成五步：建立綁定 → 依網域型態看 `records[]`（子網域 CNAME／根網域 ALIAS＋所有權 TXT／判定不了兩者並列）→
+  到名稱伺服器那邊加記錄（看 NS 不看註冊商、Cloudflare 一律灰雲）→ 探測到 `active`（狀態表）→ 用自訂網域本身驗收
+- 實測時間：DNS 加好後約 5 分鐘 `active`；轉 `active` 後約 1 分鐘內還會拿到平台萬用憑證，不要當成失敗（§3.4 自訂網域列同步）
+- 憑證驗證 72 小時沒過會轉 `failed`，而且**同一筆不會自己恢復**（不會重新申請憑證）——建綁定當天就要加驗證記錄
+- ⚠️ 已知問題：解除綁定會一直卡在 `releasing`，hostname 也無法再綁。修好前不要用「綁、解除、再綁」試錯
+- ⚠️ 部署落差：prod（v1.16.2）沒有 `dns_classification`／所有權 TXT，根網域只用「兩段」判定；UAT 有
+- §10 錯誤碼表補 409 `DOMAIN_HOSTNAME_TAKEN`、兩種 422、一直 `pending_dns`、卡在 `releasing`；`troubleshooting.md` 補「一直 `pending_dns`」一列
+
+**搬遷切換**（`references/hosted-migration-runbook.md` §7、`migration-workflow.md`）
+- 「憑證驗證記錄與流量記錄是否分開」改為已核實（分開的兩筆），拿掉「先問平台」
+- 補「先簽憑證、切換當下才改流量」的做法：凍結時段只算兩三分鐘＋TTL。依原始碼推得、**尚未實測**，要保留退路
+- 改正舊說法：先簽憑證時狀態會停在 `pending_dns`，`pending_cert` 要流量指對才會出現，不能拿它當「憑證已簽好」的訊號
+
+## 1.69.0
+
+### 模板當素材、Phase 1.5 加模板盤點與效果繫結；AI 可代設外部服務與金鑰（先確認再動手）
+
+對應 skill issue #99、#100。
+
+**模板一律當素材，只有一條路**（`references/template-workflow.md`，新）
+- 用 `preview` 取模板內容 → 問清楚每個效果要繫結到哪裡 → 從 starter 建空殼 → AI 自行建表、登記引用、設外部服務與金鑰。
+  **不再**直接用業務模板建 app：dev-guide §26.1「其他模板也可用 slug 建立」刪除，§26.2「模板會一併 seed 自建表與引用」改為警告。
+- 問答結果寫成**效果繫結表**（`new_app_requirements_template.md` 新增第六節）；每個非預設繫結都要真的改 ports 的 code，列為計畫閘門。
+- 模板效果今天只能從資料表結構與程式碼推斷：平台產生 preview 時會覆寫 `_template_meta.json`，模板自己宣告的 `effects` 讀不到
+  （要等平台配合 Template Protocol 調整）。分類看 slug 前綴，不只看 `category`。
+- 新增 `scripts/aigo_template.py`（唯讀：`list`／`suites`／`effects`／`preview`；preview 只寫進新的或空的資料夾，先驗證全部路徑、
+  寫進暫存資料夾再改名，失敗不留半成品，擋絕對路徑、`..`、磁碟代號、反斜線與 NUL）。
+
+**Phase 1.5 模板盤點閘門**
+- 新增 §1.0.5 與計畫項目 1.3：盤點結論三種——(a) 直接用、(b) 抄相近的來改、(c) 不用，(c) 寫一句理由即可。
+  既有 app 的增量開發也要盤點；盤點結果不寫進需求範本。
+- 計畫閘門由五條擴為七條（新增第 4 條盤點結論、第 5 條效果繫結表），`planning.md`、`product-line-decision.md`、evals 同步。
+
+**推翻 1.51.0 的人工設定政策：AI 可代設外部服務（egress）與金鑰**
+- 前提是**先確認再動手**：建立或授權外部服務、寫入金鑰之前，AI 先用白話列出目的網域、送出的資料、哪支 action 用、
+  外部服務是整個租戶共用的；這張表**單獨確認**，不併在計畫同意裡；網域或送出的資料一變就重新確認；刪除另外確認。
+- 金鑰的值不出現在對話：新增 `scripts/aigo_secrets.py`（`list` 只列名稱；`set --from-file` 只讀權限 600 的檔案、只走 https、
+  值只放在請求本文；`delete` 要 `--confirm`；**沒有讀取值的指令**；不跟隨 symlink、權限檢查與讀取用同一個 fd；Windows 無法設 600，請用戶在 Builder 貼上）。
+- `EGRESS_NOT_READY` 等設定缺口仍然不當平台 bug 回報——改由 AI 在確認後自行補上。
+- 改寫 SKILL.md Action 規則 5 與錯誤處理、dev-guide §25.2–§25.5、`uat-environment.md` §3 與附錄 A、`pre-report-self-grill.md`
+  Q4.5b／Q6.1、`issue-reporting.md`、`troubleshooting.md`、`platform-behaviors.md`、`hosted-apps.md`、`aigo_publish.py` 提示。
+- 合併時對齊 1.61.0 之後才寫進來的段落：`hosted-apps.md` §2.1 排程轉發鏈的外部服務與共享金鑰、
+  egress `timeout_ms` 調高，都由「AI 不代設」改為照 §25.2 確認流程。`hosted-migration-runbook.md` 轉發鏈前置與拆解模板的金鑰欄同步。Hosted env 的密鑰與 `runtime-settings` 全量替換仍由負責人設、AI 不代做。
+- `aigo_secrets.py`：金鑰檔一顆一個、只放值本身——`.env` 形狀（多行 `KEY=value`）或以 `<KEY>=` 開頭的檔會被拒絕（PEM 這類多行值照常）；3xx 回應不再當成成功
+- 權限（v1.15.4）：app 範圍外部服務的建立／授權需 `builder.access`＋app 擁有者或 `system.admin`；PATCH／DELETE 需租戶內任一 app 擁有者
+  或 `system.admin`；金鑰需 `builder.access`＋看得到該 app；租戶層 `/egress-services` 需 `system.admin`。
+
+## 1.68.0
+
+### 修正：本機刪掉的 action 同步後還留在平台，發布後照樣可以被呼叫
+
+租戶回報：本機刪掉 `actions/<name>.py`、從 `actions/manifest.json` 拿掉登記後跑 `full_deploy()`，發布回 `published`，
+那支 action 仍回 200、跑的是舊程式碼；帶 `confirm_removal=True` 重發也一樣。對照平台原始碼與該 App 的發布快照核實：
+
+- `sync_to_cloud()` 走 PATCH，只新增或覆寫，**不刪遠端檔**；`full_deploy()` 沒有接上既有的 `diff_vfs()`／`delete_remote_files()`
+- 平台判斷 action 能不能被呼叫**只看 VFS 有沒有那個檔**，manifest 沒登記不會擋（`is_enabled` 預設 true）
+- `confirm_removal=true` 只放行 409 `ACTION_REMOVAL`，本身不刪檔；遠端檔沒少，那道守門也不會觸發
+
+變更：
+
+- `scripts/aigo_sync.py`：新增 `remote_only_actions()` 與 `RemoteOnlyFilesError`；`sync_to_cloud()` 加 `on_remote_only` 參數——
+  `"abort"`（**預設**）遠端有本機沒有的 `actions/` 檔時**寫入前中止並列出路徑**、`"keep"` 列出後照常同步。
+  只看 `actions/` 底下：其他路徑有平台注入檔與本機不掃的檔，不拿「本機沒有」當成該刪
+- `scripts/aigo_publish.py`：`full_deploy()` 加同名參數，多一個 `"delete"`——先刪掉遠端殘留再同步。
+  `"delete"` 必須帶 `delete_paths`（用戶確認過的路徑）：只刪清單內的，清單外的殘留保留並列出（回傳 `remote_only_kept`）；
+  清單內混進本機還有的、`actions/` 以外的路徑就整個拒絕。確認之後別人才加的 action 不會被順手刪掉
+  刪除只放在這裡：`sync_to_cloud()` 收到的 `files` 可能只是部分檔案，拿它當本機全貌去刪會誤刪
+- 中止訊息把 `actions/<name>.py` 與其他檔（`manifest.json`、`_shared/` 共用模組）分開列，
+  後者提醒刪掉可能讓其他 action 壞掉；本機完全沒有 `actions/` 檔時另外警告不要整批刪
+- ⚠️ **行為變更**：既有專案只要遠端留著本機沒有的 `actions/` 檔（最常見是起手式的 `actions/summarize_leads.py`），
+  更新後第一次同步會中止。把清單給用戶確認，再用 `full_deploy(on_remote_only="delete", delete_paths=[…])`／`delete_remote_files()` 或 `"keep"`；只同步部分檔案的呼叫端要明確帶 `"keep"`
+- `SKILL.md` Phase 4.1、`troubleshooting.md`（新增「刪掉的 action 還能呼叫」列）、`custom-app-dev-guide.md` §8／§26.2：
+  寫明下架 action 要刪 VFS 檔、改 manifest 無效、`confirm_removal` 不刪檔
+- `tests/test_sync_remote_only.py`：18 條離線測試
+
+## 1.67.0
+
+### 產品線判斷先問：專案進正式環境了嗎
+
+產品線判斷原本只看需求形狀（新建）或 stack 形狀（遷入），沒有把「有沒有正式使用者與正式資料」當輸入。
+新增一道最前面的判斷：
+
+- 還沒進正式環境（全新，或有程式但沒上線）→ 先看 Custom App 做不做得到，過得了就走 Custom App
+- 已進正式環境、有既有程式要搬 → 引導走 Hosted App 整搬，主流程照遷入作業手冊
+- 已進正式環境、但沒有程式要搬（只有試算表／SaaS／人工流程）→ 照全新判，正式資料另外搬進平台
+
+這是引導的預設值，不是硬規則；例外與判準寫在同一節。
+
+變更：
+
+- `product-line-decision.md` 新增 §0：怎麼算已進正式環境、四種專案狀態的引導方向、理由與例外
+- `SKILL.md` 源頭意圖分流：要做 app 的先問這一題；§1.0 四問前先確認
+- `migration-workflow.md` §2.1：新增問題零；問題二的對照表與表下各點註明只適用還沒進正式環境的系統
+- `planning.md` 第 1.5 項：預設立場前先過 §0
+
+## 1.65.0
+
+### 統一說法：原系統本來就在用的 Supabase Auth 可以維持
+
+規則 32 的例外寫「不得順帶採用 Supabase Auth」，`member-admin.md` §7.1 與規則 34 則寫「維持原本的 Supabase Auth 是正當選項」，
+兩邊沒對齊；1.63.0 的遷入作業手冊照前者寫成「維持自家登入要先問平台」。統一為後者：
+
+- `dev-rules.md` 規則 32：限制改為「不得在例外核准的那顆外接庫專案上順帶啟用」這些功能；原系統本來就在用、維持原樣的登入不在此限
+- `hosted-migration-runbook.md` §2：原系統用 Supabase Auth 時，維持原本的登入是正當選項，不要搬進例外核准的外接庫專案；資料層靠 BaaS 的部分才是平台決議事項
+- `migration-workflow.md` §2.0 第 4 類與 §2.1 對照表：註明待決的是資料層，登入本身可以維持原本的 BaaS Auth
+
+## 1.64.0
+
+### 延伸欄位權限分界核實＋不要登記 `dc_` 開頭的表
+
+問題起點：「延伸欄位只開放給有 `builder.access` 的人讀寫」是否為真。對照平台最新原始碼並在測試租戶完整實測：
+
+- **值**：成立。批取／寫值只認 `builder.access`；另有匯入（`system.data_import`）可寫不可讀。
+- **定義**：不成立。建、改要 `datacenter.schema_write`（只有 `builder.access` 會 403），刪要 `system.admin`＋confirm。
+- **旁路**：`dc_ext_values`／`dc_ext_field_defs` 不在引用黑名單，可登記成 app 的資料引用。
+  值表走 proxy 全 500（沒有 `id` 欄），但**定義表可讀、可改、可新增、可刪**（刪會連帶刪光該欄所有值），
+  proxy 不看 `builder.access`，等於任何打得開 app 的員工都能繞過 `datacenter.schema_write` 與 `system.admin`。
+
+變更：
+
+- `data-center.md` §10：通道表補「Data Reference 直接引用值表」一列；新增「權限分界：定義與值分開管」與
+  「🚨 不要登記 `dc_` 開頭的表」兩段（含 2026-10-05 實測結果）；§7 登記段加同一條禁令
+- `default-table-lookup.md`：`available-tables` 相減公式扣掉 `dc_` 開頭的目錄表
+- `dev-rules.md` 規則 18：登記引用時 `dc_` 開頭的表一律不登記
+
+## 1.63.0
+
+### Hosted App 遷入作業手冊：從盤點、測試到切換與退場的主流程
+
+Custom App 線有 Phase 1～5，Hosted 線原本只寫「不進 Phase 2–4、驗證用 §3.4」，盤點、UAT、測試、切換散在各章節，
+沒有順序與每階段的通過條件。某遷入案實際走一輪後整理成主流程：
+
+- 新增 `references/hosted-migration-runbook.md`：
+# 1.75.0
+
+- 金鑰工具新增 `create-key`：先建立 `PENDING_PASTE_VALUE`，同名存在不覆蓋，含同時建立的 409 處理。
+- 新增 `set --from-env <VAR>`，支援 Windows；POSIX 的 600 權限檔案輸入維持，未新增 `.env` 解析。
+- `status` 僅查名稱並明示設定狀態未確認，不讀回金鑰值；API 失敗不轉印回應或底層例外內容。
+- 預設流程改為先防護 action、建 key、請用戶在 Builder 貼值；範例攔下空值與佔位值，未設定不得外呼或誤報完成。
+- 補上跨平台工具、競態、不洩漏與文件範例防護測試。對應 #126。
+
+## 1.74.0
+
+- 新增課程工作區與學習版協作契約、僅課程生效的 Custom App 寫入前範圍檢查。
+- Hosted CI 範本歸技術層管理；修正權限示例的未定義函式與資料範圍說明。
+- 一般工作區維持既有行為；排錯以證據為準。
+
+## 1.73.0
+
+### Custom App 線支援瀏覽器登入（`aigo_auth.py login --browser`）
+
+原本 Custom App 線只能把帳密寫進 `~/.aigo/.env`；非技術使用者（例：用 aigo-client-collab 協作的客戶）要自己編輯隱藏資料夾裡的檔案，
+也不是每個人都願意把密碼存成檔案。
+
+- `scripts/aigo_auth.py`：新增 `browser_login()`、`verify_token()` 與 `login --browser` 指令——開租戶的 `/auth/cli?port=<埠>` 登入頁，
+  接 `http://127.0.0.1:<埠>/callback` 的 Token（與 Hosted 線 `aigo login` 同一套協定與環境變數），用 `GET /api/v1/auth/me`
+  確認屬於這個租戶後寫進工作區 `.aigo/token.json`；`expires_in` 沒給就讀 JWT 的 `exp`；回呼只收 `*.ai-go.app` 來源、只綁 127.0.0.1
+- `get_token()` 找不到帳密時的錯誤訊息改成列出兩種登入方式
+- `SKILL.md` Phase 1 硬規則 2、最短設定路徑與 `references/environment.md` 補瀏覽器登入；帳密檔照舊可用
+- 新增 `tests/test_browser_login.py`（本機回呼、CORS／Private Network 預檢、缺 Token、外部來源、逾時）
+
+## 1.72.0
+
+### 前端資料畫面要做完四態（載入中／有資料／空資料／錯誤），送出中要鎖按鈕
+
+原本只有「啟動先渲染 skeleton」一條（為了避開平台 8 秒空渲染偵測），換頁、篩選、送出時的載入中與錯誤畫面都沒有規範，
+新專案範本的頁面也沒有抓資料的寫法可以照抄。
+
+**核心規則 30 擴大**（`references/dev-rules.md`、`SKILL.md` 速查表）
+- 每一個會抓資料的畫面（換頁、切篩選、翻頁、重新整理、開明細都算）都要明確處理載入中／有資料／空資料／錯誤
+- 載入中不沿用舊資料；空資料不和載入中共用畫面；錯誤要渲染出來並給「重試」，不能只 `console.error`
+- 送出中按鈕停用、回應回來才解鎖——命中簽核時連點兩下就是兩筆記錄＋兩張簽核單（規則 24）
+
+**寫法**（`references/custom-app-dev-guide.md` §30，新）
+- 哪些畫面要做與常見漏法、四態分法（`runAction` 失敗會 throw `Error`，已對照平台 SDK 模板）、丟掉過期回應、
+  送出中與簽核 pending 的處理、共用元件 `DataState`、交付前自查清單
+- §17 常見問題補「停在載入中／一進頁面就沒有資料」與「按一次建出兩筆」兩列；`platform-behaviors.md` §11 指向 §30
+
+**新專案腳手架**（`scripts/aigo_scaffold.py`）
+- 新增 `src/components/DataState.tsx`；`App.css` 補 `.skeleton`、`.state-box`、`.state-error`、`.btn:disabled`、`.sr-only`
+- `DashboardPage` 改成四態示範（資料來源留 TODO），單頁與多頁範本都通過 `aigo_typecheck.py`
+- 新增 `tests/test_scaffold.py`
+
+**驗證**（`references/verification-details.md`、`SKILL.md` 驗證流程快速參照）
+- Phase 5 新增第 10 項「資料畫面四態與送出中」：在瀏覽器實開逐頁看，API 層驗證全綠也測不出這一項
 
 ## 1.70.0
 

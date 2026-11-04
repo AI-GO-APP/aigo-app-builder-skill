@@ -18,7 +18,7 @@
 - 規則 27：`ctx.erp.validate_picking` 的冪等要看明細，不能看單據 state
 - 規則 28：原生 TIMESTAMP／DATE 是 offset-naive 的 UTC，解析前必須補 `Z`
 - 規則 29：所有 API 一律走租戶空間 `https://[tenant].ai-go.app/*`
-- 規則 30：啟動先渲染 skeleton，不要讓長 API 擋住首次渲染
+- 規則 30：資料畫面要做完四態（載入中／有資料／空資料／錯誤），送出中要鎖按鈕；啟動先渲染 skeleton
 - 規則 31：Internal app 前端禁止直呼自建表 SDK
 - 規則 32：禁止以 Hosted App 承載資料庫或 storage
 - 規則 33：每支要上正式的 app 都要有一個「UAT 結論」
@@ -229,17 +229,31 @@
       連是否跑滿一次 bcrypt 都一樣）。看到 401 **先跑 `aigo_auth.py status` 確認租戶空間**，
       不要往密碼、Token、權限方向深掘
     - 租戶前綴 = 用戶登入時網址列的第一段；不確定就直接問用戶，別猜
+    - **外部 API 金鑰**：action 使用前須攔下空值、空白與 `PENDING_PASTE_VALUE`，不得帶佔位值外呼。
+      預設先建 key 再請用戶貼值；既有 action 先部署防護才建佔位值。名稱存在或發布成功不代表已設定。
+      未設定的互動操作顯示「尚未設定」；排程可明確跳過，但不可記為完成或推進游標。
+      Webhook 需保留事件／重試，不能吞掉事件。完整流程與範例見 `custom-app-dev-guide.md` §25.1–25.2。
     - 細節見 `references/platform-behaviors.md` §6.1
     - **例外：app 的執行期網址不受本條管**——external Custom App 本來就在 `*.apps.ai-go.app`
       （有 `subdomain` 走 `{subdomain}.apps.ai-go.app/ext-runtime`，沒有走 `runtime.apps.ai-go.app/ext-runtime/{slug}`），
       internal 在 `{tenant}.ai-go.app/runtime/{識別碼}`；測試版各多一段 `version-test`。
       要給用戶連結時照 `platform-behaviors.md` §6.2 那張表，不要自己拼、不要拿本條判它錯
-30. **啟動先渲染 skeleton，不要讓長 API 擋住首次渲染**（★ 強制）
-    - 平台會監看掛載後 **8 秒**：Shadow root 全空就自動回報 runtime error，
-      並對使用者顯示「App 已載入但沒有顯示任何內容」banner
-    - 「先跑長 API、成功後才第一次渲染」的寫法會被誤報——
-      一律先渲染 loading／skeleton 佔位，資料到了再替換
-    - 詳見 `references/platform-behaviors.md` §11
+30. **資料畫面要做完四態（載入中／有資料／空資料／錯誤），送出中要鎖按鈕；啟動先渲染 skeleton**（★ 強制）
+    - **啟動**：平台會監看掛載後 **8 秒**：Shadow root 全空就自動回報 runtime error，
+      並對使用者顯示「App 已載入但沒有顯示任何內容」banner。
+      「先跑長 API、成功後才第一次渲染」的寫法會被誤報——
+      一律先渲染 loading／skeleton 佔位，資料到了再替換（`platform-behaviors.md` §11）
+    - **每一個會抓資料的畫面**（不只啟動：換頁、切篩選、翻頁、重新整理、開明細都算）都要明確處理四態：
+      - 載入中：顯示 skeleton 或「載入中」，**不要沿用上一頁或上一個篩選的舊資料**冒充新結果
+      - 有資料：正常渲染
+      - 空資料：說明「沒有資料」並給下一步（新增、清除篩選）；**不要和載入中共用同一個畫面**——
+        `[]` 一開始就渲染成「沒有資料」，使用者會以為資料不見了
+      - 錯誤：顯示看得懂的訊息＋「重試」；**不要只 `console.error`**——使用者只會看到永遠停在載入中
+    - **送出中（新增／修改／刪除／執行 action）**：按鈕停用並顯示處理中，回應回來才解鎖。
+      在 AI GO 這不只是 UX：命中簽核時連點兩下＝建兩筆記錄＋開兩張簽核單（規則 24 的 pending 不可重試）
+    - 狀態用 React state 自己管，訊息用 react-hot-toast 或頁內提示（`alert()`／`confirm()` 不可用，規則 11）
+    - 寫法、共用元件與檢查表見 `references/custom-app-dev-guide.md` §30；
+      新專案腳手架已帶 `src/components/DataState.tsx` 與示範頁，照著用即可
 31. **Internal app 前端禁止直呼自建表 SDK**（★ 強制，**開發時測不出來、上線就爆**）
     - 前端 `src/api.ts` 的 `listTables`／`queryTable`／`insertRow`／`updateRow`／
       `deleteRow` 是以**登入者身分**打 `/api/v1/data-center/*`，記錄 CRUD 一律要求

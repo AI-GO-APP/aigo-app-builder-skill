@@ -53,6 +53,10 @@ TOKEN_CACHE_FILE = "token.json"
 
 # Token 剩餘不到這個秒數就視為過期，提前換新（避免長流程中途 401）
 TOKEN_REFRESH_MARGIN = 300
+# 瀏覽器登入（login --browser）：與 aigo CLI 的 `aigo login` 同一套本機回呼——租戶的 /auth/cli 頁面登入後，
+# 把 access_token POST 到 http://127.0.0.1:<port>/callback。環境變數名稱與 CLI 相同。
+BROWSER_LOGIN_PATH = "/auth/cli"
+BROWSER_LOGIN_TIMEOUT = 300
 
 # 匯入當下的 shell 環境變數快照——**必須在任何 load_env_file() 之前取**。
 # `load_env_file` 會把 `.env` 的鍵 setdefault 進 os.environ，之後就再也分不出
@@ -845,6 +849,136 @@ def refresh_token(base_url: str, refresh: str) -> dict | None:
     }
 
 
+def _jwt_exp(token: str) -> float:
+    """讀 JWT payload 的 exp（不驗簽，只拿來算快取到期時間）；讀不到回 0。"""
+    import base64
+
+    try:
+        part = token.split(".")[1]
+        payload = json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+        return float(payload.get("exp") or 0)
+    except (IndexError, ValueError, TypeError, AttributeError):
+        return 0.0
+
+
+def _origin_allowed(origin: str, base_url: str) -> bool:
+    """回呼只接受租戶空間（或其他 *.ai-go.app 頁面）送來的請求。"""
+    if not origin:
+        return False
+    host = (urlsplit(origin).hostname or "").lower()
+    base_host = (urlsplit(base_url).hostname or "").lower()
+    return host == base_host or host == AIGO_BASE_DOMAIN or host.endswith("." + AIGO_BASE_DOMAIN)
+
+
+def browser_login(base_url: str, timeout: float = BROWSER_LOGIN_TIMEOUT, open_browser: bool | None = None) -> dict:
+    """
+    瀏覽器登入：開租戶的登入頁，使用者在瀏覽器登入後，頁面把 Token 送回本機。
+
+    與 aigo CLI 的 `aigo login` 同一套協定：在 127.0.0.1 開一個臨時埠，打開
+    `<base_url>/auth/cli?port=<埠>`；登入頁把 `{access_token, refresh_token?, expires_in?}`
+    POST 到 `http://127.0.0.1:<埠>/callback`。密碼只在瀏覽器的登入頁輸入，本機不經手。
+
+    環境變數（與 CLI 相同）：`AIGO_LOGIN_CALLBACK_PORT` 指定埠、`AIGO_LOGIN_AUTH_URL` 換登入頁、
+    `AIGO_LOGIN_NO_BROWSER=1` 不自動開瀏覽器（只印網址）。
+
+    Returns:
+        同 login() 的字典；`expires_in` 沒給時由 JWT 的 exp 推算
+
+    Raises:
+        RuntimeError: 逾時沒收到回呼
+    """
+    import threading
+    import webbrowser
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    received: dict = {}
+    done = threading.Event()
+
+    class Handler(BaseHTTPRequestHandler):
+        def _reply(self, status: int, body: dict | None = None) -> None:
+            self.send_response(status)
+            origin = self.headers.get("Origin", "")
+            if _origin_allowed(origin, base_url):
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Private-Network", "true")
+            data = json.dumps(body).encode("utf-8") if body is not None else b""
+            if body is not None:
+                self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_OPTIONS(self):  # noqa: N802  瀏覽器的 CORS／Private Network 預檢
+            self._reply(204)
+
+        def do_POST(self):  # noqa: N802
+            if urlsplit(self.path).path != "/callback":
+                self._reply(404, {"error": "not found"})
+                return
+            origin = self.headers.get("Origin", "")
+            if origin and not _origin_allowed(origin, base_url):
+                self._reply(403, {"error": "origin not allowed"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                data = json.loads(self.rfile.read(length) or b"{}")
+            except ValueError:
+                self._reply(400, {"error": "invalid json"})
+                return
+            if not isinstance(data, dict) or not data.get("access_token"):
+                self._reply(400, {"error": "missing access_token"})
+                return
+            received.update(data)
+            self._reply(200, {"ok": True})
+            done.set()
+
+        def log_message(self, *args):  # 不把請求（含 Token）印到主控台
+            pass
+
+    port = int(os.environ.get("AIGO_LOGIN_CALLBACK_PORT") or 0)
+    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        auth_url = os.environ.get("AIGO_LOGIN_AUTH_URL") or f"{base_url}{BROWSER_LOGIN_PATH}"
+        url = f"{auth_url}{'&' if '?' in auth_url else '?'}port={port}"
+        print(f"🌐 請在瀏覽器登入 AI GO：{url}")
+        print("   （瀏覽器沒有自動打開的話，複製這個網址貼到瀏覽器）")
+        if open_browser is None:
+            open_browser = os.environ.get("AIGO_LOGIN_NO_BROWSER", "").strip().lower() not in ("1", "true", "yes")
+        if open_browser:
+            webbrowser.open(url)
+        if not done.wait(timeout):
+            raise RuntimeError(f"❌ {int(timeout)} 秒內沒有收到瀏覽器登入的回應，請重跑 `aigo_auth.py login --browser`")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    access = received["access_token"]
+    expires_in = float(received.get("expires_in") or 0)
+    if not expires_in:
+        exp = _jwt_exp(access)
+        expires_in = max(exp - time.time(), 0) if exp else 0
+    return {
+        "access_token": access,
+        "refresh_token": received.get("refresh_token", ""),
+        "expires_in": expires_in,
+        "token_type": received.get("token_type", "Bearer"),
+    }
+
+
+def verify_token(base_url: str, token: str) -> dict:
+    """用 `GET /api/v1/auth/me` 確認 Token 屬於這個租戶空間；失敗拋 httpx.HTTPStatusError。"""
+    with httpx.Client(timeout=30) as client:
+        resp = client.get(f"{base_url}/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+        resp.raise_for_status()
+        return resp.json()
+
+
 # === 憑證與 Token 快取 ===
 
 
@@ -1020,6 +1154,7 @@ def get_token(project_path: str = ".", force: bool = False) -> str:
     取得可用的 access_token——Skill 內所有 API 呼叫的統一入口。
 
     依序嘗試：未過期的快取 → refresh_token 換發 → 帳密登入。
+    快取可能來自帳密登入或瀏覽器登入（`login --browser`）；沒有帳密時，過期就請使用者重跑瀏覽器登入。
     憑證來源為 `.aigo/.env` 或環境變數（AIGO_EMAIL / AIGO_PASSWORD）；
     **租戶空間**來源見 `resolve_base_url()`（config.json 的 `base_url` 或 AIGO_BASE_URL／AIGO_TENANT）。
 
@@ -1058,8 +1193,9 @@ def get_token(project_path: str = ".", force: bool = False) -> str:
     password = os.environ.get("AIGO_PASSWORD", "")
     if not email or not password:
         raise RuntimeError(
-            f"❌ 找不到 AI GO 憑證。\n"
-            f"   請在 {credentials_path()} 填入：\n"
+            f"❌ 找不到 AI GO 憑證（或瀏覽器登入已過期）。兩種登入方式擇一：\n"
+            f"   1. 瀏覽器登入：uv run --project scripts python scripts/aigo_auth.py login --browser\n"
+            f"   2. 帳密檔：請在 {credentials_path()} 填入：\n"
             f"     AIGO_EMAIL=your-email@example.com\n"
             f"     AIGO_PASSWORD=your-password\n"
             f"   （機器級憑證檔，填一次即可，之後不再詢問；不會被任何 repo 提交）\n"
@@ -1111,6 +1247,7 @@ def print_setup_guide() -> None:
 ║  2. setup-workspace <dir> 在租戶目錄建立 .aigo/config.json，     ║
 ║                           填 base_url（https://[tenant].ai-go.app）║
 ║  3. login                 驗證憑證並快取 Token                   ║
+║     login --browser       改用瀏覽器登入（不必把密碼寫進 .env）  ║
 ║  4. app add <alias> --id <uuid>   登錄 app（自動回填 kind／slug）║
 ║     app list ／ app default <alias> ／ app remove <alias>        ║
 ║  5. status                看目前生效的租戶、身分、app 表         ║
@@ -1298,6 +1435,18 @@ if __name__ == "__main__":
             sys.exit(_cmd_status(root))
         elif command == "logout":
             clear_token_cache(root)
+        elif command == "login" and "--browser" in sys.argv[2:]:
+            # 瀏覽器登入：密碼只在瀏覽器輸入；Token 寫進工作區 .aigo/token.json，不印出
+            base_url = resolve_base_url(root)
+            result = browser_login(base_url)
+            try:
+                me = verify_token(base_url, result["access_token"])
+            except httpx.HTTPStatusError as e:
+                print(f"❌ 拿到的登入狀態在 {base_url} 無效（HTTP {e.response.status_code}）：確認瀏覽器登入的是這個租戶")
+                sys.exit(1)
+            _save_token_cache(root, result, base_url)
+            who = me.get("email") or me.get("name") or ""
+            print(f"✅ 瀏覽器登入成功{f'（{who}）' if who else ''}，Token 已快取；過期後重跑 `login --browser`")
         elif command == "login":
             # 驗證憑證可用：取 Token 但不印出 Token 本身
             try:

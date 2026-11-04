@@ -128,6 +128,23 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 執行期網域�
    ```
    請用戶自己在 `~/.aigo/.env` 填入 `AIGO_EMAIL` / `AIGO_PASSWORD`，
    然後 `uv run --project scripts python scripts/aigo_auth.py login` 驗證。
+   **不想把密碼存在檔案裡** → 改用瀏覽器登入（下一節），這一步可以跳過。
+
+### 瀏覽器登入（`login --browser`，1.73.0 起）
+
+```bash
+uv run --project scripts python scripts/aigo_auth.py login --browser
+```
+
+- 開租戶的 `https://[tenant].ai-go.app/auth/cli?port=<埠>`，用戶在登入頁輸入帳密；頁面把 Token POST 回
+  `http://127.0.0.1:<埠>/callback`（與 Hosted 線 `aigo login` 同一套協定），腳本用 `GET /api/v1/auth/me` 確認 Token
+  屬於這個租戶，再寫進工作區 `.aigo/token.json`。**密碼不經過 agent、不落地成檔案**。
+- 租戶照 `resolve_base_url()`（工作區 `config.json` 的 `base_url` 等三層來源），所以要先有工作區。
+- 平台有給 `refresh_token` 就沿用既有的換發；沒給或換不到，到期後 `get_token()` 會請用戶重跑 `login --browser`
+  （`~/.aigo/.env` 有帳密時則照舊自動用帳密登入）。
+- 瀏覽器沒自動打開（遠端、無桌面環境）→ 腳本會印網址，請用戶在自己的瀏覽器開；
+  `AIGO_LOGIN_NO_BROWSER=1` 只印不開、`AIGO_LOGIN_CALLBACK_PORT` 指定埠、`AIGO_LOGIN_AUTH_URL` 換登入頁（與 CLI 相同）。
+- 回呼只接受 `*.ai-go.app` 來源的請求，伺服器只綁 `127.0.0.1`，收到 Token 就關閉；不把請求內容印到主控台。
 5. 隨時可用 `uv run --project scripts python scripts/aigo_auth.py status` 確認**實際生效的租戶空間**與憑證狀態
 6. 驗證連線：`get_token()` → `resolve_app()` → GET App，`assert_remote_matches()` 確認遠端與登錄表一致
 
@@ -142,4 +159,4 @@ https://xxx.apps.ai-go.app/…                  ❌ Custom App 執行期網域�
   不是 skill 目錄；或用 `AIGO_PROJECT_ROOT` 明確指定。
 - **不得**寫進 `config.json`、原始碼、commit、log 或任何指令列參數。
 - Token 快取在 `<專案>/.aigo/token.json`，過期自動換新；`aigo_auth.py logout` 可清除。
-- Agent **不代為輸入或寫入密碼**——憑證檔一律由使用者本人填寫。
+- Agent **不代為輸入或寫入密碼**——憑證檔一律由使用者本人填寫；瀏覽器登入時密碼只在租戶登入頁輸入。

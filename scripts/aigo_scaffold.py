@@ -60,6 +60,18 @@ html, :host { box-sizing: border-box; }
 .btn { padding: 8px 16px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; transition: all 0.15s; }
 .btn-primary { background: var(--primary); color: #fff; }
 .btn-primary:hover { background: var(--primary-hover); }
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* 資料狀態（核心規則 30）：載入中 skeleton、空資料／錯誤提示 */
+.skeleton { height: 44px; margin-bottom: 12px; border-radius: 8px;
+  background: linear-gradient(90deg, var(--border) 25%, #f1f5f9 50%, var(--border) 75%);
+  background-size: 200% 100%; animation: skeleton-shimmer 1.2s ease-in-out infinite; }
+@keyframes skeleton-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.state-box { padding: 32px 20px; text-align: center; color: var(--text-muted);
+  background: var(--card-bg); border: 1px dashed var(--border); border-radius: 8px; }
+.state-box .btn { margin-top: 12px; }
+.state-error { color: var(--danger); border-color: var(--danger); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 '''
 
 LAYOUT_TSX = '''import React from "react";
@@ -109,16 +121,83 @@ export default function App() {
 }
 '''
 
-DASHBOARD_TSX = '''import React from "react";
+DATA_STATE_TSX = '''import React from "react";
+
+// 資料畫面的四態（核心規則 30）：載入中 → skeleton；錯誤 → 訊息＋重試；空資料 → 提示；其餘渲染 children
+type Props = {
+  loading: boolean;
+  error?: string | null;
+  empty?: boolean;
+  emptyText?: string;
+  onRetry?: () => void;
+  rows?: number;
+  children?: React.ReactNode;
+};
+
+export default function DataState({ loading, error, empty, emptyText = "目前沒有資料", onRetry, rows = 3, children }: Props) {
+  if (loading) {
+    return (
+      <div aria-busy="true" aria-live="polite">
+        {Array.from({ length: rows }).map((_, i) => <div key={i} className="skeleton" />)}
+        <span className="sr-only">載入中…</span>
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="state-box state-error" role="alert">
+        <p>資料載入失敗：{error}</p>
+        {onRetry && <button className="btn btn-primary" onClick={onRetry}>重試</button>}
+      </div>
+    );
+  }
+  if (empty) return <div className="state-box">{emptyText}</div>;
+  return <>{children}</>;
+}
+'''
+
+DASHBOARD_TSX = '''import React, { useCallback, useEffect, useState } from "react";
+import DataState from "../components/DataState";
+
+type Item = { id: string; name: string };
+type Load<T> =
+  | { status: "loading" }
+  | { status: "ready"; data: T }
+  | { status: "error"; message: string };
+
+// TODO：換成實際的資料來源，例如
+//   const { data } = await runAction("list_items", {});  return data?.items ?? [];
+async function loadItems(): Promise<Item[]> {
+  return [];
+}
 
 export default function DashboardPage() {
+  const [state, setState] = useState<Load<Item[]>>({ status: "loading" });
+  const [reloadKey, setReloadKey] = useState(0);
+  const reload = useCallback(() => setReloadKey((k) => k + 1), []);
+
+  useEffect(() => {
+    let stale = false;
+    setState({ status: "loading" });
+    loadItems()
+      .then((data) => { if (!stale) setState({ status: "ready", data }); })
+      .catch((e: Error) => { if (!stale) setState({ status: "error", message: e.message || "未知錯誤" }); });
+    return () => { stale = true; };
+  }, [reloadKey]);
+
   return (
     <div className="page-content">
       <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 16 }}>總覽</h1>
-      <div className="card">
-        <p>歡迎使用 AI GO Custom App！</p>
-        <p style={{ color: "var(--text-muted)", marginTop: 8 }}>開始建立您的應用程式。</p>
-      </div>
+      <DataState
+        loading={state.status === "loading"}
+        error={state.status === "error" ? state.message : null}
+        empty={state.status === "ready" && state.data.length === 0}
+        emptyText="還沒有資料，開始建立您的應用程式。"
+        onRetry={reload}
+      >
+        {state.status === "ready" &&
+          state.data.map((item) => <div key={item.id} className="card">{item.name}</div>)}
+      </DataState>
     </div>
   );
 }
@@ -172,6 +251,7 @@ def scaffold_new_project(project_path: str, project_type: str = "single") -> lis
     write("src/main.tsx", MAIN_TSX)
     write("src/App.css", APP_CSS)
     write("src/components/AppLayout.tsx", LAYOUT_TSX)
+    write("src/components/DataState.tsx", DATA_STATE_TSX)
     write("src/pages/DashboardPage.tsx", DASHBOARD_TSX)
     write("actions/manifest.json", json.dumps(
         {"hello_action": {"description": "範例 Action", "is_enabled": True, "timeout_ms": 10000}},

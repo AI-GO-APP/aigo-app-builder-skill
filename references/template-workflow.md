@@ -125,7 +125,8 @@ uv run --project scripts python scripts/aigo_template.py effects <slug>         
      （REST 建表不會自動登記，沒登記 `ctx.db` 會說表不存在）
    - `platform_table` → `POST /refs/apps/{app_id}`（欄位以引用面 columns 為準）
    - `http` → 外部服務＋授權＋金鑰，**AI 可代設，但外部服務／資料表要單獨確認過**（不併進計畫同意；
-     網域或送出資料有變就重新確認；`custom-app-dev-guide.md` §25.2）；金鑰用 `aigo_secrets.py set`
+     網域或送出資料有變就重新確認；`custom-app-dev-guide.md` §25.2）；金鑰先防護 action、`create-key`，
+     再請用戶貼值；指定環境變數輸入用 `aigo_secrets.py set --from-env`
    - `approval`／`messaging`／`knowledge`／`erp` → 依各效果面既有規則（簽核攔截規則 24、`ctx.erp` 白名單等）
 4. **灌改造後的 VFS**：模板碼抄進 app 專案目錄改造（非預設繫結改 ports 實作）→ Phase 3–4 的同步、編譯、驗證、發布
 

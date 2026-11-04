@@ -33,6 +33,7 @@
 - 27. 租戶資料存取規則（Auth gate）：平台側人軸執法（2026-09 起）
 - 28. 執行模式：冷啟動／常駐（`always_on`，租戶自選；v1.13.0 起上 prod）
 - 29. 存取通道端點總表：internal／external／匿名／Hosted（★ 四條通道，四種憑證）
+- 30. 前端資料狀態：載入中／有資料／空資料／錯誤，加上送出中（★ 核心規則 30 的寫法）
 
 ---
 
@@ -253,13 +254,14 @@ app 仍帶舊的 30 秒 ceiling，**要 republish 一次**才會換上 manifest 
 
 依權限分流（前端隱藏不算數，這裡才是強制點）：
 
+以下只示範模組權限檢查，不含學生／客戶逐筆資料範圍。實作時仍須依已確認規格加上伺服端的資料範圍檢查；不要把可讀某模組等同於可讀全租戶資料。
+
 ```python
 def execute(ctx):
     perms = ctx.user_permissions or []
-    if "system.admin" in perms or "hr.read" in perms:
-        rows = ctx.db.query("sale_orders", limit=100)
-    else:
-        rows = [strip_sensitive(r) for r in ctx.db.query("sale_orders", limit=100)]
+    if "system.admin" not in perms and "sale.read" not in perms:
+        raise PermissionError("無銷售資料讀取權限")
+    rows = ctx.db.query("sale_orders", limit=100)
     ctx.response.json({"rows": rows})
 ```
 
@@ -572,6 +574,8 @@ Builder UI 對應「套件」面板（用面板儲存會清掉檔案裡的註解
 | 423 | 有待審核發布，等待/取消 |
 | Action 連不到第三方 API | 讀回傳 status/error：raw httpx 直連必 timeout → 改 `ctx.http.call`；多為 slug 未註冊 EgressService → §25 |
 | 使用者看到「App 已載入但沒有顯示任何內容」banner | 平台的空渲染偵測：掛載後 8 秒 Shadow root 全空就回報 runtime error。啟動先渲染 skeleton，別讓長 API 擋住首次渲染 → `platform-behaviors.md` §11 |
+| 畫面停在載入中不動、或一進頁面就顯示「沒有資料」 | 沒有分出四態：`catch` 只 `console.error`、或拿 `[]` 當初始值兼當載入中 → §30 |
+| 按一次建出兩筆、或開了兩張簽核單 | 送出中沒鎖按鈕 → §30.3；命中簽核的 pending 不可重試 → §24.2 |
 | 想用第三方 Python 套件 | `actions/requirements.txt` 精確 pin → §16.2 |
 | 某張表沒有 `tenant_id`，是 bug 嗎？ | **不是**，租戶隔離也沒失效。除了自帶 `tenant_id`，還有欄位別名 / 父表歸屬 / 全域表三種形態 → §20.3。不要自己補 `WHERE tenant_id` |
 
@@ -1383,14 +1387,25 @@ def execute(ctx):
 Server-Side Action 要打第三方 API，**一律走 `ctx.http.call(<egress-slug>, <path>)` 閘道**：
 
 ```python
+def _secret(ctx, key):
+    value = ctx.secrets.get(key)
+    if not value or not value.strip() or value.strip() == "PENDING_PASTE_VALUE":
+        return None
+    return value
+
+
 def execute(ctx):
     # slug 對應租戶註冊的「外部服務」（EgressService）——純域名白名單，
     # base_url 鎖定可打的 host。金鑰由 app 自己帶：存 ctx.secrets、自組 header。
+    key = _secret(ctx, "EXAMPLE_API_KEY")
+    if key is None:
+        ctx.response.json({"status": "not_configured", "message": "請先在 Builder 貼上金鑰值"})
+        return  # 不外呼、不寫入業務資料、不推進進度
     resp = ctx.http.call(
         "example-api",
         "/v1/orders",
         method="GET",
-        headers={"Authorization": f"Bearer {ctx.secrets.get('EXAMPLE_API_KEY')}"},
+        headers={"Authorization": f"Bearer {key}"},
     )
     if int(resp.get("status") or 500) >= 400:
         ctx.response.json({"error": "外部服務暫時無法使用", "status": resp.get("status")})
@@ -1443,16 +1458,41 @@ def execute(ctx):
 > 2. **這是獨立的一步，不併進計畫同意**：用戶說「計畫同意」不等於同意這張表——要單獨問、單獨得到明確同意。
 >    沒回覆、回覆含糊或只同意其中幾列 → 只做同意的那幾列。**網域或送出的資料一有變動就重新確認那一列**
 >    （含 Pending host 核准 `egress-pending-hosts/{id}/approve`，它會建立並授權一支共用池服務）
-> 3. **金鑰的值不經過對話**：請用戶自己填進本機檔（**一顆金鑰一個檔、檔裡只放值本身，不是 `KEY=value`**；例：`<工作區>/.aigo/secrets/<KEY_NAME>`，權限必須 600，
->    `.aigo/` 已在 `.gitignore`），再用 `scripts/aigo_secrets.py set <app> <KEY> --from-file <檔>` 寫入——
->    值只放在 HTTPS 請求本體，**不印出、不寫進 log／repo／指令列**；用戶也可以選擇自己到 Builder「服務」tab 貼上（**Windows 一律這樣做**：檔案無法設成 600，腳本會拒絕；金鑰檔也不可以是 symlink）。
->    不向用戶要金鑰值、不代為產生第三方的金鑰。**永遠不讀金鑰值**：平台有 `GET /actions/secrets/{id}/value`
->    （只要 `builder.access`），本 skill 不呼叫它，回讀只看 `key_name`（`aigo_secrets.py list`）
-> 4. 寫完回讀驗證（`available-egress-services` 看 `is_active` 與授權清單、`aigo_secrets.py list` 看 `key_name`），
->    再重試發布或呼叫
+> 3. **預設先建 key，再請用戶貼值**：先核對所有使用該 key 的 action（含 webhook／排程）已部署 §25.1 的防護，
+>    將空值、空白與 `PENDING_PASTE_VALUE` 視為未設定；尚未防護的既有 action 不可先塞佔位值。
+>    用 `scripts/aigo_secrets.py create-key <app> <KEY> --description "用途與使用的 action"` 建立；
+>    值先填固定佔位值 `PENDING_PASTE_VALUE`（空字串不能建立），**同名已存在不改值也不改說明**。
+>    隨即通知「請到 Builder → 這支 App →『服務』→ `<KEY>` 貼上 value」，附目前租戶的 `/builder/{app_id}` 連結。
+>    不向用戶要值、不代為產生第三方金鑰，**值不進對話、不印出、不讀回**。替代輸入見下方。
+> 4. 回讀驗證：外部服務看 `available-egress-services` 的 `is_active` 與授權清單；金鑰用 `status` 只查名稱。
+>    現有列表不提供安全的「是否仍為佔位值」資訊，所以只能回報「已存在，設定狀態未確認」，不能報「已設定」。
+>    **永遠不呼叫 `GET /actions/secrets/{id}/value`** 來判斷。名稱存在、`updated_at` 有變、發布成功都不代表憑證有效。
+>    用戶確認貼值後，再驗證實際功能；通過前保持排程停用，不把這一步當成業務已完成。
 >
 > **刪除**外部服務（租戶共用池，別的 App 可能在用）與刪除金鑰（`aigo_secrets.py delete … --confirm`）要另外逐項確認。
 > 設定缺口不是平台 bug（→ §25.3 第 6 點、`issue-reporting.md`）——經確認後補上即可。
+
+**替代輸入（不需經對話傳值）**：
+
+```bash
+# 用戶先在本機設定該程序可繼承的環境變數；指令只放變數名稱，Windows 也可用
+uv run --project scripts python scripts/aigo_secrets.py set <app> <KEY> --from-env MY_API_KEY
+# POSIX 備案：用戶填一顆金鑰的純值檔，不是 KEY=value；一般檔、非 symlink、權限 600
+uv run --project scripts python scripts/aigo_secrets.py set <app> <KEY> --from-file <工作區>/.aigo/secrets/<KEY>
+uv run --project scripts python scripts/aigo_secrets.py status <app>
+```
+
+AI 不自行掃描環境變數、讀取整份 `.env` 或代填值；只使用用戶指定的變數。環境變數必須在
+**執行工具的同一程序或其父程序**中設定，另一個終端設定不會自動傳給目前 agent。
+不要把值放進 shell 指令（會留在 history）、對話或除錯輸出；`--from-env` 不載入 `.env`，
+本版不提供 `--from-dotenv`。檔案路徑在 Windows 仍拒絕，改用環境變數或 Builder 貼值。
+本機金鑰檔不得進版控（先確認工作區 `.aigo/` 已被忽略）。
+
+**未設定時的行為**：§25.1 範例回 `not_configured`，前端要顯示「尚未設定」，不可顯示成功。
+排程可回 `{"status": "skipped", "reason": "secret_not_configured"}` 而不拋出重試例外，
+但必須顯示待設定狀態，不記為已送出／已完成，不推進游標或消耗任務。
+Webhook 不可只吞掉事件後回成功：要保留事件供補值後重放，或沿用來源端可重試的回應策略。
+佔位值可能通過只看名稱的發布檢查；**發布成功不等於可啟用外呼**。
 
 > 一律用**相對路徑**指引用戶，不要寫死主機名稱——子網域日後可能變動。
 > 用戶自己登入的後台網域是什麼就接在前面。
@@ -1537,7 +1577,7 @@ def execute(ctx):
 
 Phase 1.5 實作計畫裡就該**列出所有要打出去的外部服務（egress slug + base_url + 會送出的資料）**。
 計畫同意之後、寫 code 之前，把這張表當成**獨立的一步**照 §25.2 再確認一次，同意的列才由 AI 建立外部服務並授權本 App、
-請用戶把金鑰值填進本機檔再用 `aigo_secrets.py` 寫進 `ctx.secrets`——等到部署後才發現連不出去，等於整段開發白做。
+依 §25.2 先防護 action、建立 key，再請用戶貼值（或指定環境變數輸入），驗證後才啟用外呼——等到部署後才發現連不出去，等於整段開發白做。
 
 ## 26. 建立與刪除 App（API，不必走 UI）
 
@@ -1598,7 +1638,7 @@ POST /api/v1/builder/apps          （權限：builder.access）
 - ⚠️ **用業務模板 slug 建 app 會當場 seed 模板定義的自建表與 Data Reference 引用**（起手式兩款不帶）——
   表照模板預設繫結建好，改繫結要事後清，而清自建表有副作用。這正是本 skill 只用 starter 建殼的理由（§26.1）；
   已經這樣建了的 app，先盤 `GET /data-center/tables` 與 `GET /refs/apps/{id}` 再決定清不清，清之前逐張確認
-- 金鑰**不在建立時收**——建立後照 §25.2 確認流程寫入（值由用戶填本機檔或自己貼到 Builder「服務」tab）。寫入 API 見 `uat-environment.md` 附錄 A
+- 金鑰**不在建立時收**——建立後照 §25.2 確認流程先建 key，再請用戶到 Builder「服務」貼值（備案：指定環境變數或 POSIX 600 檔案）。寫入 API 見 `uat-environment.md` 附錄 A
 - 複製既有 app：`POST /apps/{app_id}/duplicate` → 201
 
 ### 26.3 刪除
@@ -1825,3 +1865,158 @@ route catalog 界定（`core/app_scope_routes.py` 的 `BROWSER_ROUTES`），未�
 以及**一般使用者**（不是開發者帳號）有沒有那支端點要的 permission。身分與 ACL 該從哪裡拿，
 見 `member-admin.md` §3.6。
 
+
+---
+
+## 30. 前端資料狀態：載入中／有資料／空資料／錯誤，加上送出中（★ 核心規則 30 的寫法）
+
+> 規則本體在 `dev-rules.md` 規則 30；這節是寫法。新專案腳手架（`aigo_scaffold.py`）已帶
+> `src/components/DataState.tsx`、`App.css` 的 `.skeleton`／`.state-box` 樣式與示範用的 `DashboardPage`，
+> 既有 app 沒有的話照下面補上。
+
+### 30.1 哪些畫面要做
+
+**只要畫面上的內容要等 API 才出得來，就要做四態**——不只啟動那一次：
+
+| 時機 | 常見漏法 |
+|---|---|
+| app 啟動 | 長 API 成功後才第一次渲染 → 8 秒空渲染誤報（`platform-behaviors.md` §11） |
+| 換頁、開明細 | 新頁面先渲染成「沒有資料」，資料到了才跳出來 |
+| 切篩選、翻頁、搜尋 | 舊結果還掛在畫面上，看起來像新結果；快速切換時舊回應晚到、蓋掉新結果 |
+| 重新整理、送出後重抓 | 整頁閃成空白 |
+| 送出（新增／修改／刪除／`runAction`） | 按鈕沒鎖，連點兩下送兩次 |
+
+### 30.2 四態怎麼分
+
+- **用一個狀態欄位分出載入中／有資料／錯誤**，空資料是「有資料但長度 0」。不要用 `data` 初始值 `[]`
+  兼當載入中——那樣載入中與空資料長得一模一樣
+- **錯誤一定要渲染出來**並給「重試」。`runAction` 在 HTTP 非 2xx 或 action 回 `status: "error"` 時會
+  **throw `Error`**（訊息取 `detail`／`error`），`catch` 之後只 `console.error` 的話畫面會永遠停在載入中
+- **快速切換時丟掉過期的回應**：`useEffect` 清理時標記作廢，晚到的舊回應不寫回 state
+
+```tsx
+import React, { useCallback, useEffect, useState } from "react";
+import { runAction } from "../action";
+import DataState from "../components/DataState";
+
+type Load<T> =
+  | { status: "loading" }
+  | { status: "ready"; data: T }
+  | { status: "error"; message: string };
+
+export default function OrdersPage() {
+  const [keyword, setKeyword] = useState("");
+  const [state, setState] = useState<Load<any[]>>({ status: "loading" });
+  const [reloadKey, setReloadKey] = useState(0);
+  const reload = useCallback(() => setReloadKey((k) => k + 1), []);
+
+  useEffect(() => {
+    let stale = false;                        // 篩選又變了 → 這次的回應作廢
+    setState({ status: "loading" });          // 不沿用上一個篩選的結果
+    runAction("list_orders", { keyword })
+      .then(({ data }) => { if (!stale) setState({ status: "ready", data: data?.items ?? [] }); })
+      .catch((e: Error) => { if (!stale) setState({ status: "error", message: e.message }); });
+    return () => { stale = true; };
+  }, [keyword, reloadKey]);
+
+  return (
+    <div className="page-content">
+      <input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="搜尋" />
+      <DataState
+        loading={state.status === "loading"}
+        error={state.status === "error" ? state.message : null}
+        empty={state.status === "ready" && state.data.length === 0}
+        emptyText={keyword ? "找不到符合的訂單，換個關鍵字試試" : "還沒有訂單"}
+        onRetry={reload}
+      >
+        {state.status === "ready" && state.data.map((o) => <div key={o.id} className="card">{o.name}</div>)}
+      </DataState>
+    </div>
+  );
+}
+```
+
+- 列表已經有資料、只是在重抓（例如送出後刷新）時，可以保留舊資料並在上方顯示小的「更新中」，
+  不要整頁換回 skeleton；但**換了篩選條件就必須清掉舊資料**，否則使用者會把舊結果當成新結果
+- skeleton 的形狀盡量接近真正的內容（幾行列表、幾張卡片），切換時版面不會大幅跳動
+
+### 30.3 送出中：鎖按鈕、回應回來才解鎖
+
+```tsx
+const [saving, setSaving] = useState(false);
+
+async function handleSave() {
+  if (saving) return;                         // 擋住連點與 Enter 連按
+  setSaving(true);
+  try {
+    const { data } = await runAction("save_order", form);
+    if (data?.approval_status === "pending" || data?.pending_approval) {
+      toast(data.approval_message || data.message || "已送出簽核，待核准後生效");  // 規則 24：不是失敗、不要重試
+    } else {
+      toast.success("已儲存");
+    }
+    reload();
+  } catch (e) {
+    toast.error((e as Error).message || "儲存失敗，請稍後再試");
+  } finally {
+    setSaving(false);
+  }
+}
+
+<button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+  {saving ? "儲存中…" : "儲存"}
+</button>
+```
+
+- 在 AI GO 這不只是 UX：預設表寫入命中簽核時，連點兩下就是**兩筆記錄＋兩張簽核單**（`§24.2`）
+- 會花比較久的動作（匯入、批次、呼叫外部服務、冷啟動後的第一次 action）在按鈕旁說明大概要等多久；
+  不開常駐的 app 第一次呼叫可能要多等幾秒（§28.1）
+- 刪除這類不可逆動作要先在畫面上確認（`confirm()` 在 Shadow DOM 不可用，用頁內對話框，核心規則 11）
+
+### 30.4 共用元件 `DataState`（腳手架內建）
+
+```tsx
+// src/components/DataState.tsx
+import React from "react";
+
+type Props = {
+  loading: boolean;
+  error?: string | null;
+  empty?: boolean;
+  emptyText?: string;
+  onRetry?: () => void;
+  rows?: number;                              // skeleton 列數
+  children?: React.ReactNode;
+};
+
+export default function DataState({ loading, error, empty, emptyText = "目前沒有資料", onRetry, rows = 3, children }: Props) {
+  if (loading) {
+    return (
+      <div aria-busy="true" aria-live="polite">
+        {Array.from({ length: rows }).map((_, i) => <div key={i} className="skeleton" />)}
+        <span className="sr-only">載入中…</span>
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="state-box state-error" role="alert">
+        <p>資料載入失敗：{error}</p>
+        {onRetry && <button className="btn btn-primary" onClick={onRetry}>重試</button>}
+      </div>
+    );
+  }
+  if (empty) return <div className="state-box">{emptyText}</div>;
+  return <>{children}</>;
+}
+```
+
+### 30.5 交付前自查（Phase 5 第 10 項）
+
+逐頁過一次，每一格都要答得出「畫面上看到什麼」：
+
+- [ ] 啟動到第一個畫面之間有 skeleton／載入中，不是空白
+- [ ] 每個會抓資料的畫面：載入中、空資料、錯誤三種各長什麼樣（錯誤可把 action 名稱暫改錯、或斷網試）
+- [ ] 換篩選／翻頁時舊資料會清掉，快速連切不會被舊回應蓋掉
+- [ ] 每個送出按鈕送出中會停用、有「處理中」字樣，失敗會解鎖並顯示原因
+- [ ] 命中簽核時顯示「已送簽核」，不是成功也不是失敗
