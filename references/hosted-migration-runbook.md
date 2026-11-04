@@ -104,8 +104,8 @@
 | 本機檔案會留著 | 上傳目錄、SQLite、產生的檔案、把 `/tmp` 當長期存放 | 重啟或換實例後檔案消失 | 檔案 → 平台 App 檔案（`hosted-apps.md` §5.2）；業務資料 → 平台表；`/data` 只放非業務狀態（`hosted-apps.md` §7）。**不要把 SQLite 放 `/data`**：最多 2 個實例共用同一個掛載 |
 | 同一件事只有一個行程在做 | 記憶體鎖、單例工作、「啟動時搶 leader」 | 兩個實例各做一次 | DB 唯一鍵佔用（`hosted-apps.md` §2.1） |
 | 請求可以很長、連線可以一直開 | 匯出、報表、SSE、WebSocket | 300 秒必斷、504 | 切段、client 自動重連（`hosted-apps.md` §2） |
-| 啟動只發生一次 | 開機時跑 migration、預熱大型快取 | 每次冷啟動都做一次；2 個實例同時啟動會同時跑 | `hosted-apps.md` §3.2 的部署流程沒有 release／pre-deploy 這一步（未核實是否有替代機制）。平台表的 schema 由資料中心建表，不在開機跑；外接庫的 migration 由［負責人］在本機對外接庫執行；真要留在啟動時跑，做成冪等並加 DB 鎖。快取改按需載入 |
-| 出站 IP 固定 | 第三方 IP 白名單 | 對方直接拒絕連線 | Hosted 有沒有固定出站 IP：**未核實**，先問平台；退路是請對方改用 token 或簽章驗證，或這支整合留在原機 |
+| 啟動只發生一次 | 開機時跑 migration、預熱大型快取 | 每次冷啟動都做一次；2 個實例同時啟動會同時跑 | `hosted-apps.md` §3.2 的部署流程沒有 release／pre-deploy 這一步，平台也沒有替代機制（2026-11-04 核 deployd 與平台文件）。平台表的 schema 由資料中心建表，不在開機跑；外接庫的 migration 由［負責人］在本機對外接庫執行；真要留在啟動時跑，做成冪等並加 DB 鎖。快取改按需載入 |
+| 出站 IP 固定 | 第三方 IP 白名單 | 對方直接拒絕連線 | 出站走 production private subnets **共用的 NAT Gateway**（平台文件），IP 不專屬本 app、平台未承諾固定；第三方 IP 白名單的退路是請對方改用 token 或簽章驗證，或這支整合留在原機 |
 | 憑證是本機檔案 | `*_CREDENTIALS=/path/key.json` 這類路徑型 env | 依賴它的功能全失敗 | 改值型 env（`hosted-apps.md` §4） |
 | 綁定位址照框架預設 | 以 `HOSTNAME` 決定 bind 的框架 | 探針連不上、啟動失敗 | `ENV HOSTNAME=0.0.0.0`（`hosted-apps.md` §2） |
 
@@ -124,7 +124,7 @@
      AI 可以改 `access-settings`（不經手密鑰；body 照 `hosted-apps.md` §6 的必帶欄位）
    - `public` 的（自家登入，或要被打進來，見階段 A 第 6 項的入站路徑）：用 §3 的「切換前只放行名單」開關
    - **先定好再 clone**：clone 會帶走 `visibility`、`access_role_ids`（`uat-environment.md` §3 步驟 2）
-3. 依 env 對帳表設定 runtime-settings（**［負責人］**填密鑰值）；要沿用原值的密鑰照 `hosted-apps.md` §4「不可隨手換新」
+3. 依 env 對帳表設定 runtime-settings（六欄全量，密鑰標 `env_sensitive=true`、不可標 `build`／`both`，`hosted-apps.md` §4；**［負責人］**填密鑰值）；要沿用原值的密鑰照 `hosted-apps.md` §4「不可隨手換新」
 4. 有排程的：照 `hosted-apps.md` §2.1 建好轉發鏈的前置——入口 Custom App 與轉發 action、Hosted 的端點與共享金鑰驗證
    （Hosted 必須 `public`，`internal` 會擋掉轉發，見第 2 步）；
    **外部服務 slug 與 `ctx.secrets` 的金鑰照 `custom-app-dev-guide.md` §25.2 確認流程設定**（AI 說明目的地與資料、用戶同意後代設；金鑰值由［負責人］填本機檔或自己貼上）。平台排程本身先不建（本檔 §8 第 8 步）
@@ -151,7 +151,7 @@
    - 外接 PostgreSQL（已核准者）：照 `hosted-apps.md` §7.2（匯入走 session 模式或直連、權限保底）
    - 匯入由［負責人］核准後執行；完成後核對筆數與關鍵表
 8. 檢查（只讀腳本，不印值）：
-   - `scripts/aigo_env_diff.py --a <新正式 hosted-id> --b <uat hosted-id>`：密鑰類不得兩邊相同
+   - `scripts/aigo_env_diff.py --a <新正式 hosted-id> --b <uat hosted-id>`：非機密 key 不得有密鑰類相同；機密 key 讀回是 `********`、工具列為「遮罩不可比」，由［負責人］在 Dashboard 逐顆核對 UAT 已換新值
    - `scripts/aigo_env_diff.py --app <新正式 hosted-id> --expect <清單>`：缺的 key 列給［負責人］。清單只放對帳表裡
      目標位置是 runtime-settings、處置不是不搬／退役的列，不放 `AIGO_*`、`PORT`
    - `scripts/aigo_cron_health.py --app <uat 入口 app-id>`：**輸出零條排程**（結束碼 0 只代表沒有紅燈，不代表零條）
@@ -181,7 +181,7 @@
 步驟：
 
 1. **先止血**：UAT 的排程總開關維持關；**［負責人］**清掉或換掉會碰到正式的 env（資源 ID、推播金鑰、第三方 webhook）——
-   `PUT runtime-settings` 是全量替換（`hosted-apps.md` §4），等於經手所有密鑰值，AI 不代做
+   `PUT runtime-settings` 是六欄全量替換（`hosted-apps.md` §4），等於經手所有密鑰值（機密 key 讀回是遮罩、照送＝保留），AI 不代做
 2. **重建空庫**：用 app 自己的開站流程或 schema 建立，第一個管理員只放建置者
 3. **匯入設定類**：照上表白名單；排除排程開關、通知名單、正式公司代碼這類「環境專屬」的設定列
 4. **塞測試資料**：一間測試公司（app 有沙盒或測試公司機制就用）、3～5 個測試人（不同角色）、
@@ -229,7 +229,7 @@
 
   ⚠️ 這個做法是依平台原始碼推得（憑證在建立綁定時就申請，簽發只看驗證記錄），**尚未實測**：計畫要保留退路——
   切換當天轉不了 `active` 就把流量記錄改回舊站。建綁定後**當天**就加驗證記錄：72 小時沒驗證，憑證逾時轉 `failed`，
-  而且同一筆不會自己恢復（§9 步驟 4）。hostname 綁之前就要定案，解除目前會卡住（§9 末段）。
+  而且同一筆不會自己恢復（§9 步驟 4）。hostname 綁之前就要定案，解除在 prod 仍可能卡住（§9 末段；修法在 UAT，prod 等下一個 tag）。
   對外網址 env（`APP_URL`、`NEXT_PUBLIC_*` 這類標 `both` 的）改成最終網域後要**重新建置部署**（`hosted-apps.md` §4 驗證步驟）；
   改完之後就不能再用 `*.ai-go.app` 驗 OAuth，相關驗證要在改設定之前做完。OAuth redirect URI 加上最終網域
 - **env 尚缺清空**：`scripts/aigo_env_diff.py --app <新正式> --expect <清單>` 乾淨（清單範圍同 §4 第 8 步）

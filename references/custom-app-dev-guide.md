@@ -105,6 +105,10 @@ actions/*.py          Action 實作
 
 樂觀鎖：帶入 `expected_version`，版本不匹配回傳 409。
 
+接手別人的 app 先讀 `GET /builder/apps` 與 `GET /builder/apps/{id}` 回的 `is_manager`（能不能改碼：
+建立者／協作者／`system.admin`）與 `is_owner`（擁有者層：建立者／`system.admin`）；`is_manager=false`
+時上面三條寫入端點一律回 404。協作者由擁有者經 `POST /builder/apps/{id}/collaborators`（body `user_id`）加入。
+
 ## 5. 編譯 API
 
 ```http
@@ -124,7 +128,8 @@ POST /api/v1/compile/compile/{slug}?dev=true
 本文件其餘章節有日期的實測 timeout 數字只代表當時環境；當前 Action／egress 的全域
 範圍與預設以 limits 為準，個別服務以該服務設定為準。
 
-External 模組（不需安裝）：react, react-dom, lucide-react, react-router-dom, react-hot-toast
+External 模組（不需安裝，Runtime IMPORT_MAP 釘精確版）：react 18.3.1、react-dom 18.3.1、
+lucide-react 0.468.0、react-router-dom **7.18.4**、react-hot-toast 2.4.1（版號清單見 §16.1）。
 
 ## 6. 內建 SDK
 
@@ -137,7 +142,7 @@ SDK 模板在執行期讀 `!!window.__IS_EXTERNAL__` 自動分流；**程式碼�
 |---|---|---|
 | `api.ts` 自建表 | `/api/v1/data-center/tables/{key}/records`（掛 `builder.access`，§7.5） | `/api/v1/ext/data-center/tables/{key}/records`（無結構操作） |
 | `db.ts` 預設表 proxy | `/api/v1/proxy/{app_id}/{table}…` | `/api/v1/ext/proxy/{table}…`（路徑**沒有** `app_id`，app 由 token 決定） |
-| `action.ts` | `/api/v1/actions/apps/{app_id}/run/{name}`（可 `use_dev`） | `/api/v1/ext/actions/run/{name}`（**只讀 `published_vfs`**，沒有 dev 版） |
+| `action.ts` | `/api/v1/actions/apps/{app_id}/run/{name}`（可 `use_dev`） | `/api/v1/ext/actions/run/{name}`（走 `effective_vfs`：已發布讀 `published_vfs`，**未發布時 fallback 到草稿 `vfs_state`**；沒有 `use_dev` 開關） |
 | `approval.ts` | `/api/v1/approvals/*` | **不支援**——SDK 直接拋錯（§24.4） |
 | `user.ts` | 讀注入的 `__USER_ROLES__`／`__USER_PERMISSIONS__` | 快照恆空（§13） |
 | Storage（無 SDK 檔） | `/api/v1/storage/upload`（`files.access`）＋ `data-center` 圖片端點 | `/api/v1/ext/storage/{upload,url,list,file}`（§12） |
@@ -229,7 +234,8 @@ def execute(ctx):
     ctx.erp.confirm_sale_order(id)  # 觸發平台業務流程（方法級白名單，見 §24 與下方註）
 ```
 
-> 上面是常用的一組，`ctx` 實測共有 20 個命名空間。`ctx.erp` 只開放六個方法，
+> 上面是常用的一組，`ctx` 實測共有 20 個命名空間。`ctx.erp` 只開放白名單內的 **10 個方法**
+> （`backend/app/core/scope_map.py`，清單見 §24.1），
 > 呼叫白名單外的方法會由閘道回 **403**（意思是「方法未開通」，不是「能力不存在」）。
 > 完整清單與回傳型別見 `platform-behaviors.md` §4。
 
@@ -367,7 +373,7 @@ app（含 Server Action 的 `ctx.db`）要讀寫某張自建表，**先替 app �
 
 | 現象 | 實情 |
 |---|---|
-| `413` | **兩個來源**：端點自己「檔案超過上限」（單檔 100 MB）；全域 body 上界「請求內容超過上限」（`upload` 整包 **109 MiB**，非上傳端點 96 MiB，body 帶 `limit_bytes`）。都是零物件、重送同一份永遠不會過 |
+| `413` | **兩個來源**：端點自己「檔案超過上限」（單檔 100 MB）；全域 body 上界「請求內容超過上限」（整包依入口：`POST /api/v1/storage/upload` **103 MiB**、`/ext/storage/upload` 與 `/open/storage/upload` **109 MiB**，非上傳端點 96 MiB，body 帶 `limit_bytes`）。都是零物件、重送同一份永遠不會過 |
 | `401` 立刻回、body 沒被讀 | 2026-09-04 起（#1441）token 簽章／到期在**讀 body 之前**就驗——token 過期不必先送完 100 MB；換新 token 重送安全 |
 | `403「無權存取此路徑」` | `path`／`folder` 正規化後逃出 `{tenant}/{app}/` 前綴（含 `..`、絕對路徑、NUL），四條端點一律 403（2026-09-02 起，#1371）。**自己拼過 `/../` 的呼叫端從這版起會壞**——folder 只用不含 `/`、`..` 的簡單名 |
 | `list` 看不到剛傳的檔 | `list` **非遞迴**（只列一層），且 `upload` 會清洗 `folder` 而 `list` 不清洗——對帳要帶**送出時同一個** `folder` |
@@ -512,7 +518,8 @@ App 設定「存取」區塊看得到，也對應 app 物件的兩個唯讀欄�
 | 已送出申請 | 有值 | null | 同上 404 |
 | 已核可 | 有值 | 有值 | `/pub/*` 正常服務 |
 
-- 申請端點：`POST /api/v1/apps/{app_id}/anonymous-access-request`（需 `builder.manage_access`）。
+- 申請端點：`POST /api/v1/apps/{app_id}/anonymous-access-request`（需 `builder.manage_access`，
+  且屬**擁有者層**：只有建立者或 `system.admin` 能送；協作者呼叫回 404，與查無 app 同形）。
   **先把 `allow_anonymous_access=true` 存檔、再送申請**（UI 也是這個順序，旗標沒存按鈕不亮）。
   冪等：重送不覆寫首次時間，回 `{requested: true, requested_at}`；核可欄與核可人**不回給租戶**
 - 核可由平台營運在 ops console 操作，**沒有 SLA、也不會自動通過**；申請後把狀態告訴用戶，
@@ -531,7 +538,10 @@ App 設定「存取」區塊看得到，也對應 app 物件的兩個唯讀欄�
 
 ### 16.1 前端（bundle）
 
-Runtime 內建：react ^18.x, react-dom ^18.x, react-router-dom ^6.x, lucide-react latest, react-hot-toast latest
+Runtime 內建（`frontend/src/lib/appRuntime.ts` 的 IMPORT_MAP，一律釘精確版，不是浮動範圍）：
+react 18.3.1、react-dom 18.3.1、react-router-dom **7.18.4**、lucide-react 0.468.0、react-hot-toast 2.4.1。
+react-router-dom 是 **v7**，照 v7 文件寫路由碼：`HashRouter`／`Routes`／`Route`／`useNavigate`／`Link`
+照用；v6 的 `json()`／`defer()` 已移除，型別名稱也與 v6 不同。
 不支援：CSS Modules, Tailwind, styled-components, @mui/material, 動態 import, Node.js 原生模組
 
 ### 16.2 Python action 依賴：`actions/requirements.txt`（per-app wheelhouse）
@@ -570,6 +580,7 @@ Builder UI 對應「套件」面板（用面板儲存會清掉檔案裡的註解
 | CSS 變數無效 | :host, :root 雙選擇器 |
 | db.update 400 | {"data": {...}} 包裝 |
 | 401 | Token 過期，重新登入 |
+| 404（VFS 寫入、還原、升級模板） | 可能是「不是這支 app 的管理者」：持 `builder.publish` 但非管理者的存檔被拒仍回 404，只留 log 事件 `custom_app_save_denied` → 先看 `GET /builder/apps/{id}` 的 `is_manager`（§4） |
 | 409 | VFS 版本衝突，重新 GET |
 | 423 | 有待審核發布，等待/取消 |
 | Action 連不到第三方 API | 讀回傳 status/error：raw httpx 直連必 timeout → 改 `ctx.http.call`；多為 slug 未註冊 EgressService → §25 |
@@ -606,7 +617,33 @@ Builder UI 對應「套件」面板（用面板儲存會清掉檔案裡的註解
 
 ### 讀取規範
 
-讀取預設表資料時，應用 `app_domain` 過濾，僅處理本 App 建立的資料：
+讀取預設表資料時，應用 `app_domain` 過濾，僅處理本 App 建立的資料。**在伺服器端過濾**：
+`POST …/proxy/{app_id}/{table}/query` 的 `filters` 支援 JSONB 運算子 `jsonb_eq`／`jsonb_ne`
+（value 為 `{key, value}`）與 `jsonb_contains`（value 為 JSON 物件），四條 proxy 面
+（internal／ext／open／pub）共用同一支 `_build_filter_clause`：
+
+```json
+{
+  "filters": [
+    {"column": "custom_data", "op": "jsonb_eq", "value": {"key": "app_domain", "value": "<APP_DOMAIN>"}}
+  ],
+  "limit": 1000,
+  "offset": 0
+}
+```
+
+前提：`custom_data` 必須在該表引用（`/refs`）的 `columns` 內，否則回 400「未授權的篩選欄位」；
+鍵名只收 `[A-Za-z_][A-Za-z0-9_]*`，value 一律以字串比對（`->>`）。
+
+兩個 SDK 限制（2026-11 核對）：
+- `db.ts` `queryAdvanced` 的 `FilterCondition.op` 型別**未列**三個 jsonb 運算子
+  （`frontend/src/constants/sdkTemplates.ts` 的 `interface FilterCondition`）——
+  要自己 `fetch` proxy 端點，或在 app 內把 `op` 斷言成寬型別再傳。
+- Server Action 的 `ctx.db.query(table, **filters)` 只會把 kwargs 轉成 `eq`
+  （`action_context.py`），下不了 jsonb 篩選；action 內要照 `app_domain` 篩時，
+  取回後在 Python 過濾，或改由前端打 proxy 端點。
+
+取回後過濾只當備案：
 
 ```typescript
 const myRecords = allRecords.filter(
@@ -614,12 +651,10 @@ const myRecords = allRecords.filter(
 );
 ```
 
-> ⚠️ **這個過濾只能在取回後做**——`custom_data` 是 JSONB，伺服器端過濾一律回 400。
-> 配上 DB Proxy「單次最多 500 筆」的硬上限，資料一多就會變成
-> 「只過濾了前 500 筆」而不自知。表裡資料可能超過 500 筆時，
-> **必須先用帶唯一鍵排序的 `offset` 迴圈取完整資料再過濾**——
-> 見 `platform-behaviors.md` §1.2、§1.3。這也是為什麼要被篩選／排序／分頁的維度
-> 應該放**原生欄位**，不要只存在 `custom_data` 裡。
+> ⚠️ 不論哪一種，DB Proxy 單次最多 **1000 筆**（`PROXY_MAX_LIMIT`，GET `le=1000`、POST
+> `min(limit, 1000)`，四個入口統一）。表裡資料可能超過 1000 筆時，
+> **必須用帶唯一鍵排序的 `offset` 迴圈取完**——見 `platform-behaviors.md` §1.2、§1.3。
+> 這也是為什麼要被排序／分頁的維度應該放**原生欄位**，不要只存在 `custom_data` 裡。
 
 ### 實例
 
@@ -851,7 +886,7 @@ Meta 面只用來讀中文標題與值域——理由與逐表落差見 `default
 > 值域來源有兩個，規劃匯入 payload 時**先查再寫**，不要對正式租戶試寫：
 >
 > 1. **Meta API** `GET /api/v1/data-center/meta/tables/{key}`（登入即可）——回傳 `FieldDef`，
->    select 型欄位帶 `options`。**2026-09-03 測試租戶實測已可用**（193 張：85 預設＋108 自建）：
+>    select 型欄位帶 `options`。**2026-09-03 測試租戶實測已可用**（預設 86 張＋該租戶自建表，以實列為準）：
 >    `crm_clients` 回 `customer_type ∈ [company, individual]`、`sale_orders` 回 `state`／`tax_type`／
 >    `invoice_format` 的值域。⚠️ **Meta key ≠ proxy／refs 面的表名**（客戶在 Meta 是 `crm_clients`，
 >    proxy 面是 `customers`）——先 `aigo_data.py meta tables --grep` 找 key 再取
@@ -1323,7 +1358,8 @@ route 用 `instanceof` 判斷的業務錯誤類別必須是**同一個物件**�
 |--------|-----------|---------|
 | 前端 `db.ts` | `insert` / `update` / `remove`（預設表） | insert = insert-then-flag；update/delete = pre-guard |
 | Server Action `ctx.db` | 同上 | 同上；pre-guard 以例外呈現 |
-| Server Action `ctx.erp` | `confirm_sale_order`、`confirm_purchase_order`、`post_move`、`confirm_payment`、`validate_picking`、`confirm_payroll_run` | pre-guard，拋例外 |
+| Server Action `ctx.erp`（套 pre-guard） | `confirm_sale_order`、`confirm_purchase_order`、`post_move`、`confirm_payment`、`validate_picking`、`confirm_payroll_run` | pre-guard，拋例外 |
+| Server Action `ctx.erp`（**不套** pre-guard） | `reconcile_payment`、`cancel_payroll_run`、`create_invoice`、`create_bill`（後兩者建 draft 單據，只做租戶隔離驗證） | 不攔；白名單共 10 個方法（`scope_map.py`） |
 
 常見設流程的表：`sale_orders`、`purchase_orders`、`account_moves`、`account_payments`、
 `stock_pickings`、`mrp_productions`、`hr_leaves`。
@@ -1384,7 +1420,10 @@ def execute(ctx):
 
 ### 25.1 怎麼呼叫
 
-Server-Side Action 要打第三方 API，**一律走 `ctx.http.call(<egress-slug>, <path>)` 閘道**：
+Server-Side Action 要打第三方 API，**一律走 `ctx.http.call(<egress-slug>, <path>)` 閘道**。
+另有 `ctx.http.fetch(service, url, headers=None)`：經 `system.admin` 建立的 wildcard 外部服務
+（`allow_dynamic_host=True`）GET 任意公網 URL，回 `{status, headers, data}`；GET-only、無 body、
+不注入憑證，與 `call` 同一個 `http` scope、同一組 egress 限制（§25.4），服務仍須授權給本 app。
 
 ```python
 def _secret(ctx, key):
@@ -1498,11 +1537,14 @@ Webhook 不可只吞掉事件後回成功：要保留事件供補值後重放，
 > 用戶自己登入的後台網域是什麼就接在前面。
 
 - 權限（v1.15.4 核對）：**建立**（`POST /builder/apps/{id}/egress-services`，預設授權本 App）與**改授權清單**
-  （`PUT /builder/apps/{id}/authorized-egress-services`）＝`builder.access` 且（本 App 擁有者或 `system.admin`）；
+  （`PUT /builder/apps/{id}/authorized-egress-services`）＝`builder.access` 且本 App **管理者**
+  （建立者／協作者／`system.admin`，2026-10-30 起 `require_app_owner_or_admin` 改用管理者判準）；
   **編輯／停用／刪除**（`PATCH`／`DELETE /builder/apps/{id}/egress-services/{service_id}`）＝`builder.access` 且
-  （同租戶任一 App 的擁有者或 `system.admin`）；**金鑰**（`/actions/apps/{id}/secrets`）＝`builder.access`
+  （同租戶任一 App 的擁有者或 `system.admin`，`require_tenant_app_owner_or_admin` 未改）；
+  **金鑰**（`/actions/apps/{id}/secrets`）＝`builder.access`
   且看得到這支 app。租戶級 `/api/v1/egress-services` 掛 `system.admin`，不在本 skill 的路徑上。
-  403 → 帳號權限不足，請租戶管理員操作（確認流程照舊），開發者自己繞不過去。
+  403「僅 App 擁有者或管理員可管理外部服務」→ 帳號不是這支 app 的管理者，請建立者加為協作者
+  或由租戶管理員操作（確認流程照舊），開發者自己繞不過去。
 - 外部服務是**租戶共用池**、無服務擁有者：任一 App 擁有者或 admin 可改／刪／停用，
   其他 App 各自授權使用。
 
@@ -1799,7 +1841,7 @@ agent 不自行開、也不把「要不要常駐」丟給 owner 選。決策的�
 | 通道 | 誰在用 | 憑證 | 前綴 | 權限閘 |
 |---|---|---|---|---|
 | **internal** | internal Custom App 前端（登入者） | `__APP_TOKEN__`＝app-scoped JWT（代表登入者；`POST /app-scoped-token/{app_id}`／`app-runtime-session` 發） | `/api/v1/data-center`、`/proxy/{app_id}`、`/actions/apps/{app_id}`、`/storage`、`/approvals`（★ `/refs` 與平台管理面**不在** route catalog 內，今天打得到是 audit 放行，見下） | 登入者的權限（自建表記錄 CRUD 掛 `builder.access`，§7.5；預設表看 Data Reference 授權） |
-| **external** | external／self_built Custom App 前端（app 使用者） | `__APP_TOKEN__`＝`custom-app-auth` 發的使用者 token（claim 帶 `custom_app_id`） | `/api/v1/ext/{data-center,proxy,actions,storage,data,compile,preview-token,runtime-errors}`＋`/custom-app-auth/{slug}/*` | app 脈絡，不驗使用者權限；別種憑證一律 401「無效或已過期的 Token」（實打） |
+| **external** | external／self_built Custom App 前端（app 使用者） | `__APP_TOKEN__`＝`custom-app-auth` 發的使用者 token（claim 帶 `custom_app_id`） | `/api/v1/ext/{data-center,proxy,actions,storage,data,compile,preview-token,runtime-errors,ai-hub}`＋`/custom-app-auth/{slug}/*`（另有 `/ext/request-evidence` JWKS，SDK 不用） | app 脈絡，不驗使用者權限；別種憑證一律 401「無效或已過期的 Token」（實打） |
 | **匿名** | 未登入訪客（只有 external／self_built 可開） | 無 | `/api/v1/pub/{data-center,proxy,data}/{slug}/…`（**唯讀**：只有 GET／`query`） | 表要 `is_public_readable`＋app 開旗標＋**平台核可**（§15.1）；120 次/分/IP |
 | **Hosted／self_built 後端** | Hosted App 容器、第三方自建應用 | `Authorization: Bearer <API key>`（容器內 `AIGO_API_TOKEN`；`X-API-Key` 相容） | `/api/v1/open/{data-center,proxy,data,members,storage,ai-hub}`（`/open/members` 只有 `GET /{user_id}/context`，prod v1.15.4 起；`storage`／`ai-hub` prod v1.16.0 起，另需 scope 開關，`hosted-apps.md` §5.2） | app 身分（API key 本身沒有 user；internal Hosted 的登入者由 proxy 注入 header 帶進來）；預設表零授權起步，600 次/分/key（`hosted-apps.md` §5） |
 
@@ -1813,7 +1855,7 @@ agent 不自行開、也不把「要不要常駐」丟給 owner 選。決策的�
 | 改 | `PATCH …/records/{id}` | `PATCH /ext/…/records/{id}` | — | `PATCH /open/…/records/{id}` |
 | 刪 | `DELETE …/records/{id}` | `DELETE /ext/…/records/{id}` | — | `DELETE /open/…/records/{id}` |
 | 預設表 proxy | `GET …/{table}`、`POST …/{table}/query`、`POST …/{table}`、`PATCH`／`DELETE …/{table}/{row_id}`（★ **單列 GET 不存在**，見下） | `/ext/proxy/{table}`（無 `app_id`） | `GET /pub/proxy/{slug}/{table}`、`POST …/query` | `/open/proxy/{table}` |
-| 跑 action | `POST /actions/apps/{app_id}/run/{name}` | `POST /ext/actions/run/{name}`（只讀已發布） | — | —（Hosted 沒有 action） |
+| 跑 action | `POST /actions/apps/{app_id}/run/{name}` | `POST /ext/actions/run/{name}`（已發布讀 published；未發布 fallback 草稿；無 `use_dev`） | — | —（Hosted 沒有 action） |
 | 結構操作（建表／欄位） | `/data-center/tables…`（建改 `datacenter.schema_write`；刪除 `system.admin`） | **無** | **無** | **無** |
 | **身分與 ACL 的來源** | `__USER_ROLES__`／`__USER_PERMISSIONS__` 快照＋action 的 `ctx.user_permissions`／`ctx.user_id`（★ **不是** `/members`，見 `member-admin.md` §3.6） | app 脈絡的使用者，**沒有**平台角色（快照恆為空陣列） | 無身分 | internal Hosted：proxy 注入 `X-Aigo-User-Id`／`-Tenant-Id`／`-App-Id`／`-Population`（client 自帶的會被剝），角色／權限用 API key 打 `GET /open/members/{user_id}/context`；`/api/v1/members*`、`/auth/me` 仍一律 401。public Hosted／第三方後端沒有 user（`hosted-apps.md` §6） |
 

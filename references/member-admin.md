@@ -91,8 +91,13 @@
 | 改角色（含權限字串） | `PUT /api/v1/members/roles/{role_id}` | `system.roles_manage` |
 | 刪角色 | `DELETE /api/v1/members/roles/{role_id}` | `system.roles_manage` |
 | 改成員角色 | `PUT /api/v1/members/{id}`，body `role_ids[]` | `hr.member_manage` |
-| Custom App 角色白名單 | `PATCH /api/v1/builder/apps/{app_id}/settings`，body `{access_role_ids: [...]}` | `builder.manage_access` |
+| Custom App 角色白名單 | `PATCH /api/v1/builder/apps/{app_id}/settings`，body `{access_role_ids: [...]}` | `builder.manage_access` ＋ **擁有者層**（`ensure_custom_app_owner`：app 建立者 `user_id` 或 `system.admin`；協作者與其他人回 404「App 不存在」；只收登入 session） |
 | Hosted App 可見度與白名單 | `PUT /api/v1/hosted-apps/{id}/access-settings`，body `{visibility, access_role_ids}` | `hosted_apps.deploy`，再收窄到 app 的 `created_by`／admin |
+| Custom App 協作者名單（§3.7） | `GET /api/v1/builder/apps/{app_id}/collaborators` | `builder.access` ＋ 管理者（建立者／協作者／`system.admin`） |
+| 加／移除協作者（§3.7） | `POST …/collaborators` body `{user_id}`（201）；`DELETE …/collaborators/{user_id}`（204） | `builder.access` ＋ 擁有者層（POST）；DELETE 擁有者可移除任何人、協作者只能移除自己 |
+| 轉移 Custom App 建立者 | `POST /api/v1/builder/apps/{app_id}/transfer-ownership`，body `{new_owner_id}` | 登入 ＋ 擁有者層（建立者本人或 `system.admin`） |
+| 直接建 pending 使用者（不寄邀請信） | `POST /api/v1/invitations/admin-users`，body `{email, name?}` → 回 `user_id`，之後用 `POST /invitations {user_id}` 發連結 | `system.invitations` |
+| 管理員重設成員密碼 | `POST /api/v1/members/{id}/reset-password` → 產生臨時密碼並強制下次登入改密；不可重設自己或其他 `system.admin` | `hr.member_manage`（★ 寫入閘門：影響他人登入，只在用戶明確交辦時執行，不代操作） |
 
 **憑證**：這些端點都掛 `require_permission(...)`，**只有真人 JWT 打得到**——
 `aigo_auth.get_token()` 取的就是登入者本人的平台 JWT。隨附整合 API Key 只走 `/open/*`、
@@ -119,7 +124,7 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
 |---|---|---|
 | 設定端點 | `PATCH /builder/apps/{id}/settings {access_role_ids}` | `PUT /hosted-apps/{id}/access-settings {visibility, access_role_ids}` |
 | 空陣列的語意 | 所有人可用（internal 下＝全租戶成員） | **`internal`＋空＝全租戶已登入成員**；`public` 下必須為空（DB CHECK） |
-| owner 免檢 | app 的 `user_id` | app 的 `created_by` |
+| 免檢（不受白名單限制） | 建立者（app 的 `user_id`）**與協作者**（§3.7，2026-10-29 起；含資料代理） | 建立者（app 的 `created_by`）**與 Hosted 協作者**（`GET/POST/DELETE /hosted-apps/{id}/collaborators`，同一套判準） |
 | 不在名單的人看到 | **404「App 不存在」**（fail-closed，與查無此 app 同形，不用 403 洩漏存在性）；資料面、action、compile、cron 端點同一守門 | proxy 依 `is_hosted_app_visible_with` 判定，不可見同樣不放行 |
 
 - `access_role_ids` 是**可見度**，不是資料授權：進得了 app 的人能打到 app 所有 action，
@@ -127,7 +132,7 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
   Auth gate（dev-guide §27）。
 - 角色 id 從 `GET /members/roles` 取；寫入前把「角色名 → id」對照印給用戶確認。
 - 開發者自己有 `builder.access` 也**不再無條件繞過**白名單（action／compile 端點已收緊）——
-  測試時把自己的角色放進名單，或用 owner 帳號。
+  測試時把自己的角色放進名單、用建立者帳號，或請建立者把你加成協作者（§3.7，協作者免檢）。
 - 2026-09-08 測試租戶實打：兩條線設定後 GET 立即讀回一致；錯的角色 id 兩線同一句 400「角色不存在或不屬於此租戶：<id>」；
   Custom 送非 UUID 400「access_role_ids 含無效的角色 ID（需為 UUID 格式）」；Hosted `public`＋角色 422
   「public visibility 不可搭配 access_role_ids」。受限帳號側的 404 未實打（§8）。
@@ -143,7 +148,7 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
 | **授權強制**（真正擋得住的那一層） | Server Action 內的 `ctx.user_permissions`／`ctx.user_id`（`dev-rules.md` 規則 23／31） | 前端任何判斷 |
 | 進得了 app 的人是誰（可見度） | `access_role_ids` 白名單（§3） | app 自建的名單表 |
 | 員工的 email／部門／到職等主檔欄位 | 預設表 `hr_employees`（引用後走 proxy 面；它在 `sensitive_ack_tables()`，授權時要明示確認） | `GET /members` |
-| 自建表要記「哪個使用者」 | `text` 欄存 user UUID ＋ `GET /api/v1/users` 解顯示名（`data-center.md` §9） | 自建 user／role 表 |
+| 自建表要記「哪個使用者」 | `text` 欄存 user UUID ＋ `GET /api/v1/users` 解顯示名（`data-center.md` §9）。平台主站所有成員下拉的選項值一律是 **`users.id`**（不是 `members.id`；沒有登入帳號的成員列出但停用，2026-11-04 #2230），app 存這個值就對得上 | 自建 user／role 表 |
 
 **兩個獨立的理由，任一個都足以讓成員 API 在 app 內不可用**（2026-09-16 測試租戶實打＋源碼核對）：
 
@@ -162,6 +167,23 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
 （`__USER_PERMISSIONS__`／`ctx.user_permissions`／`access_role_ids`）。
 遷入既有系統時，來源的 `can_login`／`is_admin`／`is_super` 這類欄位與整張「公司成員表」
 是**要被平台取代的東西**，不是要照搬的自建表（§7）。
+
+### 3.7 Custom App 協作者：管理者層 vs 擁有者層（2026-10-29 起，#2150／#2154；核自 `core/permissions.py`、`api/custom_app_collaborators.py`）
+
+**誰是誰**：建立者＝`custom_apps.user_id`；協作者＝建立者加進名單的同租戶、持 `builder.access` 的使用者；
+**管理者**＝建立者／協作者／`system.admin`（`ensure_custom_app_manageable`）；**擁有者**＝建立者／`system.admin`
+（`ensure_custom_app_owner`）。`builder.manage_access` 不在任一判準內。兩道守門不過都回 **404「App 不存在」**，
+與查無 app 同形；只收登入 session（app 憑證、opaque token 一律 403）。
+
+| 層 | 誰過 | 管哪些面 |
+|---|---|---|
+| 管理者層 | 建立者、協作者、`system.admin` | 改碼存檔、publish（仍需 `builder.publish`）、AI 寫回／還原／升級模板、機密 `…/secrets`、資料引用 `POST /refs/apps/{id}`、外部服務授權（egress 面不過是 403 不是 404）、`GET …/collaborators` |
+| 擁有者層 | 建立者、`system.admin`（協作者 404） | `PATCH …/settings`（白名單、`url_name`）、`DELETE /apps/{id}`、`POST …/transfer-ownership`、`POST …/anonymous-access-request`、`POST …/collaborators`、移除他人 |
+
+- 持 `builder.publish` 的非管理者存檔被拒時，後端另記 `custom_app_save_denied` 事件；對呼叫端仍是 404，
+  不是權限字串問題——先看 `GET /builder/apps/{id}` 的 `is_manager`／`is_owner`（`platform-behaviors.md` §6.2）。
+- 協作者對可見度免檢（§3 表）：不受 `access_role_ids` 限制，含資料代理。
+- 名單端點與錯誤碼見 §2 表與 §8；加人前 `user_id` 從 `GET /api/v1/users` 取、印給用戶確認（寫入閘門）。
 
 ## 4. 邀請：批次建連結的固定流程
 
@@ -182,8 +204,11 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
 2. **48 小時過期**；同租戶同 email 重發會作廢先前 pending 的那張。
 3. **帶外連結的受邀者仍要走信箱驗證**：只有平台代寄（`send_email: true` 且投遞成功）那條路免驗證；
    你拿回來轉交的連結，受邀者註冊時仍要驗證收件信箱。
-4. **端點沒有限流**，迴圈數百次不會被擋；但 `data-operations.md` §3.5 寫入閘門對所有 POST
-   都適用——批次仍要「估影響面 → 試一筆 → 確認」。
+4. **限流只在寄信那一層**：`send_email: false` 只建 token，沒有限流，迴圈數百次不會被擋；
+   `send_email: true` 走 `check_invite_email_rate_limit`，**每租戶每小時 60 封**（key
+   `invite-email:{tenant_id}`）。超限時 **API 仍回 200、token 已簽發，只是信靜默不寄**（後端只記 log）——
+   批次代寄超過 60 人要分批跨小時，或改 `send_email: false` 自己轉交連結。
+   `data-operations.md` §3.5 寫入閘門對所有 POST 都適用——批次仍要「估影響面 → 試一筆 → 確認」。
 
 **`redirect_url` 落點白名單**（fail-closed 422；核自 `core/invite_links.py`）：
 `/app-login/`、`/runtime/`、`/customApp/`、`/builder/`、`/dashboard/`、`/onboarding`、`/hosted-app-handoff/`。
@@ -324,6 +349,8 @@ Deploy Token 只認 `/hosted-apps*`、Custom App 的 service token 掛在無角�
 | `DELETE /invitations/{token}` 404 ★「Invitation not found.」 | token 不存在或已被新邀請作廢清掉 | 用 `GET /invitations` 現查 |
 | `DELETE /members/roles/{id}` 404 ★「角色不存在」 | id 錯或已刪 | — |
 | `PATCH /builder/apps/{id}/settings {allow_anonymous_access: true}` 400 ★「Internal App 不支援匿名存取」 | internal 開匿名 | 匿名頁拆 Hosted public（`product-line-decision.md` §6），不是換模式 |
+| 有 `builder.manage_access`，`PATCH /builder/apps/{id}/settings` 仍 404「App 不存在」 | 呼叫者不是這支 app 的建立者也不是 `system.admin`（擁有者層守門；協作者同樣 404） | 看 `GET /builder/apps/{id}` 的 `is_owner`；請建立者操作，或由建立者 `transfer-ownership`（§3.7） |
+| `POST /builder/apps/{id}/collaborators` 422 `ineligible`／409 `already_creator`、`already_collaborator`；`DELETE …/collaborators/{user_id}` 404 `not_collaborator` | 目標跨租戶、不存在、非 active、service account 或缺 `builder.access`／已在名單／名單裡沒這個人 | 先 `GET …/collaborators` 現查，`user_id` 從 `GET /api/v1/users` 取 |
 | `PUT /hosted-apps/{id}/access-settings` 422 ★「public visibility 不可搭配 access_role_ids」 | `public` 帶了非空白名單 | 要限角色就 `internal`；`public` 時 `access_role_ids` 送 `[]` |
 | `POST /invitations` 403 | 呼叫者沒有 `system.invitations` | 換 `POST /members`（需 `hr.member_manage`）或請管理員授權 |
 | 用 Deploy Token／`AIGO_API_TOKEN`／app token 打任何本檔端點 401／403 | 憑證體系不對（§2） | 換登入者 JWT，不是 bug |

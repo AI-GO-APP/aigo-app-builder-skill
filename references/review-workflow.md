@@ -31,8 +31,12 @@
    - **絕不代替用戶輸入或寫入密碼**，也不要把密碼放進指令列
      （會留在 shell 歷史紀錄）。用戶若在對話中貼出密碼，提醒對方改填 `~/.aigo/.env`
      並更換該密碼。
-4. `GET /api/v1/builder/apps/{app_id}` 取得完整 App 資訊含 VFS
+4. `GET /api/v1/builder/apps/{app_id}` 取得完整 App 資訊含 VFS。同時回讀 `is_owner`／`is_manager`／
+   `creator_name`：`is_manager=false`（不是建立者、協作者或 `system.admin`）時存檔、發布、secrets、
+   `POST /refs/apps/{app_id}` 一律 404「App 不存在」，持 `builder.access`／`builder.publish` 也一樣——
+   要請擁有者先 `POST /api/v1/builder/apps/{app_id}/collaborators`（body `user_id`）把本帳號加成協作者
 5. 分析 VFS 結構並輸出 Review 報告：
+   - **本帳號對此 app**：owner／manager／viewer（依 `is_owner`／`is_manager`；viewer 只能對話與看碼）
    - 列出所有檔案及大小
    - 標記 SDK 檔案 `[SDK]`（不可修改：api.ts, db.ts, action.ts）
    - 標記 Runtime 注入檔 `[INJ]`（不可修改：data.json, db.json, actions.json）

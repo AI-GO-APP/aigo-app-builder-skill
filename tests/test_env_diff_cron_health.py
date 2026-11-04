@@ -22,6 +22,13 @@ B = {'env_vars': {'SHARED_KEY': SECRET, 'ONLY_B': 'y', 'EMPTY_A': 'set', 'DIFF':
      'env_availability': {'BUILD_KEY': 'runtime'}, 'always_on': True, 'persistent_disk': False}
 
 
+MASK = '********'
+MA = {'env_vars': {'API_SECRET': MASK, 'PUBLIC_URL': 'https://a.example', 'FLAG': 'on', 'LEGACY': MASK},
+      'env_sensitive': {'API_SECRET': True, 'PUBLIC_URL': False, 'FLAG': False, 'LEGACY': False}}
+MB = {'env_vars': {'API_SECRET': MASK, 'PUBLIC_URL': 'https://a.example', 'FLAG': 'off', 'LEGACY': 'plain'},
+      'env_sensitive': {'API_SECRET': True, 'PUBLIC_URL': False, 'FLAG': False, 'LEGACY': False}}
+
+
 def response(status, data):
     return httpx.Response(status, json=data, request=httpx.Request('GET', 'https://test.invalid'))
 
@@ -35,6 +42,19 @@ class EnvDiffTest(unittest.TestCase):
         self.assertEqual(s['empty_in_b'], [])
         self.assertEqual(s['same_value'], ['BUILD_KEY', 'SHARED_KEY'])
         self.assertEqual(s['availability_differs'], ['BUILD_KEY'])
+
+    def test_masked_keys_are_not_compared(self):
+        result = env.diff_settings(MA, MB)
+        rows = {r['key']: r for r in result['rows']}
+        self.assertIsNone(rows['API_SECRET']['same_value'])
+        self.assertTrue(rows['API_SECRET']['masked'])
+        self.assertIsNone(rows['LEGACY']['same_value'])  # 值是遮罩字串也算遮罩，即使旗標是 false
+        self.assertIs(rows['PUBLIC_URL']['same_value'], True)
+        self.assertIs(rows['FLAG']['same_value'], False)
+        self.assertEqual(result['summary']['masked'], ['API_SECRET', 'LEGACY'])
+        self.assertEqual(result['summary']['same_value'], ['PUBLIC_URL'])
+        text = env.format_text(result, {'a': 'a', 'b': 'b'})
+        self.assertIn('遮罩不可比（2）：API_SECRET, LEGACY', text)
 
     def test_no_value_or_hash_in_any_output(self):
         import hashlib

@@ -11,15 +11,22 @@ aigo_env_diff.py — 比對 Hosted App 的 runtime-settings 環境變數（★ �
      處置**不是**「不搬」「退役」的列。`AIGO_*` 與 `PORT` 是平台注入、不在 runtime-settings 裡，
      不要列；清單裡出現時會警告並略過，不算缺席。
 
-只打 `GET /api/v1/hosted-apps/{id}/runtime-settings`。這支 GET 回的是**明文值**——
-本工具只輸出 key 名、有無、是否為空、`env_availability`、兩邊值是否相同；
+只打 `GET /api/v1/hosted-apps/{id}/runtime-settings`。平台 v1.17.0 起這支 GET **把機密值遮罩**：
+回應多一欄 `env_sensitive`（`dict[str, bool]`，缺漏＝機密），機密 key 的值一律是 `********`。
+本工具**不取真值**——真值只能由負責人在 Dashboard 逐顆看，或 session-only 的
+`POST /{id}/runtime-settings/reveal`（body `{"name"}`，一次一顆、機密者記稽核；Deploy Token 403）；
+本工具刻意不打 reveal。
+
+輸出只有 key 名、有無、是否為空、`env_availability`、是否遮罩、非機密 key 兩邊值是否相同；
 「是否相同」以記憶體內雜湊比對，雜湊本身與任何前綴都**不輸出、不落檔、不記 log**。
+任一側標機密或值就是遮罩字串的 key **不比值**（`same_value` 為 null），列在「遮罩不可比」。
 
 另列兩邊的 `always_on`／`persistent_disk`。
 
-摘要：只在 A／只在 B／A 為空／B 為空／兩邊值相同。
-★ 「兩邊值相同」是發現項不是好消息：prod 與 UAT 共用同一把密鑰，UAT 出事就是 prod 出事
-（uat-environment.md）。網址、開關這類值相同可能合理，要逐顆判斷。
+摘要：只在 A／只在 B／A 為空／B 為空／兩邊值相同／遮罩不可比。
+★ 非機密 key「兩邊值相同」要逐顆判斷：網址、開關相同可能合理；本該是密鑰卻標了非機密，先改旗標。
+密鑰類是否 prod 與 UAT 共用（UAT 出事就是 prod 出事，uat-environment.md），本工具判不出來，
+由負責人在 Dashboard 逐顆核對。
 
 結束碼：0＝正常；1＝**只**代表 `--expect` 有 key 缺席或為空（可當交付閘門）；
 2＝其他一切意外（登入失敗、清單檔讀不到、讀不到設定、回應形狀不符）＝無法判斷。
@@ -40,6 +47,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(__file__))
 
 KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+ENV_MASK = "********"  # 平台 core/hosted_app_env.ENV_MASK：GET 對機密 key 回的固定字串
 
 
 def _platform_injected(key: str) -> bool:
@@ -72,6 +80,12 @@ def _digest(value) -> bytes:
     return hashlib.sha256(raw.encode("utf-8")).digest()
 
 
+def _masked(settings: dict, key: str) -> bool:
+    """該 key 在回應裡是遮罩：`env_sensitive` 標 True，或值本身就是遮罩字串。"""
+    flags = settings.get("env_sensitive") or {}
+    return flags.get(key) is True or (settings.get("env_vars") or {}).get(key) == ENV_MASK
+
+
 def _availability(settings: dict, key: str) -> str:
     avail = settings.get("env_availability") or {}
     return avail.get(key) or "runtime"  # 缺漏視為 runtime（hosted-apps.md §4）
@@ -82,21 +96,23 @@ def _app_flags(settings: dict) -> dict:
 
 
 def diff_settings(a: dict, b: dict) -> dict:
-    """兩個 runtime-settings 互比。結果不含任何值或雜湊。"""
+    """兩個 runtime-settings 互比。結果不含任何值或雜湊；遮罩 key 不比值。"""
     env_a = a.get("env_vars") or {}
     env_b = b.get("env_vars") or {}
     rows = []
     for key in sorted(set(env_a) | set(env_b)):
         in_a, in_b = key in env_a, key in env_b
+        masked = (in_a and _masked(a, key)) or (in_b and _masked(b, key))
         row = {
             "key": key,
             "a": {"present": in_a, "empty": in_a and _is_empty(env_a[key]),
                   "availability": _availability(a, key) if in_a else None},
             "b": {"present": in_b, "empty": in_b and _is_empty(env_b[key]),
                   "availability": _availability(b, key) if in_b else None},
+            "masked": masked,
             "same_value": None,
         }
-        if in_a and in_b and not row["a"]["empty"] and not row["b"]["empty"]:
+        if not masked and in_a and in_b and not row["a"]["empty"] and not row["b"]["empty"]:
             row["same_value"] = hmac.compare_digest(_digest(env_a[key]), _digest(env_b[key]))
         rows.append(row)
     summary = {
@@ -105,6 +121,7 @@ def diff_settings(a: dict, b: dict) -> dict:
         "empty_in_a": [r["key"] for r in rows if r["a"]["empty"]],
         "empty_in_b": [r["key"] for r in rows if r["b"]["empty"]],
         "same_value": [r["key"] for r in rows if r["same_value"] is True],
+        "masked": [r["key"] for r in rows if r["masked"]],
         "availability_differs": [r["key"] for r in rows if r["a"]["present"] and r["b"]["present"]
                                  and r["a"]["availability"] != r["b"]["availability"]],
     }
@@ -170,7 +187,9 @@ def format_text(result: dict, labels: dict[str, str]) -> str:
         width = max([len(r["key"]) for r in result["rows"]] + [3])
         out.append(f"{'KEY':<{width}}  {'A':<14} {'B':<14} 比對")
         for r in result["rows"]:
-            if r["same_value"] is True:
+            if r["masked"]:
+                cmp = "遮罩"
+            elif r["same_value"] is True:
                 cmp = "相同 ⚠️"
             elif r["same_value"] is False:
                 cmp = "不同"
@@ -181,11 +200,13 @@ def format_text(result: dict, labels: dict[str, str]) -> str:
         out.append("摘要")
         for name, label in (("only_in_a", "只在 A"), ("only_in_b", "只在 B"), ("empty_in_a", "A 為空"),
                             ("empty_in_b", "B 為空"), ("same_value", "兩邊值相同"),
-                            ("availability_differs", "env_availability 不同")):
+                            ("masked", "遮罩不可比"), ("availability_differs", "env_availability 不同")):
             out.append(f"  {label}（{len(s[name])}）：{', '.join(s[name]) or '—'}")
         if s["same_value"]:
-            out.append("  ⚠️ 兩邊值相同的 key 逐顆判斷：密鑰類（token、secret、password、私鑰、DB 連線）"
-                       "在 prod 與 UAT 共用是發現項，UAT 應換一把；網址或開關相同可能合理。")
+            out.append("  ⚠️ 兩邊值相同的 key 逐顆判斷：網址或開關相同可能合理；本該是密鑰卻標了非機密，先改 env_sensitive。")
+        if s["masked"]:
+            out.append("  ℹ️ 遮罩不可比的 key 是機密（GET 讀回 ********）：prod 與 UAT 是否共用同一把，"
+                       "由負責人在 Dashboard 逐顆核對；本工具不取真值。")
     else:
         width = max([len(r["key"]) for r in result["rows"]] + [3])
         for r in result["rows"]:

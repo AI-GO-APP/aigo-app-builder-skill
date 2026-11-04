@@ -44,8 +44,8 @@ Hosted 及其他寫入照學習版的範圍預檢，再走本技能既有流程�
 
 課程工作區若本回合只問觀念，或使用者明確要求不做本機變更，先直接回答；更新留到第一次進入實作前，不能假裝已檢查。其他工作區維持下列更新流程。
 
-> 若已裝 SessionStart hook（見 README「保持更新」），本階段會自動被跳過（節流），
-> 不必重複執行。
+> 若已裝 SessionStart hook（見 README「保持更新」），本階段會自動被跳過（節流），不必重複執行。
+> 平台 `/context` 也會回它要求的 `skill_version`；aigo-cli `/v3/status` 報 `skill_update_required` 時同樣先同步。
 
 ```bash
 python scripts/check_update.py     # macOS / Linux 用 python3
@@ -56,9 +56,8 @@ python scripts/check_update.py     # macOS / Linux 用 python3
   安裝強制同步到遠端 main**——git 安裝 `fetch` + `reset --hard` + `clean`，複製式安裝
   （skills CLI）下載 `main.zip` 鏡像覆蓋。本地修改、分岔的 commit、多出來的檔案一律被
   遠端取代；不問使用者、不等回覆。你不需要也**不可以**替使用者做「要不要更新」的決定。
-- **無輸出 = 沒事**：已是最新版、離線、或同一版本差 3 小時內已失敗過一次都靜默結束，
-  直接進 Phase 0。（節流只抑制網路抓取與失敗重試；版本比對每次都做，
-  所以本機多份安裝共用遠端快取，任一份落後都抓得到。）
+- **無輸出 = 沒事**：已是最新版、離線、或同一版本差 3 小時內已失敗過一次都靜默結束，直接進 Phase 0。
+  （節流只抑制網路抓取與失敗重試；版本比對每次都做，本機多份安裝共用遠端快取，任一份落後都抓得到。）
 - **有輸出 = 已經同步過了（或同步失敗）**，逐行處理：
   - **「已同步」**→ **立刻重新讀取 `SKILL.md` 與相關 `references/`**，讓新版指令在本回合
     就生效；把版本落差與變更摘要**告知**使用者（告知，不是徵詢——更新已完成，
@@ -118,6 +117,7 @@ uv run --project scripts python scripts/aigo_auth.py status   # 1. 找工作區�
 
 - **Data Reference 一律用 `GET /api/v1/refs/apps/{app_id}`**，不要讀 `src/db.json`（實測恆為 `{}`）
 - ⚠️ 自建表清單取不到時回**空清單**——空清單不等於「租戶沒有表，可以放心建新的」
+- **接手既有 app 先看 `GET /builder/apps/{id}` 回的 `is_manager`／`is_owner`**：`is_manager=false`（不是建立者、協作者或 `system.admin`）時 sync／publish／secrets 一律 404「App 不存在」，持 `builder.access`／`builder.publish` 也一樣——請建立者先 `POST /builder/apps/{id}/collaborators`（body `user_id`，被加者也要有 `builder.access`）
 - **步驟 9：確認已完全理解現有結構，才可進入開發**
 ## Phase 1：環境設定
 
@@ -305,7 +305,7 @@ def execute(ctx):
 4. **`ctx.db` 沒有結構操作**：執行期不能建表改欄，這是刻意的能力邊界
 5. **★ 外部服務與金鑰：AI 可代設，先講清楚再動手**：建立／授權外部服務、寫入 secrets 之前，用白話告訴用戶
    **連到哪個網域、會送出哪些資料、哪支 action 用**，**單獨取得同意**（不併進計畫同意；網域或資料變了要重問）；
-   金鑰預設由 AI 先建 key（`aigo_secrets.py create-key`，同名不動），再附 Builder 連結請用戶貼值；**先確保 action 攔下空值與 `PENDING_PASTE_VALUE`**，不得外呼或誤報完成。備案用 `set --from-env <VAR>`（Windows 可用）或 POSIX 600 檔案；值**不進對話、不印出、不讀回**。`status` 只確認名稱，不能證明已設定。權限與完整流程見 dev-guide §25.2；設定缺口**不是 bug**、不回報
+   金鑰預設由 AI 先建 key（`aigo_secrets.py create-key`，同名不動；要用使用者登入 JWT，app-scoped token／`__APP_TOKEN__` 一律 403，且本帳號須是該 app 管理者，否則 404），再附 Builder 連結請用戶貼值；**先確保 action 攔下空值與 `PENDING_PASTE_VALUE`**，不得外呼或誤報完成。備案用 `set --from-env <VAR>`（Windows 可用）或 POSIX 600 檔案；值**不進對話、不印出、不讀回**。`status` 只確認名稱，不能證明已設定。權限與完整流程見 dev-guide §25.2；設定缺口**不是 bug**、不回報
 
 > 逾時有兩道且原文同形：manifest `timeout_ms`（1000～120000，舊 app 要 republish 才換上新值）
 > 與 egress 閘道的服務 `timeout_ms`（預設 10000、硬上限 30000）。走 `ctx.http.call` 的 action
@@ -331,7 +331,7 @@ if (file) downloadFile(file);
 0. **定目標並印出來**：`app = resolve_app(root, alias)` → `print(app.describe())`
    → GET app 後 `assert_remote_matches(app, info)`。工作區有多個 app 而本次沒指定 →
    `resolve_app` 會報錯列出 alias，**問用戶，不要猜**。`full_deploy()` 自己也會印目標行
-1. **同步 VFS**：讀取本地檔案 → PATCH `/api/v1/builder/apps/{id}/source/files`
+1. **同步 VFS**：讀取本地檔案 → PATCH `/api/v1/builder/apps/{id}/source/files`（非本 app 管理者回 404「App 不存在」，見 Phase 0 `is_manager`）
    - 腳本：`scripts/aigo_sync.py` 的 `sync_to_cloud()`
    - ★ 內建二次驗證：PATCH 後自動 GET 確認 vfs_version 遞增 + 檔案確實寫入
    - ★ **PATCH 不刪檔**：本機刪掉的 `actions/*.py` 留在遠端、發布後照樣可被呼叫（manifest 拿掉登記不會下架），所以遠端有本機沒有的 `actions/` 檔時 sync 預設**寫入前中止並列出**——把清單給用戶確認，再用 `full_deploy(..., on_remote_only="delete", delete_paths=[用戶確認過的路徑])`／`delete_remote_files()`（下架）或 `on_remote_only="keep"`（保留）→ `troubleshooting.md`「刪掉的 action 還能呼叫」列
@@ -387,7 +387,7 @@ if (file) downloadFile(file);
 
 只有通過驗證閘門後才可發布：
 
-1. POST `/api/v1/builder/apps/{id}/publish`
+1. POST `/api/v1/builder/apps/{id}/publish`（須持 `builder.publish` **且**本帳號 `is_manager`，否則 404「App 不存在」）
    - 腳本：`scripts/aigo_publish.py` 的 `publish_app()`
    - ★ 內建二次驗證：POST 後自動 GET 確認 status == "published"
    - ★ POST 前內建 `egress_preflight()`：比對 `_template.json` 的 `required_egress` 宣告、`actions/*.py` 的
@@ -396,8 +396,8 @@ if (file) downloadFile(file);
    - 三個 query 參數預設都不帶，**409 回來先讀 `code` 再決定**（dev-guide §8 分流表）：
      `confirm_removal=true` 只在用戶確認要移除該 action；`confirm_egress_gaps=true` 只在確定用不到那個
      slug；`auto_rollback=true` 是發布後自動編譯驗證、失敗退回上一版並回 422——要開得讓用戶知道會退版
-2. 發布後執行 Publish 一致性驗證；**發布後立刻呼叫 action 回 503 是 runner 冷啟動**，等 `Retry-After`
-   再試，不是發布失敗（`troubleshooting.md` 503 列）
+2. 發布後執行 Publish 一致性驗證；**發布後立刻呼叫 action**：首次發布回 409 `App 部署中`、之後的發布
+   冷啟動回 503，兩者都讀 `Retry-After` 再試，不是發布失敗（`troubleshooting.md` 503 列）
 
 ### 樂觀鎖
 
@@ -453,10 +453,10 @@ Hosted App 線（不走 Phase 2–4）：
 > 查無此症、或照表處理仍卡死 → **自動**進入下方「問題回報」五步，不要反覆重試、不要繞道硬改。
 
 狀態碼語義分野：**403** 權限（結構操作 `datacenter.schema_write`／`system.admin` 與記錄 `builder.access` 降級動作不同；body 帶
-`reason`／`rule_id` 是租戶資料存取規則 → dev-guide §27）｜**409** 配額或衝突｜**422** 輸入不合法｜
-**400** 業務規則拒絕｜**503 「app runner 暫時不可用」** 三種成因同形：先問有沒有 publish
-（`status: draft` 重試不會好）→ 剛發布的冷啟動（等 `Retry-After`）→ body 帶 `quota_hint` 是租戶
-運算配額（**不是 code 問題**，把原文轉給用戶）｜**`aigo login` 瀏覽器登入 401「帳號或密碼錯誤」**
+`reason`／`rule_id` 是租戶資料存取規則 → dev-guide §27）｜**404「App 不存在」** 存檔／發布／secrets 回這個不一定是 app_id 錯——非本 app 管理者（`is_manager=false`）同形 404，持 `builder.access`／`builder.publish` 也擋｜**409** 配額或衝突，
+action 呼叫期另有兩種：`App 尚未發布`（`retryable: false`，先 publish，重試不會好）與 `App 部署中`（首次發布的部署窗口，等 `Retry-After: 15`）｜**422** 輸入不合法｜**400** 業務規則拒絕｜
+**503 「app runner 暫時不可用」** 是 runner 不可達：非首次發布後的冷啟動等 `Retry-After: 30`；body 帶 `quota_hint` 是租戶
+運算配額（**不是 code 問題**，把原文轉給用戶）；`retryable: false` 是 runner 拒絕（身分驗證）｜**`aigo login` 瀏覽器登入 401「帳號或密碼錯誤」**
 先跑 `aigo_cli_check.py` 看版本，再看登入頁網址是不是租戶子網域，最後才查帳密（`troubleshooting.md`）。
 
 **★ Action 對外呼叫失敗時別急著改 code**：先完整讀出 status 與 error message。

@@ -116,7 +116,7 @@ AI GO 預設表的命名慣例是 **`<功能區前綴>_<實體複數>`**。看�
 **兩個命名面**：平台對同一張預設表有兩套 key——
 
 - **Meta 面**（`/api/v1/data-center/meta/tables/{key}`、延伸欄位端點的 `{erpKey}`）：key 依功能區分組，
-  例如 `crm_clients`、`purchase_suppliers`、`accounting_invoices`。約 85 張，有中文標題與欄位 label。
+  例如 `crm_clients`、`purchase_suppliers`、`accounting_invoices`。86 張（以 `meta tables` 實列為準），有中文標題與欄位 label。
   ⚠️ 它的 `fields` 是**表現層策展白名單**（Workspace grid／表單），比實體表少欄是常態——
   只能用來讀語意（標題、label、值域），**不能用來判欄位有無**（§0 的 ⚠️）。
 - **引用面**（`/api/v1/refs/*`、Open Proxy、`ctx.db`／`db.ts`）：key 就是實體表名，例如 `customers`、
@@ -187,9 +187,9 @@ AI GO 預設表的命名慣例是 **`<功能區前綴>_<實體複數>`**。看�
 
 | 使用者會怎麼說 | 預設表（Meta 標題） | 常被誤建成 | 備註 |
 |---------------|-------------------|-----------|------|
-| 員工、同仁、部門 | `hr_employees`（員工列表）、`hr_departments`（部門） | `staff`、`members`、`teams` | 身分與登入沿用平台 `users`（規則 23），員工主檔才是 `hr_employees` |
+| 員工、同仁、部門 | `hr_employees`（員工列表）、`hr_departments`（部門） | `staff`、`members`、`teams` | 身分與登入沿用平台 `users`（規則 23），員工主檔才是 `hr_employees`。預設表的 `user_id`／`maker_id`／`approver_id` 等欄填 `users.id`（`GET /api/v1/users`），**不是 `members.id`**（`data-center.md` §9） |
 | 請假、出勤、加班 | `hr_leaves`、`hr_leave_allocations`、`hr_attendances`、`hr_overtime_requests` | `leave_requests`、`attendance_logs` | `hr_leaves.state` 值域見 §4 |
-| 工時、填報 | `hr_timesheets`（工時紀錄）、`hr_work_entries` | `time_logs` | `date` 必填 |
+| 工時、填報 | `hr_timesheets`（工時紀錄）、`hr_work_entries` | `time_logs` | `date`、`employee_id` 必填——同 `hr_expenses`，沒有員工實體不可用 |
 | 技能、證照 | `hr_skills`（技能管理）、`hr_employee_skills` | `certifications` | |
 | 薪資 | `hr_payroll_settings`（投保設定／基本工資／勞健保科目，15 欄）、`hr_payroll_runs`（期別彙總，17 欄）、`hr_payroll_bonus_rules`（獎金規則，14 欄） | `payroll_settings`（測試租戶實例） | ★ 這三張**可引用**，別因為「黑名單」三個字把整族關掉。缺的是**個人薪資單明細那一層**（見 §3 黑名單段）——平台只到 `hr_payroll_runs` 的期別彙總 |
 
@@ -227,7 +227,9 @@ AI GO 預設表的命名慣例是 **`<功能區前綴>_<實體複數>`**。看�
 | `stock_orderpoints` | `stock_warehouse_orderpoints` | |
 | `stock_packaging` | `stock_package_types`（以 columns 端點實查為準） | |
 | `stock_freight_groups` | `freight_groups` | |
-| `accounting_invoices`／`_bills`／`_vouchers`／`_credit_notes`／`_refunds`／`_journal_entries` | **全部是 `account_moves`** | Meta 依單據型別拆 key，實體表只有一張 |
+| `stock_delivery_batches` | `stock_picking_batches` | |
+| `mrp_routings` | `mrp_routing_workcenters` | |
+| `accounting_invoices`／`_bills`／`_vouchers`／`_credit_notes`／`_refunds`／`_journal_entries`／`_settlements` | **全部是 `account_moves`** | Meta 依單據型別拆 key，實體表只有一張；`accounting_settlements`（暫收付款）在 Meta 標 readonly-shared |
 | `accounting_payments_inbound`／`_outbound` | `account_payments` | 以 `payment_type` 區分 |
 | `accounting_voucher_templates` | `account_move_templates` | |
 | `accounting_fixed_assets`／`_inventory_valuations`／`_bank_statements` | `fixed_assets`／`inventory_valuations`／`account_bank_statements` | |
@@ -240,8 +242,8 @@ AI GO 預設表的命名慣例是 **`<功能區前綴>_<實體複數>`**。看�
 `sale_order_lines`、`purchase_order_lines`、`account_move_lines`、`hr_expenses`、`hr_overtime_requests`、
 `msg_*`、`notifications`、`announcements`、`stock_locations`、`stock_move_lines`。
 
-**Meta 可讀但不可引用**（黑名單）：`users`、`hr_payroll_contracts`／`hr_payroll_slips`／`hr_salary_items`、
-`utm_stages`／`utm_tags`、`roles`、`members`。
+**Meta 可讀但不可引用**（黑名單）：`users`、薪資明細 5 張 `hr_payroll_contracts`／`hr_payroll_slips`／
+`hr_payroll_slip_lines`／`hr_payroll_bonus_rule_results`／`hr_salary_items`、`utm_stages`／`utm_tags`、`roles`、`members`。
 
 ★ **403 與 404 是同一個授權決策的兩種表現，不是兩種原因**（2026-09-16 測試租戶實打）。
 `GET /api/v1/refs/tables/{t}/columns` 對黑名單成員會回**兩種**狀態碼：
@@ -249,10 +251,10 @@ AI GO 預設表的命名慣例是 **`<功能區前綴>_<實體複數>`**。看�
 | 表 | 回應 | 讀法 |
 |---|---|---|
 | `users`／`roles`／`members` | **403**「此表不可引用」 | 黑名單，講得很清楚 |
-| `hr_payroll_contracts`／`hr_payroll_slips`／`hr_salary_items` | **404**「表不存在」 | ⚠️ **仍然是黑名單**——不是「這個租戶沒建」 |
+| `hr_payroll_contracts`／`hr_payroll_slips`／`hr_payroll_slip_lines`／`hr_payroll_bonus_rule_results`／`hr_salary_items` | **404**「表不存在」 | ⚠️ **仍然是黑名單**——不是「這個租戶沒建」 |
 | `hr_payroll_settings`／`hr_payroll_runs`／`hr_payroll_bonus_rules` | 200 | 不在黑名單，可引用 |
 
-🚨 **那三張薪資明細表的 404 最容易被誤讀成「版本差異、將來會出現」。** 它是薪資明細閘
+🚨 **那五張薪資明細表的 404 最容易被誤讀成「版本差異、將來會出現」。** 它是薪資明細閘
 的表現：`references.columns` 無條件濾掉黑名單成員，濾掉之後的查表結果就是「找不到」
 （`core/app_scope_routes.py` 對這個行為有逐字說明）。判準寫在
 `utils/table_inspector.py`——**薪資族之內、有可指向個別員工的欄、且有金額欄**，三個條件
@@ -260,7 +262,7 @@ AI GO 預設表的命名慣例是 **`<功能區前綴>_<實體複數>`**。看�
 （規則參數）、`hr_payroll_runs`（整批彙總）刻意**不在**批內，而 `hr_expenses`／
 `hr_expense_sheets`（有 `employee_id` ＋金額）也刻意不在——費用核銷不是薪資數字。
 
-⇒ **不要把這三張排進「等平台補上就能用」的待辦。** 要個人薪資單那一層，
+⇒ **不要把這五張排進「等平台補上就能用」的待辦。** 要個人薪資單那一層，
 只能在 app 內自建，或走平台的薪資模組介面。
 
 ---
@@ -283,7 +285,7 @@ AI GO 預設表的命名慣例是 **`<功能區前綴>_<實體複數>`**。看�
 | `analytic_accounts` | `name` | |
 | `hr_expenses` | `name`、`date`、**`employee_id`** | 沒有員工實體就不能用 |
 | `hr_expense_sheets`／`hr_employees`／`hr_departments` | `name` | |
-| `hr_timesheets` | `date` | |
+| `hr_timesheets` | `date`、**`employee_id`** | 同 `hr_expenses`，沒有員工實體不可用 |
 | `sale_orders`／`purchase_orders` | `date_order` | |
 | `sale_order_lines`／`purchase_order_lines` | `order_id` | |
 | `product_templates` | `name` | |
@@ -298,8 +300,8 @@ CHECK 值域（`state`、`type`、`priority` 等）見 `custom-app-dev-guide.md`
 
 | 類型 | 表 |
 |------|----|
-| 平台獨寫（由平台流程產生） | `stock_moves`、`stock_quants`、`mrp_workorders`、`analytic_lines`、`ir_sequences`、`currency_rates` |
-| 全域參考資料（全租戶共用） | `account_accounts`、`countries`、`country_states`、`currencies`、`languages`、`uom_uom`、`uom_categories` |
+| 平台獨寫（由平台流程產生） | `stock_moves`、`stock_quants`、`mrp_workorders`、`analytic_lines`、`ir_sequences`、`ir_sequence_date_ranges`、`currency_rates` |
+| 全域參考資料（全租戶共用） | `account_accounts`、`countries`、`country_states`、`country_groups`、`currencies`、`languages`、`uom_uom`、`uom_categories`、`decimal_precisions` |
 
 ---
 

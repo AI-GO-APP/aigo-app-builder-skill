@@ -3,11 +3,11 @@
 > **這不是 Custom App 的部署模式，是一條平行產品線**（平台文件明文「勿混稱」）。
 > 本 skill 的主流程（Phase 2–4）不適用於 Hosted App；Phase 1.5 判斷走這條線時讀本檔。
 > **Phase 4.2 驗證閘門的等價物是 §3.4——部署後必過，未通過不得對外交付。**
-> 內容核對自平台原始碼與文件（2026-09-01），部分端點已實測（見下）。
+> 內容核對自平台原始碼與文件（2026-09-01；2026-11-04 對 `origin/main` 25cb09c75 與 tag v1.20.2 重核），部分端點已實測（見下）。
 
 ### ⚠️ 部署落差（prod＝最新 `v*` tag；main 只進 UAT）
 
-- **prod 跑平台最新的 `v*` tag**（2026-10-02 核：v1.16.0——該 tag 才有的 `/open/storage/*` 當天 prod 實打可用，§5.2），**平台 `main` 只部署到 UAT**——main 剛合併的功能
+- **prod 跑平台最新的 `v*` tag**（2026-11-04 核：v1.20.2；2026-10-02 時為 v1.16.0——該 tag 才有的 `/open/storage/*` 當天 prod 實打可用，§5.2），**平台 `main` 只部署到 UAT**——main 剛合併的功能
   在下一個 tag 前**只有 UAT 有**；tag 不一定從 main 切，「prod 有沒有」看 tag 內容，不看合併日期
 - 歷史（2026-09-07 prod＝v1.13.0，prod openapi 實查已含本檔當時所有端點）：下列 09-01／09-02 缺的東西
   已隨 v1.13.0 補齊，留作「下一次 prod 又落後 main」的判讀範本：
@@ -30,12 +30,12 @@
   ① 建置引擎搬 **AWS CodeBuild**（§1／§2；UAT 2026-09-05、prod 隨 v1.13.0 切換，平台 0907 漂移
   runbook 明記「prod 已切 CodeBuild」）；② 記錄分頁改版——`GET /{id}/runtime-starts`「先前啟動」與
   `POST /{id}/logs/interpret-line`（§8）；③ `runtime-settings` 多一欄 **`resources`**（per-app 執行上限，
-  §4）——`PUT` 的全量語意從四欄變**五欄**；租戶 app 數配額（舊 429「預設 5 支」）已整條移除（§10）
+  §4）——`PUT` 的全量語意從四欄變五欄，v1.17.0 再加 `env_sensitive` 成**六欄**（§4）；租戶 app 數配額（舊 429「預設 5 支」）已整條移除（§10）
 - **靠旗標不靠版本的兩條**：租戶專屬節點 `TENANT_DEDICATED_NODES` 在 **UAT 與 prod 都是 `ops-only`**
   （租戶自助開機未開放，要平台替租戶開）⇒ §4.1 的 `resources` 在多數租戶會 403；
   租戶資料存取規則 `POLICY_GATE_MODE` **v1.16.0 的 prod manifest 已是 on**（2026-10-02 核 tag；v1.15.4 以前是 off）（§5 末條）
-- **判讀原則**：對著本檔宣稱的端點拿到 404 或回應缺欄位，**先懷疑部署落差**，
-  不是文件錯也不是你打錯——隔幾天再試或問平台
+- **只在 UAT 開的旗標（prod manifest 未開，本檔不涵蓋）**：`HOSTED_PLATFORM_V1`（常駐 Hosted Service，`/api/v1/hosted-platform/*`——要突破 300 秒或常駐的工作負載走這條，不要拿 Hosted App 硬撐）、`TENANT_POSTGRES=ops-only`（租戶專屬 PostgreSQL，ADR 0037 仍 draft）
+- **判讀原則**：對著本檔宣稱的端點拿到 404 或回應缺欄位，**先懷疑部署落差**，不是文件錯也不是你打錯——隔幾天再試或問平台
 
 ## 目錄
 
@@ -295,14 +295,18 @@ Hosted 端的預算＝該值 − 冷啟動 − 往返裕度，用完就停手、
   ——計畫的落點是**需求盤點表 §四.1 ＋ app 分配表該列**（`new_app_requirements_template.md`），
   交付說明的落點是 **§3.4「全部通過」那行**；§3.4 部署後會 `GET runtime-settings` 讀回核對，
   讀到 `true` 卻拿不出這句＝未通過
-- 設定方式：`PUT /{id}/runtime-settings` 五欄一起送（§4）；共用池／免費租戶的常駐可能被平台方案擋
+- 設定方式：`PUT /{id}/runtime-settings` 六欄一起送（§4）；共用池／免費租戶的常駐可能被平台方案擋
 - Dashboard 直接建站的 owner 不會經過本 skill——遇到「不知道為什麼開著」的常駐 app，
   先照上表問一次，答案皆否就關掉
 
 ### 3.1 憑證：Deploy Token vs 登入 session
 
 - **Deploy Token**（`POST /api/v1/deploy-tokens`，scope 固定 `hosted_apps.deploy`，
-  raw 只在發行當下給一次；預設 90 天，UI 在詳情頁「設定」）——**只夠日常部署面**
+  raw 只在發行當下給一次；`expires_in_days` 預設 90 天、可調 1–365、顯式 `null`＝永久（只靠撤銷失效），UI 在詳情頁「設定」）——**只夠日常部署面**
+- **誰能部署、誰能鑄 Deploy Token**（v1.20.0 #2166 兩層權限）：**管理者層**＝擁有者（`created_by` 或 `system.admin`）＋該 app 的
+  **協作者**（`GET|POST /{id}/collaborators`、`DELETE /{id}/collaborators/{user_id}`，session-only）——可部署、改 runtime-settings、
+  鑄這支 app 的 Deploy Token；**擁有者層**才能改 access-settings、刪除、轉移建立者、增刪協作者（協作者打會 403）。
+  移除協作者同時撤銷其在該 app 鑄出的 Deploy Token；`GET /hosted-apps` 每列帶 `is_owner`／`is_manager`
 - §11 表「Token ❌」的端點（**建立**／改名／複製／刪除／網域／檔案／終端／憑證三動詞）
   **一律要登入 session**——用 Deploy Token 打會 403，**不是 bug 不要重試**
 - **建立 app 是 session-only**（ADR 0019）：per-app token 綁的是既有 app，
@@ -346,7 +350,7 @@ POST {deployd_upload_url}  ← multipart/form-data，第一個欄位必須叫 ta
     打完先 `tar -tzf` 核一遍：Dockerfile 在裡面，且每個被排掉的目錄都是你想排的那一個
 - **redeploy**（`POST /{id}/redeploy`）＝重跑**最後一次成功上傳**的原始碼，不需重傳；
   沒有可重跑的來源回 409
-- **restart**（`POST /{id}/restart`）不重建映像（⚠️ prod 2026-09-02 仍 404，見檔頭）
+- **restart**（`POST /{id}/restart`）不重建映像（v1.13.0 起 prod 可用）
 - **設定變更（env／持久碟）不重建、不耗建置資源，但不是瞬間生效**：平台對現行版次重送
   spec，新 revision 接手需**數分鐘**（實測 1–6 分鐘）。在延遲窗內驗證會誤判成「沒生效」，
   接著做不必要的重建——先等，別急著重新上傳（§4 有判讀方式）
@@ -364,7 +368,7 @@ POST {deployd_upload_url}  ← multipart/form-data，第一個欄位必須叫 ta
   「起不來會落 failed」那一半（負向）未實打
 - 部署建議走 CLI（§3.3）；REST 流程留給 CLI 裝不了的環境
 - **部署流程本身不碰 `always_on`**：新建 app 的常駐預設就是 `false`，deploy／redeploy 也不會改它。
-  只有 §3.0 判 `true` 的 app 才在 `active` 之後 `PUT /{id}/runtime-settings` 五欄一起送（§4）；
+  只有 §3.0 判 `true` 的 app 才在 `active` 之後 `PUT /{id}/runtime-settings` 六欄一起送（§4）；
   判 `false` 的什麼都不用做——但 §3.4 仍要讀回確認（Dashboard 那端隨時可能有人手動開）
 
 ### 3.3 CLI（`aigo`，建議的部署路徑）
@@ -413,7 +417,9 @@ python3 scripts/aigo_cli_check.py      # 零相依；--json 給機器讀
   執行——它會匯出成 `AIGO_DEPLOY_TOKEN`（優先序最高），CLI 的全域 profile 不會互相蓋；
   app 本身先 `aigo_auth.py app add <alias> --id <hosted app uuid>` 登錄（SKILL.md Phase 1）
 - **⚠️ `--slug` 語意**：命中既有 slug＝**redeploy**，否則**註冊新 app**；
-  未給則取目錄名 normalize。打錯 slug 不會報錯、會多一個 app——部署前先 `aigo hosted list` 核對
+  未給則取目錄名 normalize。打錯 slug 不會報錯、會多一個 app——部署前先 `aigo hosted list` 核對。
+  slug 不得以 `aihub-`、`svc-`、`hs-` 開頭（v1.19.0 #2123 保留前綴，422 列出整組）；自動配名撞名時加 `-2`、`-3`…，
+  所以「沒報錯」不代表拿到你想的 slug，部署後看回應的 slug
 - **專案目錄＝cwd**（沒有 `--path`）；打包自動排除 `.git`／`node_modules`
 - **⚠️ base origin 預設就是 `https://ai-go.app`（apex）**，租戶身分由 Deploy Token 承載
   ——這是 hosted CLI 自己的契約，**不要拿核心規則 29（租戶空間網址）去「糾正」它**
@@ -445,7 +451,7 @@ Custom App 線每次變更都要過 SKILL.md Phase 4.2 的驗證閘門；Hosted 
 | 結果 | 下一步 |
 |---|---|
 | 全部通過 | 可交付；交付說明附 version marker 的值（對照基準）＋**常駐狀態一句**：`常駐＝關（預設）` 或 `常駐＝開，理由 X；退場條件 Y` ＋**UAT 結論一句**（規則 33：`UAT＝有；拓撲 X` 或 `UAT＝無；理由 Y；風險 Z`） |
-| `always_on` 讀回 `true` 但沒有決策紀錄 | 回 §3.0 問一次業務問題；皆否 → `PUT runtime-settings` 關掉（五欄一起送）再驗一次；有一項是 → 補寫理由與退場條件到計畫與交付說明 |
+| `always_on` 讀回 `true` 但沒有決策紀錄 | 回 §3.0 問一次業務問題；皆否 → `PUT runtime-settings` 關掉（六欄一起送）再驗一次；有一項是 → 補寫理由與退場條件到計畫與交付說明 |
 | 建置 `failed` 且日誌全空 | **原樣重送一次**（偶發型），再失敗往建置記憶體查 → §8 |
 | ksvc ready 逾時但 runtime-logs 顯示已就緒 | 綁定介面陷阱 → §2，不要改 PORT |
 | 改動「沒生效」 | 先確認上一次 rollout 成功（失敗＝對外還是舊版）→ §3.2；只改 env 就再等滿傳播窗 → §4 |
@@ -466,7 +472,12 @@ Custom App 線每次變更都要過 SKILL.md Phase 4.2 的驗證閘門；Hosted 
 | 保留 | `PORT`（平台注入）、`K_*` 前綴、**`AIGO_*` 整族** |
 
 - 每顆可標 `runtime`／`build`／`both`（缺漏視為 `runtime`）
-- **要在建置期內嵌進前端 bundle 的（`NEXT_PUBLIC_*` 這一族），標 `both` 就夠**——
+- 每顆另有機密旗標 `env_sensitive[key]`（v1.17.0 #1867；**缺漏＝機密**，只有字面 `false` 才是非機密）：
+  機密 key **不可**標 `build`／`both`（→ 422，值會進映像層）；`GET` 讀回機密值一律是 `********`；
+  `PUT` 送 `********` 只對「現存且現為機密」的 key 表示保留原值，新 key 或非機密 key 送 `********` → 422。
+  真值只能由負責人在 Dashboard 看，或 session-only 的 `POST /{id}/runtime-settings/reveal`（body `{"name"}`，一次一顆、
+  機密者記稽核；Deploy Token 403）——本 skill 不打 reveal
+- **要在建置期內嵌進前端 bundle 的（`NEXT_PUBLIC_*` 這一族），標 `both` 就夠，但必須同時 `env_sensitive[key]=false`**（缺漏＝機密＋`both` → 422）——
   某遷入案 2026-09-22 實踩：標 `both` 後 CodeBuild 上的 `next build` 讀得到，部署後瀏覽器端
   打的是正確的後端網址，**不需要**另外傳 `--build-arg`。Dockerfile 仍建議每顆寫
   `ARG X` ＋ `ENV X=$X`：build-arg 與 env 注入哪條生效不由 app 決定，兩條都吃最省事
@@ -474,14 +485,16 @@ Custom App 線每次變更都要過 SKILL.md Phase 4.2 的驗證閘門；Hosted 
   **出現在租戶可見的建置日誌**、也留在執行中行程——只該留在伺服器的機密**不要**標 build
 - 🚨 **`PUT /runtime-settings` 是全量替換不是 merge**：省略 `env_vars`＝清空、
   省略 `always_on`＝關、省略 `persistent_disk`＝卸掛、省略 `resources`＝回平台預設——
-  **五欄（env_vars／env_availability／always_on／persistent_disk／resources）一律一起送**
-  （v1.13.0 起五欄，prod openapi 的 `HostedAppRuntimeSettingsUpdate` 已含 `resources`）
+  省略 `env_sensitive`＝每顆都當機密——
+  **六欄（env_vars／env_availability／env_sensitive／always_on／persistent_disk／resources）一律一起送**
+  （v1.13.0 起五欄、v1.17.0 起六欄；`GET` 讀回的機密值是 `********`，照送等於保留原值，見上）
 - 建置期 env 走 SSE-KMS 輸入物件（CodeBuild），不再落在 Job env；建置階段讀不到某顆 env 時，
   平台的失敗提示會指向「環境變數」頁的**建置階段**——先核那顆有沒有標 `build`／`both`，
   不是去查 Dockerfile
 - **`apply_state` 的正確讀法**（核自原始碼 schema 註解＋2026-09-02 實測）：只在 **PUT 回應**帶回，
-  `GET` 恆為 `null`（不是退回去了）。`applied` 只表示「spec 已送達、現行版次已重送」，
-  **不保證容器已換版**——PUT 走 `wait_ready=false`。要確認是否傳播完成，唯一可靠方法是
+  `GET` 恆為 `null`（不是退回去了）。PUT 回三態：`pending_first_deploy`（尚無版次，設定存了等第一次部署）／
+  `saved_not_applied`（已存、尚未送達執行層）／`applied`——`applied` 只表示「spec 已送達、現行版次已重送」，
+  **不保證容器已換版**——PUT 走 `wait_ready=false`（模組的第四態 `submitted_not_ready` 不會從這支 PUT 回來）。要確認是否傳播完成，唯一可靠方法是
   **從 app 內讀一個無害變數**（例如加一顆 `APP_BUILD_MARKER`）；用「移除變數」測比新增乾淨
 
 ### 4.1 per-app 執行上限 `resources`（★ 只有專屬節點租戶能設；v1.13.0 起，專屬節點 UAT／prod 皆 ops-only）
@@ -498,7 +511,7 @@ Custom App 線每次變更都要過 SKILL.md Phase 4.2 的驗證閘門；Hosted 
   運算資源頁換規格，不是重試
 - 免費租戶 → 403；**共用池（非專屬節點）租戶 → 403 `RESOURCES_REQUIRE_DEDICATED_NODES`**
   （2026-09-08 prod 實打訊息：「共用池租戶不能自設執行上限（沿用平台常數）；請先在「機器」設定專屬節點」；
-  同一支 app 不帶 `resources` 的五欄 PUT 回 200 `apply_state: applied`，`GET` 回應已含 `resources` 鍵）——
+  同一支 app 不帶 `resources` 的全量 PUT 回 200 `apply_state: applied`，`GET` 回應已含 `resources` 鍵）——
   app 端改不了。專屬機器目前 `TENANT_DEDICATED_NODES=ops-only`（UAT／prod 同），**租戶自己在
   「運算資源」頁開不了**，要請平台替租戶開；沒開之前這個 403 是預期
 - 租戶換小機型時平台會逐 app 檢查，超限的 app 會擋住換機型（422 帶 `apps[]`）——
@@ -535,7 +548,8 @@ Hosted App 容器**只帶平台注入的 `AIGO_*`**，原系統的 env 一顆都
    不算尚缺（例如原系統的 `DATABASE_URL`，見本節末）
    （Hosted 核對可用 `scripts/aigo_env_diff.py --app <hosted-id> --expect <key 清單>`：缺席／空值時結束碼非 0；
    清單只放目標位置是 runtime-settings、處置不是不搬／退役的列；`--a <prod-id> --b <uat-id>` 比兩個 app，
-   列出兩邊值相同的 key。只打 GET、不印值）
+   非機密 key 列出兩邊值相同；機密 key 讀回是 `********`、不比值、另列「遮罩不可比」，是否共用由負責人在 Dashboard
+   逐顆核對。只打 GET、不打 reveal、不印值）
 3. **把「尚缺」逐顆列給用戶**，說明缺了哪個功能會壞，請負責人到對應位置設定（Hosted：「環境變數」tab）。
    遷入與其 UAT 的密鑰**值**一律由負責人提供：Custom App 的 `ctx.secrets` 照 dev-guide §25.2
    先防護 action、建 key，再請負責人到 Builder「服務」貼值（備案：指定環境變數或 POSIX 600 檔案）；**Hosted env 的密鑰一律由負責人在「環境變數」tab 設**——
@@ -705,8 +719,8 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
 - `folder` 只收英數、`_`、`-`：`a.b` 回 400 `invalid_folder`（實打）。同一支 app 的不同實例／不同版次
   看得到彼此上傳的檔（檔案屬於隨附整合，不屬於容器）
 - 檔案**只對同一支 app 可見**、不進知識中心、平台登入使用者面一律 404（平台文件與原始碼，未實打）
-- ⚠️ **刪 Hosted App 不會清掉它的 App 檔案**（原始碼核對，未實打）：刪除是軟刪，隨附整合只翻 `draft`、
-  key 被撤銷，`file_nodes` 沒有對應的清除路徑。app 退場前要自己 `list`＋`DELETE` 清乾淨——
+- ⚠️ **刪 Hosted App 不會清掉它的 App 檔案**（原始碼核對，未實打）：刪除是軟刪，隨附整合翻 `draft`、
+  服務權杖（`AIGO_API_TOKEN`）**立即撤銷**（v1.20.0 #2168 起；之前只翻 `draft`），`file_nodes` 沒有對應的清除路徑。app 退場前要自己 `list`＋`DELETE` 清乾淨——
   刪了之後就沒有 key 能再清
 - **平台 AI**：`POST /open/ai-hub/complete` 收 `messages`（純文字）＋選填 `model`（要在 `/models` 清單內）、
   `file_id`（本 app 上傳且 `ready` 的檔，就是上面拿到的那個）、`response_format`；回上游 chat completion 原樣。
@@ -726,7 +740,7 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
   漏了回 422 `Field required`；2026-10-02 prod 實打，值可先 GET app 讀回原值照送）：`visibility` = `public`（預設）／
   `internal`（需登入 AI GO）。**`internal` ＋ `access_role_ids=[]` ＝ 全租戶已登入成員**；填角色 id
   就只放行那些角色；`public` 下 `access_role_ids` 必須為空（DB CHECK）。需 `hosted_apps.deploy`，
-  再收窄到 app 的 `created_by`／admin。**internal app 沒有預覽截圖**。
+  且限**擁有者層**（`created_by` 或 `system.admin`；協作者 403，§3.1）。**internal app 沒有預覽截圖**。
   角色從哪來、外部人員怎麼進租戶 → `member-admin.md` §1／§3／§4。
   2026-09-08 測試租戶實打：`POST /hosted-apps {create_deployment:false}` 註冊後即可設定；`internal`＋角色 200
   且 GET 立即讀回；`public`＋非空角色 **422「public visibility 不可搭配 access_role_ids」**；不存在的角色
@@ -914,7 +928,9 @@ Hosted App 讓其他 App 打 HTTP 過去——這是明文禁止的反模式，�
 ## 8. 日誌與除錯
 
 - **建置日誌**：`GET /{id}/deployments/{dep_id}/logs?after={cursor}`——只有 cursor 增量，
-  **沒有** severity／時間篩選（UI 上那兩顆是停用佔位，別宣稱有）
+  **沒有** severity／時間篩選（UI 上那兩顆是停用佔位，別宣稱有）。要整份日誌用
+  `GET /{id}/deployments/{dep_id}/logs/download`（v1.17.0 #1893；回短效 presigned URL、TTL 300 秒；只有終態 deployment 有，
+  未終態 409 `log_not_final`；Deploy Token 可用）
 - ★ **建置 failed 但日誌全空**（`{"lines": [], "source": "none"}`，`failure_reason` 只有
   「builder 未留下 termination message」；2026-09-02 實測多次）：主線 watcher 已能區分
   OOMKilled／exit 137／無 termination message 三種，prod 目前只回最泛的那句。處置順序——
@@ -931,7 +947,8 @@ Hosted App 讓其他 App 打 HTTP 過去——這是明文禁止的反模式，�
 - **執行期日誌**：`GET /{id}/runtime-logs?tail=&since=&until=&severity=`
   （tail 1–1000 預設 200；`reason: scaled_to_zero` 也是 HTTP 200，不是錯誤）
 - **AI 解讀**：`POST /{id}/logs/interpret`——`source=build` 必帶 `deployment_id`
-  且**不吃** tail/since/until/severity；`source=runtime` 相反。走 AI 額度（超額 429）
+  且**不吃** tail/since/until/severity；`source=runtime` 相反。走 AI 額度（超額 429）；另有每使用者每分鐘 10 次限流
+  （與 `interpret-line` 共用一桶，v1.17.0 #1949）——429 先等一分鐘再判是不是額度
 - **記錄分頁改版（v1.13.0，三支端點 prod openapi 已實查）**——三個子分頁「即時日誌／先前啟動／建置日誌」：
   - `GET /{id}/runtime-starts`：最近 **7 天**每一次**容器執行段**（同一實例內容器重啟＝新的一段）
     的起迄、時長與 `reason`（2026-09-08 prod 實打回應形狀：`{app_id, since, starts:[{pod_name, run_index,
@@ -964,7 +981,7 @@ POST /{id}/domains {"hostname": "app.example.com"}      → 201，status=pending
   （body 欄位是 hostname，不是 domain；kind 預設 bind）
 GET  /{id}/domains                                        → 列出本 App 的網域與目前 records[]／status
 POST /{id}/domains/{domain_id}/verify                     → 立即探測一次
-DELETE /{id}/domains/{domain_id}                          → 202，轉 releasing（⚠️ 目前會卡住，見末段）
+DELETE /{id}/domains/{domain_id}                          → 202，轉 releasing（prod 仍可能卡住，見末段）
 ```
 
 **`kind`**：`bind`（預設，指向本 App）／`redirect`（轉址，必帶 `https://` 開頭的 `redirect_url`）。
@@ -984,13 +1001,10 @@ IP、萬用字元、含路徑或埠號。hostname **全平台唯一**：已綁�
 | 網域型態 | 要加的記錄 |
 |---|---|
 | **子網域**（`app.example.com`，建議） | ① 流量 CNAME：`app.example.com` → `{slug}.deploy.ai-go.app` ② 憑證驗證 CNAME：`_xxxx.app.example.com` → `_yyyy.….acm-validations.aws` |
-| **根網域**（`example.com`） | ① 流量 **ALIAS**（DNS 商要支援 ALIAS／ANAME 或 CNAME Flattening）② 所有權 TXT：`_aigo-verify.example.com`（值與租戶綁定；**僅 UAT**，見下方部署落差）③ 憑證驗證 CNAME |
-| 平台判定不了（查不到 SOA；僅 UAT） | CNAME 與 ALIAS 並列（同一個目標），照 DNS 商能力擇一；也會帶所有權 TXT |
+| **根網域**（`example.com`） | ① 流量 **ALIAS**（DNS 商要支援 ALIAS／ANAME 或 CNAME Flattening）② 所有權 TXT：`_aigo-verify.example.com`（值與租戶綁定）③ 憑證驗證 CNAME |
+| 平台判定不了（查不到 SOA） | CNAME 與 ALIAS 並列（同一個目標），照 DNS 商能力擇一；也會帶所有權 TXT |
 
 - 憑證驗證 CNAME 剛建立時 `name`／`value` 是 `null`，**約 10 秒後**（實測）再 `GET …/domains` 或 `verify` 才會出現
-- ⚠️ **部署落差**（2026-10-09，prod＝v1.16.2）：prod 的回應**沒有** `dns_classification`／`dns_zone_name`，改帶 `is_apex`，
-  而且只用「兩段＝根網域」判定（`example.co.uk` 這類會被當成根網域）；**prod 沒有所有權 TXT**。UAT 跟 main，有上述兩項。
-  子網域 CNAME 綁定兩邊行為一致、都實測過。發版後拿掉這條
 
 #### 步驟 3：到「實際負責 DNS 的地方」加記錄
 
@@ -1009,8 +1023,8 @@ IP、萬用字元、含路徑或埠號。hostname **全平台唯一**：已綁�
 | `pending_dns` | 流量記錄還沒指對；根網域則也可能是所有權 TXT 缺／錯（看 `error_message`） | 回步驟 3 |
 | `pending_cert` | 流量已指對，等憑證簽發 | 等；`error_message` 是「版次轉為運行中後才會啟用自訂網域」＝App 沒有 `active` 版次 |
 | `active` | 已生效 | 步驟 5 |
-| `failed` | 「憑證驗證失敗或逾時」（驗證記錄 **72 小時**內沒加好）、「平台憑證名額已滿，請聯絡管理員」（平台側憑證容量，不是你的配額）、無權限 | **逾時那種無法自行恢復**：同一筆綁定不會重新申請憑證，補記錄也沒用，要解除重綁——而解除目前會卡住（末段），所以回報平台。名額已滿會被背景探測持續重試，名額釋出後可能自己恢復。**建綁定後當天就加驗證記錄** |
-| `releasing` | 解除中 | ⚠️ 目前會卡住，見末段 |
+| `failed` | 「憑證驗證失敗或逾時」（驗證記錄 **72 小時**內沒加好）、「平台憑證名額已滿，請聯絡管理員」（平台側憑證容量，不是你的配額）、無權限 | **逾時那種無法自行恢復**：同一筆綁定不會重新申請憑證，補記錄也沒用，要解除重綁（解除在 prod 仍可能卡住，見末段）。名額已滿會被背景探測持續重試，名額釋出後可能自己恢復。**建綁定後當天就加驗證記錄** |
+| `releasing` | 解除中 | prod 仍可能卡住，見末段 |
 
 實測：DNS 加好後約 **5 分鐘**轉 `active`（2026-10-09，prod、UAT 各一次）。
 
@@ -1025,15 +1039,18 @@ echo | openssl s_client -connect app.example.com:443 -servername app.example.com
 - ⚠️ **轉 `active` 後約 1 分鐘內**（實測），連線可能還拿到平台萬用憑證 `*.deploy.ai-go.app`，瀏覽器／curl 報憑證名稱不符。
   等 1–2 分鐘再驗，**不要當成失敗**
 - internal App 在兩個網址各要登入一次（session cookie 綁 host）
+- 用自訂網域跑 WebSocket 的 app：v1.19.0（#2107）修了自訂網域升級回 503，但**存量 app 要重新部署一次**註記才補上；
+  300 秒上限不變（§2）
 - 接著照 §3.4「自訂網域」列：用該網域重跑主要路由；OAuth redirect URI 加上這個網域
 
-#### ⚠️ 已知問題：解除綁定卡在 `releasing`（2026-10-09，prod 與 UAT 都可重現）
+#### ⚠️ 已知問題：解除綁定卡在 `releasing`（2026-10-09 曾在 prod 與 UAT 重現；平台已修，prod 未發版）
 
-`DELETE` 回 202、轉 `releasing` 後，背景清理每一輪都失敗，`error_message` 一直是「解除綁定尚未完成，將自動重試」；
-網域不會從列表消失，**該 hostname 也無法再綁到任何 App**。平台已開票處理。修好前：
+2026-10-09：`DELETE` 回 202、轉 `releasing` 後，背景清理每一輪都失敗，`error_message` 一直是「解除綁定尚未完成，將自動重試」；
+網域不會從列表消失，**該 hostname 也無法再綁到任何 App**。平台連續修了四次：#2162（v1.20.0）、#2213／#2215／#2220
+（2026-11-03，只在 main＝**UAT**，未入 v1.20.2，prod 等下一個 tag）。處置：
 
-- **不要用「先綁、解除、再綁」試錯**：綁之前先定案 hostname、子網域或根網域、要綁哪個 App
-- 綁錯了回報平台，不要反覆重試 `DELETE`
+- **綁之前先定案** hostname、子網域或根網域、要綁哪個 App；不要用「先綁、解除、再綁」試錯
+- prod 上解除仍可能卡住：卡住就回報平台，不要反覆重試 `DELETE`；UAT 可以重測解除流程
 - 要試流程就用一次性的子網域（如 `aigo-test-YYYYMMDD.example.com`），不要拿正式要用的名字試
 
 ## 10. 錯誤碼對照（★ 分清「重試會好」與「不會好」）
@@ -1059,7 +1076,7 @@ echo | openssl s_client -connect app.example.com:443 -servername app.example.com
 | 422「請改用 Gateway API 建立網域」 | `POST /{id}/domains` 送了 `kind: gateway` | 改走 `/api/v1/hosted-app-gateways`（§11 末） |
 | 422（`POST /{id}/domains`，訊息提到 hostname） | body 欄位寫成 `domain`，或 hostname 是平台網域／IP／萬用字元／單一 label | 欄位是 `hostname`；換成自己的網域（§9） |
 | 自訂網域一直停在 `pending_dns` | 記錄加錯地方（看 NS 不看註冊商）、Cloudflare 開了橘雲、根網域缺所有權 TXT | §9 步驟 3 逐項查 |
-| 自訂網域解除後一直是 `releasing`、「解除綁定尚未完成，將自動重試」 | 平台已知問題（2026-10-09） | 不要重試 `DELETE`；回報平台（§9 末段） |
+| 自訂網域解除後一直是 `releasing`、「解除綁定尚未完成，將自動重試」 | 平台 2026-10-09 已知問題；修法在 UAT，prod 等下一個 tag（§9 末段） | prod：回報平台、不要反覆重試 `DELETE`；UAT：可重測 |
 
 ## 11. API 端點速查（前綴 `/api/v1/hosted-apps`）
 
@@ -1067,13 +1084,14 @@ echo | openssl s_client -connect app.example.com:443 -servername app.example.com
 |---|:-:|
 | `GET /`／`GET /{id}` | ✅ |
 | `POST /`（建立）——session-only（ADR 0019，§3.1；固定 403 訊息） | ❌ |
-| `POST /{id}/deployments`／`GET .../deployments*`／`.../logs` | ✅ |
-| `POST /{id}/restart`／`GET /{id}/runtime-logs`／`POST /{id}/logs/interpret`（⚠️ restart／interpret prod 2026-09-02 仍 404，v1.13.0 已補） | ✅ |
+| `POST /{id}/deployments`／`GET .../deployments*`／`.../logs`／`.../logs/download`（§8） | ✅ |
+| `POST /{id}/restart`／`GET /{id}/runtime-logs`／`POST /{id}/logs/interpret`（v1.13.0 起 prod 可用；interpret 每使用者 10 次/分，§8） | ✅ |
 | `GET /{id}/runtime-starts`／`GET /{id}/runtime-starts/{pod_name}/logs`／`POST /{id}/logs/interpret-line`（§8；v1.13.0，prod openapi 已實查） | ✅ |
 | `GET|PUT /{id}/runtime-settings`／`GET /{id}/resource-usage` | ✅ |
 | `GET /{id}/preview`／`POST /{id}/preview/capture` | ✅ |
-| `POST /{id}/redeploy`（⚠️ prod 2026-09-02 仍 404，v1.13.0 已補）／`clone`／`PATCH /{id}`（改名）／`DELETE /{id}`（回 `{status: deleted, teardown: completed}`，2026-09-08 實打） | ❌ |
-| `POST|DELETE /{id}/icon`／`PUT /{id}/access-settings` | ❌ |
+| `POST /{id}/redeploy`（v1.13.0 起 prod 可用）／`clone`／`PATCH /{id}`（改名）／`DELETE /{id}`（回 `{status: deleted, teardown: completed}`，2026-09-08 實打） | ❌ |
+| `POST|DELETE /{id}/icon`／`PUT /{id}/access-settings`（擁有者層，§6） | ❌ |
+| `POST /{id}/runtime-settings/reveal`（單顆真值，§4）／`GET|POST /{id}/collaborators`、`DELETE /{id}/collaborators/{user_id}`（§3.1） | ❌ |
 | `/{id}/credential/{provision|rotate|revoke}` | ❌ |
 | `/{id}/domains*`／`/{id}/ports*` | ❌ |
 | `/{id}/files*`／`/{id}/console/*`（含 WS 終端） | ❌ |
