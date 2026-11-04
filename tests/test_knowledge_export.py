@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -84,7 +85,8 @@ class KnowledgeExportTest(unittest.TestCase):
         out = self.export()
         result = self.run_cli("verify", out)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertRegex(result.stdout, r"^OK 1\.71\.0 abc123 [0-9a-f]{16}\n$")
+        version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        self.assertRegex(result.stdout, rf"^OK {re.escape(version)} abc123 [0-9a-f]{{16}}\n$")
 
     def test_modified_reference_reports_sha256(self):
         out = self.export()
