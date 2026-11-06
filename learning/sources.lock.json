@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "builder_version": "1.77.0",
-  "review_note": "Rebased learning onto Builder 1.77.0: aigo_auth resolve_base_url/get_token/get_app_info signatures unchanged, all 9 excerpt headings present, aigo_learning_scope.py (#125) added to shared tools and replaces the duplicate learning_scope.py",
+  "builder_version": "1.78.0",
+  "review_note": "Relocked for Builder 1.78.0 (#121): only VERSION changed since the 1.77.0 review; aigo_auth API and all 9 excerpt headings unchanged",
   "sources": {
-    "VERSION": "4871e93398a3049bd6d4db8e6f6e7d554bb4bcf7ee774b0a0630c24a9bad8a36",
+    "VERSION": "b983697fa79e6dc7320b2c54f89409307d49b5cafcb56194866cdfa5dab0b5e5",
     "references/custom-app-dev-guide.md": "89a45fecb50bd290d03aebb7c89a42ce2cd9336d4b22b40025c7e4e98d9d3a9a",
     "scripts/aigo_auth.py": "e6009f35a6bdf37f6ab236b5fae3d1221be51b7bb6c5ede4eb01213273189368",
     "scripts/aigo_cli_check.py": "6da6d188983ef07e70533e4dcd8e3fb0a1aa33da49e75f4086489506ad4667e9",

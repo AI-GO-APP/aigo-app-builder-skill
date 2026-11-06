@@ -42,7 +42,7 @@
 
 ## 2026-11-07 補記：併入 Builder 1.77.0
 
-- 分支併入 main `ecf8df5`（1.77.0）。`learning/sources.lock.json` 以 `--review-sources` 重鎖；`aigo_auth` 的 `resolve_base_url`／`get_token`／`get_app_info` 介面與 9 個摘錄章節標題均未變。
+- 分支併入 main `aace64f`（1.78.0；1.77.0→1.78.0 只有 VERSION 變動）。`learning/sources.lock.json` 以 `--review-sources` 重鎖；`aigo_auth` 的 `resolve_base_url`／`get_token`／`get_app_info` 介面與 9 個摘錄章節標題均未變。
 - 移除 `learning/scripts/learning_scope.py`，學生包改附一般版 #125 的 `scripts/aigo_learning_scope.py`（`aigo_compile`／`aigo_publish`／`aigo_sync` 已依賴它）；原 scope 測試改對這份執行。
 - `test_learning_packages` 不再依賴本機 `main` ref，改比對 HEAD 追蹤內容。
 - 實跑：`uv run --project scripts python -m unittest discover -s tests` → 178 項，OK（skipped=6）；`-p test_learning_scope.py` → 8 項 OK。
