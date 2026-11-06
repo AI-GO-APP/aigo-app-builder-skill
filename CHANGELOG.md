@@ -22,7 +22,6 @@
 - 外部 IDE 流程不變；新增 `builder/`、`scripts/builder_entry.py`、`scripts/aigo_knowledge.py`、`references/reference-index.md`。
 - 知識包不經 `check_update.py`，不更新或重設任何安裝目錄；既有 Phase -1 自我更新只管理 IDE 安裝。
 
-# 1.75.0
 # 1.77.0
 
 ### 對齊 AI-GO v1.20.2（origin/main 25cb09c75，2026-11-04）的 API 與行為變更
