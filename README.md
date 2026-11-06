@@ -129,6 +129,22 @@ python scripts/check_update.py --check-only  # 只報告不同步（維護者／
 > 維護者注意：改動 Skill 內容後要同步 bump `VERSION` 並在 `CHANGELOG.md` 補一節，
 > 否則使用者端不會收到更新提示。
 
+## 知識包（給 Builder／aigo CLI 用）
+
+知識包把 Builder 入口、術語、全部參考文件、授權與相容資訊匯出成固定版本的唯讀內容，
+供 aigo CLI 在同一會話內釘住版本；它不更新任何 skill 安裝。
+
+```bash
+python3 scripts/aigo_knowledge.py export --out <dir>
+python3 scripts/aigo_knowledge.py verify <dir>
+```
+
+`manifest.json` 記錄 skill 版本、commit、dirty 狀態、相容契約、引用清單、逐檔 SHA-256
+與整包 digest；digest 綁定整份 manifest（不只檔案清單），相同來源與 commit 會產出相同 manifest。
+
+這條流程與 `scripts/check_update.py` 完全分開：知識包只供 Builder／aigo CLI 會話載入，
+不讀寫安裝目錄或 `~/.aigo`；Phase -1 自我更新只管理外部 IDE 的 skill 安裝。
+
 ## 目錄結構
 
 ```
@@ -139,7 +155,12 @@ aigo-builder/
 ├── VERSION                           # 版本標記（更新檢查的比對基準）
 ├── CHANGELOG.md                      # 版本變更紀錄
 ├── LICENSE                           # MIT 授權
+├── builder/                          # Builder／aigo CLI 專用入口與契約
+│   ├── ENTRY.md                      # Builder 入口模板
+│   ├── compat.json                   # 知識包相容資訊 SSOT
+│   └── scenarios/                    # Builder 離線契約情境
 ├── references/                       # 依需要載入的參考文件
+│   ├── reference-index.md            # 核心／按需載入與入口索引
 │   ├── custom-app-dev-guide.md       # 核心 API 規格與架構理念
 │   ├── data-center.md                # 資料中心自建表完整規格
 │   ├── event-triggers.md             # Webhook 與 App 排程
@@ -163,6 +184,8 @@ aigo-builder/
 └── scripts/
     ├── pyproject.toml                # uv 專案設定
     ├── check_update.py               # Skill 自我更新檢查（零相依，不走 uv）
+    ├── builder_entry.py              # 展開 Builder 入口共享規則（零相依）
+    ├── aigo_knowledge.py             # 匯出／驗證固定版本知識包（零相依）
     ├── aigo_cli_check.py             # aigo CLI 版本閘門（零相依；瀏覽器登入需 ≥ 0.5.0）
     ├── uv.lock                       # 鎖定依賴版本
     ├── aigo_auth.py                  # 認證（登入、Token 管理、App 資訊）

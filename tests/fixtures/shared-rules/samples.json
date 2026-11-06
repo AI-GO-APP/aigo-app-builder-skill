@@ -1,0 +1,58 @@
+[
+  {
+    "rule_id": "frontend.hashrouter",
+    "topic": "hashrouter",
+    "source": "SKILL.md",
+    "anchor": "2. **路由**",
+    "must_contain": ["多頁用 `HashRouter`", "禁用 `BrowserRouter`"]
+  },
+  {
+    "rule_id": "frontend.hashrouter_auto_repair",
+    "topic": "hashrouter",
+    "source": "SKILL.md",
+    "anchor": "### 自動修復策略",
+    "must_contain": ["| BrowserRouter | → HashRouter |"]
+  },
+  {
+    "rule_id": "frontend.protected_sdk",
+    "topic": "protected_sdk",
+    "source": "SKILL.md",
+    "anchor": "9. **SDK 不可修改**",
+    "must_contain": ["api.ts, db.ts, action.ts", "data.json, db.json, actions.json"]
+  },
+  {
+    "rule_id": "frontend.shadow_dom",
+    "topic": "shadow_dom",
+    "source": "SKILL.md",
+    "anchor": "4. **CSS 變數**",
+    "must_contain": ["`:host, :root { }`", "`html, :host { }`", "`confirm()` / `alert()` / `prompt()` 不可用"]
+  },
+  {
+    "rule_id": "action.egress",
+    "topic": "python_action",
+    "source": "SKILL.md",
+    "anchor": "1. **對外呼叫一律走",
+    "must_contain": ["`ctx.http.call(<egress-slug>, <path>)`", "raw `import httpx / requests / urllib.request` 連不出去"]
+  },
+  {
+    "rule_id": "action.idempotency",
+    "topic": "python_action",
+    "source": "references/dev-rules.md",
+    "anchor": "20. **Webhook / 排程 action 必須冪等**",
+    "must_contain": ["Webhook / 排程 action 必須冪等", "可能重複執行"]
+  },
+  {
+    "rule_id": "data_reference.inventory_and_register",
+    "topic": "data_reference",
+    "source": "references/dev-rules.md",
+    "anchor": "18. **資料承載體：雙軌分流**",
+    "must_contain": ["`GET /api/v1/data-center/tables`", "`POST /api/v1/refs/apps/{app_id}`"]
+  },
+  {
+    "rule_id": "data_reference.read_state",
+    "topic": "data_reference",
+    "source": "CONTEXT.md",
+    "anchor": "### Data Reference",
+    "must_contain": ["`GET /api/v1/refs/apps/{app_id}`", "VFS 裡的 `src/db.json` 實測恆為 `{}`"]
+  }
+]
