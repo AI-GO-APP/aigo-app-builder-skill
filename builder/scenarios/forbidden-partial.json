@@ -1,0 +1,113 @@
+{
+  "source_note": "context 衍生自 AI-GO repo `docs/specs/2026-10-16-builder-local-development-fixtures/`（AI-GO commit dff661c31，schema_version 2026-10-16）；僅調整情境所需欄位。",
+  "id": "forbidden-partial",
+  "title": "權限不足且分頁未完",
+  "user_request": "接上客戶資料；清單不完整時先別新建表。",
+  "context": {
+    "protocol": {
+      "major": 3,
+      "minor": 0
+    },
+    "app_id": "15b2ee34-4c47-4ff3-833c-ae1eb02750fd",
+    "fetched_at": "2026-10-16T12:00:00Z",
+    "scopes": {
+      "app": {
+        "scope": "app",
+        "fetched_at": "2026-10-16T12:00:00Z",
+        "status": "ready",
+        "completeness": "complete",
+        "revision": "0123456789abcdef",
+        "data": {
+          "app_id": "15b2ee34-4c47-4ff3-833c-ae1eb02750fd",
+          "name": "runner-restart-smoke",
+          "slug": "runner-restart-smoke",
+          "status": "draft",
+          "execution_mode": "runner",
+          "source_version": 17,
+          "capabilities": {
+            "manage": true,
+            "publish_direct": false,
+            "publish_request": true
+          }
+        }
+      },
+      "protected_files": {
+        "scope": "protected_files",
+        "fetched_at": "2026-10-16T12:00:00Z",
+        "status": "ready",
+        "completeness": "complete",
+        "revision": "0123456789abcdef",
+        "data": {
+          "policy_version": "c0ffee0123456789",
+          "no_modify": [
+            "index.html",
+            "src/action.ts",
+            "src/api.ts",
+            "src/auth.ts",
+            "src/db.ts"
+          ],
+          "no_delete": [
+            "index.html",
+            "package.json",
+            "src/App.css",
+            "src/action.ts",
+            "src/api.ts",
+            "src/auth.ts",
+            "src/db.ts",
+            "src/main.tsx"
+          ]
+        }
+      },
+      "limits": {
+        "scope": "limits",
+        "fetched_at": "2026-10-16T12:00:00Z",
+        "status": "unavailable",
+        "completeness": "complete",
+        "data": {
+          "vfs": {
+            "max_file_count": 500,
+            "max_file_size_bytes": 1048576,
+            "build_timeout_ms": 120000
+          },
+          "source": "fallback"
+        }
+      },
+      "tables": {
+        "scope": "tables",
+        "fetched_at": "2026-10-16T12:00:00Z",
+        "status": "ready",
+        "completeness": "partial",
+        "revision": "0123456789abcdef",
+        "data": {
+          "items": [
+            {
+              "name": "clients"
+            }
+          ]
+        }
+      },
+      "references": {
+        "scope": "references",
+        "fetched_at": "2026-10-16T12:00:00Z",
+        "status": "forbidden",
+        "completeness": "complete"
+      }
+    }
+  },
+  "expected": {
+    "request_scopes": [
+      "tables",
+      "references"
+    ],
+    "forbidden_actions": [
+      "assume_absent",
+      "create_table"
+    ],
+    "confirmation_required": false,
+    "notes": "references forbidden 不是不存在；tables partial 尚未讀完，不建新表，缺權限給平台入口。"
+  },
+  "entry_anchors": [
+    "403 不被當成空清單",
+    "分頁未讀完必須標記 partial"
+  ]
+}

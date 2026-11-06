@@ -1,0 +1,46 @@
+{
+  "protocol_major": 3,
+  "fixtures_schema_version": "2026-10-16",
+  "context_snapshot": {
+    "core_scopes": [
+      "app",
+      "protected_files",
+      "limits"
+    ],
+    "on_demand_scopes": [
+      "tables",
+      "references",
+      "roles",
+      "services",
+      "schedules"
+    ],
+    "statuses": [
+      "ready",
+      "forbidden",
+      "unavailable",
+      "not_requested"
+    ]
+  },
+  "grant_scopes": [
+    "context.read",
+    "source.read",
+    "source.write"
+  ],
+  "capabilities": [
+    "chat.stream",
+    "chat.resume",
+    "context.snapshot",
+    "source.sync",
+    "turn.cancel"
+  ],
+  "operation_envelope": {
+    "schema_version": "draft-2026-10-19",
+    "types": [
+      "request_context",
+      "propose_operation",
+      "complete"
+    ],
+    "status": "reserved; implemented by aigo-cli train 6"
+  },
+  "source_contract": "AI-GO docs/integrations/builder-local-contract.md @ dff661c31"
+}
