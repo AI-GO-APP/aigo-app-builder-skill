@@ -24,7 +24,7 @@
 | **預設表** | 各模組 REST：`/api/v1/client`（客戶）、`/sale`、`/crm`、`/hr`、`/stock`、`/purchase`、`/accounting`、`/mrp`、`/project`、`/supplier` | `<module>.read`／`.write`／`.delete`（與平台 UI 同一套 RBAC；`system.admin` 直通） | `aigo_data.py call`（路由以 §4 與各模組 reference 為準） |
 | **自建表** | `/api/v1/data-center/tables/{key}/records` 記錄 CRUD；結構操作另有端點 | 記錄 CRUD `builder.access`；建改結構 `datacenter.schema_write`；刪表刪欄 `system.admin` | `aigo_data_center.py`（已封裝） |
 | **批次匯出／匯入** | `POST /api/v1/exports` → 輪詢 → `/download`；`/api/v1/imports`（csv／excel／json，有對應引擎） | 匯出：該表模組的 read；匯入：`system.data_import`（admin 直通） | `aigo_data.py export`；匯入走平台 UI |
-| **結構與值域** | `/api/v1/data-center/meta/tables`（193 張：85 預設＋108 自建）、`/meta/tables/{key}` | 登入即可 | `aigo_data.py meta` |
+| **結構與值域** | `/api/v1/data-center/meta/tables`（預設 86 張＋該租戶的自建表，以實列為準）、`/meta/tables/{key}` | 登入即可 | `aigo_data.py meta` |
 | **成員／邀請／角色／app 角色白名單** | `/api/v1/invitations`、`/api/v1/members`、`/api/v1/members/roles`、`PATCH /builder/apps/{id}/settings`、`PUT /hosted-apps/{id}/access-settings` | `system.invitations`／`hr.member_manage`／`system.roles_manage`／`builder.manage_access`／`hosted_apps.deploy` | `aigo_data.py call`；流程與邊界見 `member-admin.md` |
 
 沒有「表名 → 記錄」的通用端點給登入使用者用在預設表上：`/proxy`、`/unified`、`/open/proxy` 都要 app 或整合 id

@@ -116,6 +116,8 @@
      整列 deny；Hosted internal app 的身分在伺服端 header（`X-Aigo-User-Id` 等，只有識別、不帶角色），
      畫面內要依角色分流得再用 app 的 API key 查 `GET /api/v1/open/members/{user_id}/context`（`hosted-apps.md` §6）；
      外部人員角色的 permissions 從空集合起步，`system.*`／`hr.*`／`accounting.*` 不給
+   - **多人共同開發同一支 Custom App**：改碼、存檔、發布、管機密只放行建立者、per-app 協作者與 `system.admin`；
+     計畫列出協作者名單，由擁有者 `POST /builder/apps/{id}/collaborators`（body `user_id`）加入，被加者也要有 `builder.access`
    - **產出：授權架構表**（與 app 分配表並列寫進計畫；確認後照表建角色、設白名單、發邀請）
      `| app（alias） | 模式 | access_role_ids（角色名） | 角色 → permissions（新開／沿用） | 進入方式／邀請落點 |`
      ——預設情況就是一列 `| <alias> | starter-internal | （空＝全租戶成員） | 沿用既有角色 | 已是成員 |`

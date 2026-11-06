@@ -69,7 +69,10 @@ def execute(ctx):
 }
 ```
 
-每個標記的 action 各得一條獨立對外端點。`receive_webhook` 是歷史預設端點，**無需宣告**。
+每個標記的 action 各得一條獨立對外端點。`receive_webhook` 是預設端點，**免 `"webhook": true` 旗標**，
+但**發布快照裡必須有 `actions/receive_webhook.py`**（且 `is_enabled` 非 `false`），否則 POST 預設端點回 404
+（`resolve_hook_action` 的 `strict_default=True`，只套在 POST 接收面；GET 訂閱驗證面不套用，
+所以 Meta 訂閱驗證過了不代表 POST 會收）。
 
 **未標記 `webhook` 的 action 絕對無法從公開端點觸發**——這個 opt-in 旗標是唯一的授權界線。
 
@@ -79,6 +82,9 @@ def execute(ctx):
 
 **新增／刪除／停用 webhook 端點，都必須重新 publish 才會生效。**
 改完 manifest 沒 republish 就去測，一定 404。
+
+反向也有延遲：POST 接收面對 slug→app 的解析有 **30 秒快取**（只快取解析成功的結果），
+停用 hook、下架 app 或改 subdomain 後，接收面最多再收 30 秒。GET 訂閱驗證面沒有這層快取。
 
 ### 1.3 URL 推導
 
@@ -122,6 +128,10 @@ def execute(ctx):
     headers = ctx.params.get("headers", {})
     ...
 ```
+
+**body 上限 413**：原始 body > 256 KiB 在查 DB 前回 413（app 存不存在回應相同）；body 未超但整則佇列訊息
+（body＋headers＋token 等外層欄位）> 262,144 bytes 也在入列前回 413 `Request body too large`，不重試。
+大檔用 URL 引用、在 action 內下載，不要把檔案本體塞進 webhook body。
 
 ### 1.5 ★ `headers` 不可信
 
@@ -202,7 +212,7 @@ manifest 全部 action `timeout_ms` 的最大值，夾在 30000～**120000**；�
 
 | 入口 | 給誰 | 端點 | 讀 | 寫 |
 |---|---|---|---|---|
-| **App 開發面（★ 預設走這條）** | app 開發者 | Builder →該 App →「排程」分頁；REST `/api/v1/builder/apps/{app_id}/crons` | `builder.access`（能看到 app 即可） | `builder.app_cron_manage` **或** `settings.write`（`system.admin` 直通） |
+| **App 開發面（★ 預設走這條）** | app 開發者 | Builder →該 App →「排程」分頁；REST `/api/v1/builder/apps/{app_id}/crons` | `builder.access` 或 `settings.read`（能看到 app 即可；持寫權者也可讀） | `builder.app_cron_manage` **或** `settings.write`（`system.admin` 直通） |
 | 租戶營運面 | 租戶管理員 | `/dashboard/settings/app-crons`；REST `/api/v1/app-crons` | `settings.read` | `settings.write` |
 
 - `/dashboard/settings/app-crons` 這個選單**只有 `system.admin` 或 `settings.write` 看得到**——把開發者引導去那裡
@@ -228,10 +238,10 @@ manifest 全部 action `timeout_ms` 的最大值，夾在 30000～**120000**；�
 | 操作 | App 開發面端點（`/api/v1/builder/apps/{app_id}` 前綴） | 租戶營運面對應 |
 |---|---|---|
 | 列表／建立 | `GET` / `POST .../crons` | `GET` / `POST /api/v1/app-crons` |
-| 配額用量（★ 規劃時先查） | `GET .../crons/quota` → `{is_paid, app_used, app_limit, tenant_used, tenant_limit, min_interval_minutes}`（付費 `app_limit: null`、`min_interval_minutes: 5`；`tenant_limit` 早期實打 50，prod v1.15.4 為 **100**（`PAID_TIER_MAX_CRONS_PER_TENANT`，平台標為過渡值，會再調）——**以 quota 回傳為準**） | — |
-| 讀／改／刪 | `GET` / `PATCH` / `DELETE .../crons/{cron_id}` | 同形 `/api/v1/app-crons/{cron_id}` |
+| 配額用量（★ 規劃時先查） | `GET .../crons/quota` → `{is_paid, app_used, app_limit, tenant_used, tenant_limit, min_interval_minutes}`（付費 `app_limit: null`、`min_interval_minutes: 5`；`tenant_limit` 主線為 **150**（`PAID_TIER_MAX_CRONS_PER_TENANT`，2026-10-23 由 100 調到 150，平台仍標為過渡值）——**以 quota 回傳為準**） | — |
+| 讀／改／刪 | `GET` / `PATCH` / `DELETE .../crons/{cron_id}`（回應另含 `last_403_code`：最近一次 mint 403 的細分類碼，與 `warnings`） | 同形 `/api/v1/app-crons/{cron_id}` |
 | 啟停 | **`PATCH`** `.../crons/{cron_id}/toggle` | 同形 |
-| 立即執行一次 | `POST .../crons/{cron_id}/run-now` | 同形 |
+| 立即執行一次 | `POST .../crons/{cron_id}/run-now` → `{cron_id, status: "enqueued", delivery_id, scheduled_at, warnings}`——**事件已入列，不是執行結果**；結果看執行紀錄（`triggered_by='cron'`）與排程的 `lastcall`／`last_status` | 同形 |
 
 ⚠️ **暫停中的排程 run-now 回 400**——要先 `PATCH .../toggle` 重啟才能手動觸發。
 app 不可見（不在 `access_role_ids` 內）時整組端點回 404「app 不存在」，不是 403。
@@ -278,7 +288,7 @@ app 不可見（不在 `access_role_ids` 內）時整組端點回 404「app 不�
 |---|---|---|
 | **最小間隔** | **60 分鐘** | **5 分鐘** |
 | 每 app 條數 | 2 | 不限 |
-| 每租戶條數 | 10 | 100（prod v1.15.4；過渡值，以 `crons/quota` 為準） |
+| 每租戶條數 | 10 | 150（2026-10-23 起；過渡值，以 `crons/quota` 為準） |
 
 - **超限直接回 400，不會靜默截斷。** 規劃「每 10 分鐘對帳」前先確認租戶是付費檔，
   否則要改成每小時或請用戶升級。
@@ -347,7 +357,8 @@ app 不可見（不在 `access_role_ids` 內）時整組端點回 404「app 不�
 
 | 症狀 | 檢查 |
 |---|---|
-| webhook 端點 404 | manifest 有 `"webhook": true`？**publish 了嗎？** hook 名合法？ |
+| webhook 端點 404 | manifest 有 `"webhook": true`？**publish 了嗎？** hook 名合法？預設端點：`actions/receive_webhook.py` 有在發布快照裡嗎（§1.1）？ |
+| webhook 回 413 | body > 256 KiB，或 body＋headers 整則 > 262,144 bytes（§1.4）——改成傳 URL |
 | webhook 收到但沒反應 | 執行紀錄看 action 是否報錯——**app 層錯誤不會重投也不會告警** |
 | 同一事件被處理兩次 | 第三方登記了新舊兩條 URL？或 action 沒做冪等 |
 | 驗簽一直失敗 | 是否用了重新序列化的 body？必須用 `ctx.params["body"]` 原字串 |

@@ -30,12 +30,15 @@
 
 ## 1. DB Proxy 查詢（★ 影響每一支 App）
 
-### 1.1 單次查詢硬上限 500 筆，回傳是裸陣列
+### 1.1 單次查詢硬上限 1000 筆（預設 100），回傳是裸陣列
 
-`POST /api/v1/proxy/{app_id}/{table}/query` 無論 `limit` 給多大，單次最多回 **500 筆**，
+`POST /api/v1/proxy/{app_id}/{table}/query` 無論 `limit` 給多大，單次最多回 **1000 筆**
+（`PROXY_MAX_LIMIT`，body `limit` 取 `min(limit, 1000)`；不給 `limit` 預設 **100**），
 且**回傳沒有分頁信封**（沒有 `total`／`page`），就是一個 JSON 陣列。
+四個 proxy 入口（platform GET／POST、`/open/proxy`、`/ext/proxy`）共用同一個上限
+（2026-10 起統一；2026-07 實打時平台面是 500）。
 
-要取完整資料必須自己用 `offset` 迴圈，並以「回傳數 < 500」作為結束條件。
+要取完整資料必須自己用 `offset` 迴圈，並以「回傳數 < 自己送的 `limit`」作為結束條件。
 
 ### 1.2 offset 分頁必須指定唯一鍵排序，否則會重複又漏抓（★ 最容易靜默出錯）
 
@@ -70,7 +73,7 @@ await queryAdvanced(table, {
 **推論出的設計規則**：任何需要被**篩選、排序、分頁**的維度，一律放預設表**原生欄位**；
 `custom_data` 只適合存「取回之後才用」的資料。`app_domain` 過濾只能在前端或 action 內做
 （見 `custom-app-dev-guide.md` §18）——**且必須先照 §1.2 取完整資料再過濾**，
-否則配上 §1.1 的 500 筆上限就會變成「只過濾了前 500 筆」。
+否則配上 §1.1 的單次上限就會變成「只過濾了第一頁」。
 
 ### 1.4 `queryAdvanced` 的完整簽名
 
@@ -105,9 +108,9 @@ queryAdvanced(table, {
 | 不合法運算子 | **422 列出合法集合** | 400「不支援的運算子」 |
 | 錯鍵名 | 422「需要 field/op/value 三個鍵」 | 400「不合法的欄位名稱: 」（欄位名是空字串） |
 | **不合法過濾形狀** | 422 | **200 回整表（靜默）**——`where`、`filter`、`conditions`、`{k: v}` 任何形狀都不生效 |
-| 回傳 | `{items, total, page, page_size}` | 裸陣列、上限 500、無 total（§1.1） |
+| 回傳 | `{items, total, page, page_size}` | 裸陣列、上限 1000（預設 100）、無 total（§1.1） |
 | 排序 | 單欄 `sort` | 多欄 `order_by`，必帶唯一鍵（§1.2） |
-| **寫入 body** | `POST` 必須包 `{"data":{…}}`，裸物件**靜默忽略**後 422 抱怨必填欄；`PATCH` 兩種形狀都收 | `POST`／`PATCH` 都必須包 `{"data":{…}}`，裸物件 **400「無有效欄位資料」**（明確，比較好認） |
+| **寫入 body** | `POST` 必須包 `{"data":{…}}`，裸物件**靜默忽略**後 422 抱怨必填欄；`PATCH` 裸物件**靜默 no-op**（當成 `data={}`，零欄更新、回 200），一律包 `{"data":{…}}` | `POST`／`PATCH` 都必須包 `{"data":{…}}`，裸物件 **400「無有效欄位資料」**（明確，比較好認） |
 | **取單列** | `GET …/records/{id}` | **沒有**——`GET …/{table}/{row_id}` 是 **405**，`{row_id}` 只支援 PATCH／DELETE（走列表或 `/query` 過濾） |
 | **打錯面** | 預設表打這一面 → 404 `table_not_found`「自建表不存在：<表>」（★ 是走錯面，不是表不存在） | 自建表打這一面 → 不通 |
 
@@ -159,13 +162,20 @@ HTTP 403
  "message": "「stock_quants」為平台 seed／系統產生表，僅可宣告 read 權限"}
 ```
 
-已確認屬此類的表（非完整清單）：
+完整清單（`PLATFORM_SOLE_WRITE_TABLES`，`backend/app/utils/table_inspector.py`，2026-11-04 核對；
+read 放行、create／update／delete 一律 403 `seed_table_readonly`）共 11 張：
 
-| 表 | 由什麼產生 |
+| 表 | 由什麼產生／為何鎖寫 |
 |---|---|
 | `stock_moves` | 確認領退料單／生產工單時產生的異動明細 |
 | `stock_quants` | `stock_moves` 累計後的結存量 |
 | `mrp_workorders` | 確認生產工單時依配方 routing 展開的工序 |
+| `analytic_lines` | 分析帳明細，直寫會斷與總帳的勾稽 |
+| `currency_rates` | 平台 seed 維護的匯率；ERP 換算直接讀它 |
+| `dc_fields` | 資料中心欄位 catalog，與實體 DDL 同交易維護 |
+| `ir_sequences`、`ir_sequence_date_ranges` | 單號分配指標，直寫會撞號／跳號 |
+| `ir_crons` | 平台排程佇列；app 合法管道是 `custom_app_crons` |
+| `billing_order_lines`、`billing_invoice_lines` | 計費單頭金額由明細衍生；發票品項涉稅務合規 |
 
 限制在**前後端一致**：Server Action 內 `ctx.db.insert("stock_moves", ...)` 同樣回 403。
 
@@ -191,16 +201,24 @@ tenant_id    user     user_id   user_permissions  user_roles
 
 ### 4.2 `ctx.erp` 是方法級白名單
 
-實測可用的六個方法（以不存在的 UUID 呼叫會回 `False`，代表已接到真實業務邏輯）：
+白名單共十個方法（`backend/app/core/ctx_allowlist.py`，2026-11-04 核對；前六個 2026-07～09 實打，
+以不存在的 UUID 呼叫會回 `False`，代表已接到真實業務邏輯；後四個只核原始碼，**未實打**）：
 
-| 方法 | 回傳 |
-|---|---|
-| `confirm_sale_order(id)` | `bool` |
-| `confirm_purchase_order(id)` | `bool` |
-| `post_move(id)` | `bool` |
-| `confirm_payment(id)` | `bool` |
-| `validate_picking(id)` | `bool` |
-| `confirm_payroll_run(id)` | `dict`：`{ok, state, move_id}` |
+| 方法 | 回傳 | 簽核 pre-guard（規則 24） |
+|---|---|---|
+| `confirm_sale_order(id)` | `bool` | 套 |
+| `confirm_purchase_order(id)` | `bool` | 套 |
+| `post_move(id)` | `bool` | 套 |
+| `confirm_payment(id)` | `bool` | 套 |
+| `validate_picking(id)` | `bool` | 套 |
+| `confirm_payroll_run(id)` | `dict`：`{ok, state, move_id}` | 套 |
+| `create_invoice(order_id)`（未實打） | `dict`：`{invoice_id}`；`order_id` 可為 id 清單（多訂單合併，須同客戶，否則 `None`） | 不套 |
+| `create_bill(order_id)`（未實打） | `dict`：`{bill_id}`；清單須同供應商 | 不套 |
+| `reconcile_payment(payment_id)`（未實打） | `int`：補建的沖銷筆數（修復已 posted 付款用） | **不套** |
+| `cancel_payroll_run(run_id)`（未實打） | `dict`：`{ok, state, move_id}` | **不套** |
+
+「不套」＝呼叫不會被租戶簽核流程攔成 `approval_status: "pending"`，只有租戶隔離；
+用在 action 裡要自己判斷是否該先走簽核。
 
 不在白名單的方法名（例如自己臆測的 `create_picking`／`confirm_production`）會由閘道回
 **403**（`/internal/ctx/invoke`），而不是 `AttributeError`。
@@ -371,6 +389,10 @@ POST https://urfit.ai-go.app/api/v1/auth/login → 200 {"access_token": ...}
 - **不要自己拼**：Builder 工具列的「開啟」「預覽」、App 設定頁的分享連結都出自同一支產生器；
   要給用戶連結時優先請對方從那裡複製，或用 `GET /builder/apps/{id}` 回讀 `access_mode`／
   `slug`／`url_name`／`subdomain` 照上表組。
+- **同一支 `GET /builder/apps/{id}`（與 `GET /builder/apps` 列表）另回三個身分欄位**（2026-10-29 起）：
+  `is_manager`（能改碼：建立者／協作者／`system.admin`）、`is_owner`（擁有者層入口：建立者或
+  `system.admin`）、`creator_name`（只在單筆回）。Builder 開起來是唯讀、沒有設定／轉移入口，
+  先看這兩個布林，不是權限字串問題（`member-admin.md` §3.7）。
 
 | 常見錯法 | 結果 |
 |---|---|
@@ -578,13 +600,20 @@ export function currentIdentity(): { userId: string; email: string; tenantId: st
 
 ## 11. 空渲染偵測：掛載後 8 秒內必須渲染出東西（2026-08 起）
 
-平台會監看 Shadow DOM root：bundle 掛載後 **8 秒內** root 完全沒有任何元素或非空白文字，
-就自動回報一則 runtime error，並對使用者顯示 banner
+平台會監看 Shadow DOM root：bundle 的 module script **載入完成後 8 秒內** root 完全沒有任何元素或
+非空白文字，就自動回報一則 runtime error，並對使用者顯示 banner
 「**App 已載入但沒有顯示任何內容——程式很可能在啟動時就失敗了。請聯絡此 App 的擁有者。**」
 （原始碼 `frontend/src/lib/emptyMountWatch.ts`）。
 
 - 判定是聯集：`root.firstElementChild` 存在**或** `textContent.trim()` 非空即算有內容；
   寬限期內**曾經**出現過內容就不回報；逾時當下會重新量一次再決定
+- **寬限期從相依（esm.sh 共用元件）載完才起算**（2026-10 起）：相依還在下載時 app 一行都沒跑，
+  那段空白不算。下載本身另分三態、三則訊息，**都不是空渲染**：
+  慢（8 秒）→ 只記 runtime-errors「App 所需的共用元件下載過慢，畫面延後出現——…」，不顯示；
+  卡住（15 秒）→ banner「載入比平常久，請重新整理頁面再試——…」，載完就收掉；
+  失敗 → banner「共用元件下載失敗，請重新整理頁面再試；若每次都失敗，請聯絡此 App 的擁有者。」
+  （app import 了 `react/`、`react-dom/` 下不存在的子路徑也落在這一則）。
+  用戶回報的 banner 文字含「共用元件」＝相依問題，查 import 路徑與 CDN，不是 app 啟動失敗
 - 本意是抓「啟動即拋例外」的 app（例外發生在 app 自己的執行環境時，
   平台的 window 層攔截不到，以前只會一片空白）
 - **反面效應**：app 若「先跑長 API、成功後才第一次渲染」，超過 8 秒就會被誤報一次
@@ -657,7 +686,9 @@ export function currentIdentity(): { userId: string; email: string; tenantId: st
 `error` 括號裡的毫秒數印的是該服務實際的值，所以看到 `Action 執行超時(10000ms)`
 一樣可能是這道牆。
 
-`PATCH /api/v1/egress-services/{id}` 送 `timeout_ms: 60000` 與 `120000` 都回 **422**：
+`PATCH /api/v1/builder/apps/{app_id}/egress-services/{service_id}`（Builder 線入口，`builder.access` ＋
+同租戶任一 App 擁有者或 `system.admin`；頂層 `/api/v1/egress-services/*` 全部要 `system.admin`，
+一般開發者打會 403）送 `timeout_ms: 60000` 與 `120000` 都回 **422**：
 
 ```json
 {"detail":[{"type":"value_error","loc":["body","timeout_ms"],

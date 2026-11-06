@@ -62,7 +62,9 @@ AI GO **預先定義**的中小企業通用資料表（專案、客戶、銷售�
 綁 **app** 的舊模型，資料存在 JSONB 裡、**沒有真實資料表**。每個 app 各自擁有一組互不相通的表。
 
 **它不等於自建表。** 目前狀態：builder 工具面已退場、後台「資料」tab 已隱藏；
-SDK 雙軌並存所以存量 app 不會壞；舊模型與端點尚未移除。
+SDK 雙軌並存所以存量 app 不會壞。2026-09-11 起**結構端點**（`POST /objects`、`/objects/batch`、
+`/objects/{id}/fields`、`PATCH /fields/{id}`、`/public/objects*`）一律 **410 Gone**；
+**記錄端點**（`/objects/{id}/records`、`/records/{id}`）暫留，轉接到資料中心。
 
 **新功能一律只接自建表，不要再往 CustomObject 加東西。**
 
@@ -76,7 +78,8 @@ SDK 雙軌並存所以存量 app 不會壞；舊模型與端點尚未移除。
 
 **它不是新建的表**——是對平台既有表的引用授權。
 加入引用可在 Builder 後台操作，也可用 API：`POST /api/v1/refs/apps/{app_id}`
-（只需 `builder.access`，body 為 `{table_name, columns[], permissions[]}`）。
+（`builder.access` ＋ 本 app 管理者（建立者／協作者／`system.admin`），且只收登入 session，
+app-scoped token 403；body 為 `{table_name, columns[], permissions[]}`）。
 
 ### 延伸欄位（ERP ext field）
 

@@ -95,9 +95,9 @@ app 身分列出來的表可能只是子集。這與已退場的 CustomObject（
 
 > **保留名 409**：撞名在建表當下就回 409（「與系統內建（ERP）表名衝突」／「為 SQL 保留字」／
 > 「與平台保留表名衝突」），**沒有事後補救管道**。照 `biz_` 前綴走就不會撞。
-> ⚠️ 2026-09-01 實測**地板名檢查 prod 尚未生效**（`display_name: "users"` 實際建成 201，測試表已刪）——
-> 這不是可以撞名的許可：檢查部署後既有表會被 grandfather（只擋新建不回溯），
-> 但你占用了平台語意的名字，日後對照文件、除錯、資料遷移全會混淆。一律當作 409 已生效來規劃。
+> 保留母體是 `reserved_physical_table_names()`＝SQL 保留字 ∪ ERP 表名 ∪ 平台地板表名（主線已生效）。
+> **只擋新建、不回溯**：檢查上線前建好的撞名表會被 grandfather，但你占用了平台語意的名字，
+> 日後對照文件、除錯、資料遷移全會混淆。一律照 `biz_` 前綴規劃。
 
 > **唯一例外**：relation 欄位指向自建表時用的是 `target_table_id`（目標表的 **UUID**，
 > 從 `GET /tables` 回應的 `id` 取），不是實體名。填錯會拿到泛用 422。
@@ -169,14 +169,15 @@ app 身分列出來的表可能只是子集。這與已退場的 CustomObject（
   （409，`detail.dependents` 列出依賴者）。
 - **→ 預設表**：參數 `target_erp_key`＝預設表 key（API 參數沿用 erp 命名）。軟關聯，**不建外鍵**（跨 schema 邊界），
   目標值在寫入時驗證存在性。
-  ⚠️ **只有部分預設表能當目標，且無法事先查詢**（核自原始碼：目標是靠命名慣例解析的，
-  2026-08-31 主線 86 張只有 38 張可解析；2026-09-02 prod 實測 8 張常用表**只有 `sale_orders` 過**，
-  `customers`／`product_templates`／`sale_order_lines`／`crm_leads`／`hr_employees`／
-  `account_payments`／`product_products` 皆 422「無法解析 target_erp_key…本版尚不支援此表作為關聯目標」）。
-  `GET /refs/available-tables` 與 `/refs/tables/{t}/columns` 都看不出可否當目標。
-  **規劃時一律先假設不支援**：指向預設表的欄位建成 `text` 存平台 UUID（軟參照本來就不建 FK，
-  只損失寫入時的存在性驗證），只在建表規格裡標「可升級為 relation」。遷入案第三張表才撞到會很痛——
-  前兩張已建好
+  **建欄前先查 `GET /api/v1/data-center/relation-targets`**（`builder.access` 或 `datacenter.schema_write`；
+  不查租戶資料）：回傳陣列，每列 `{key, canonical_key, physical_table, title}`——`key` 是可送進
+  `target_erp_key` 的值（含 Meta key 與實體表名別名），`canonical_key` 是建欄成功後 Catalog 實際保存的鍵，
+  `physical_table` 是實體表名，`title` 是 Meta 中文標題（無標注時為 `null`）。
+  清單內的表用 `key` 當 `target_erp_key` 建 relation；**不在清單的表才降級**成 `text` 存平台 UUID
+  （軟參照本來就不建 FK，只損失寫入時的存在性驗證），並在建表規格裡標「可升級為 relation」。
+  送了不在清單的 key 回 422「無法解析 target_erp_key…本版尚不支援此表作為關聯目標」。
+  `GET /refs/available-tables` 與 `/refs/tables/{t}/columns` 看不出可否當目標，不要拿它們判斷。
+  `users` 刻意不在清單內（`_DENIED_RELATION_TABLES`，見 §9）
 
 兩者**恰擇其一**——都給或都不給皆為錯誤。建立後不可變（PATCH 改欄不收這兩個參數）。
 
@@ -267,23 +268,30 @@ data-center/{租戶 UUID}/{表實體名}/{隨機 UUID}.{png|jpg|gif|webp}
 | 刪欄影響 | GET | `/api/v1/data-center/tables/{key}/fields/{field_key}/impact` | `builder.access` |
 | 刪欄 | DELETE | `/api/v1/data-center/tables/{key}/fields/{field_key}` | `system.admin` |
 | 查記錄 | GET | `/api/v1/data-center/tables/{key}/records` | `builder.access` |
+| 關聯下拉選項 | GET | `/api/v1/data-center/tables/{key}/title-options` | `builder.access` |
 | 新增記錄 | POST | `/api/v1/data-center/tables/{key}/records` | `builder.access` |
 | 更新記錄 | PATCH | `/api/v1/data-center/tables/{key}/records/{record_id}` | `builder.access` |
 | 刪記錄 | DELETE | `/api/v1/data-center/tables/{key}/records/{record_id}` | `builder.access` |
 
 `datacenter.schema_write` 那幾列 `system.admin` 直通；刪表／刪欄刻意只給 `system.admin`（§2）。
+`title-options` 回 `{items: [{id, title}], total, page, page_size}`（`search` 對 title 做 ILIKE contains；
+`page_size` ≤200）：`title` 取自表的 `title_field_key` 欄位，未設時退回 `id::text`——
+relation 欄位要顯示名字而不是 UUID，先 `PATCH /tables/{key}` 設 `title_field_key`（§11.2）。
 
 External app 的執行期走 `/api/v1/ext/data-center/...`——含 `GET /tables`（列出自建表及其欄位定義；
 租戶切到擋下模式後**只列這支 app 已引用的表**，見下方「app 讀寫自建表要先登記引用」）與記錄 CRUD，但**沒有結構操作**。前端 SDK 依 `window.__IS_EXTERNAL__` 自動分流。
 **Hosted App 容器內**（`AIGO_API_TOKEN`）走 `/api/v1/open/data-center/...`——照上表路徑打會 401
-（`hosted-apps.md` §5）。匿名訪客走 `/api/v1/pub/data-center/{slug}/...`（唯讀）。
+（`hosted-apps.md` §5）。匿名訪客走 `/api/v1/pub/data-center/{slug}/...`（唯讀；records 的 `page_size` 上限 **100**，
+其他三條通道 200，且不收 `sort`／`filters`）。
 四條通道同一張表的完整對照（前綴、憑證、權限閘）→ `custom-app-dev-guide.md` §29。
 
-records 平面的三個契約（自己寫 client 時最常踩；2026-09-02 實測＋原始碼核對）：
+records 平面的四個契約（自己寫 client 時最常踩；2026-09-02 實測＋原始碼核對）：
 
-- **POST records 的 body 必須包 `{"data": {...}}`**。裸物件不報格式錯，而是整包被忽略後回
-  422 `not_null_violation`「欄位「x」為必填」——訊息指向第一個必填欄位，容易誤以為欄位名對不上。
-  `PATCH .../records/{id}` 兩種形狀都收。`scripts/aigo_data_center.py` 的 `insert_record` 已包好
+- **POST／PATCH records 的 body 都必須包 `{"data": {...}}`**（schema `RecordIn` 只讀 `data`）。
+  POST 裸物件不報格式錯，而是整包被忽略後回 422 `not_null_violation`「欄位「x」為必填」
+  ——訊息指向第一個必填欄位，容易誤以為欄位名對不上。
+  **`PATCH .../records/{id}` 裸物件是靜默 no-op**：被當成 `data={}`，零欄更新、回 200，
+  看回應會以為改成功了。`scripts/aigo_data_center.py` 的 `insert_record` 已包好
 - **`filters` 的運算子依欄位型別限縮**（核自 prod tag v1.15.4 `field_types.py` 的 `query_ops`）：
 
   | 欄位型別 | 合法運算子 |
@@ -297,6 +305,11 @@ records 平面的三個契約（自己寫 client 時最常踩；2026-09-02 實�
   → 422 並列出合法集合。`in`／`not_in` 的 value 必須是陣列（`in []` 命中 0 列、`not_in []` 命中全部）；
   `is_null` 可省略 value。**沒有 OR、沒有 `is_not_null`**，多條一律 AND
   需要範圍查詢的日期欄要建成 `date`／`datetime`（§23.7 降級表本就如此），別存 text
+- **403 帶 `reason` 時是租戶資料存取規則，不是引用權限**：自建表 records 面受租戶資料存取規則
+  （data policy）約束——查詢自動套上規則的 where，寫入違規回 **403**，body 除 `error`／`message`
+  另帶 `reason`（`policy_denied`／`app_data_access_suspended`／`runner_unavailable`／`policy_invalid`／
+  `hidden_column_write`）與 `rule_id`。引用沒給動詞的 403 沒有這兩個鍵。
+  排查時把 `reason` 與 `rule_id` 印給管理員，不要在 app 裡繞
 - 與預設表 proxy 平面的完整對照（鍵名、運算子、錯誤反應都不同）→ `platform-behaviors.md` §1.5
 
 ### 前端 SDK（`src/api.ts`，Custom App 內）
@@ -511,8 +524,13 @@ action `ctx.user_permissions`／可見度 `access_role_ids`）。要員工的 em
 - 資料中心也多了一張唯讀表 `users`（「使用者帳號」，readonly-shared，
   無側欄入口、可直開 `/dashboard/data/users`）
 
-⚠️ **自建表目前不能把 relation 欄位指向 `users`**——它不在可解析的關聯目標內
-（選了會 422，前端建欄選單也已排除身分表）。要在自建表記「哪個使用者」：
+★ **寫預設表的「人」欄位一律填 `users.id`，不是 `members.id`**：預設表的 `user_id`／`maker_id`／
+`approver_id`／`salesperson_id` 等 UUID 外鍵指向 `users.id`，`GET /api/v1/members` 回的 `id` 是
+`members` 表的鍵、對不上。成員下拉用 `GET /api/v1/users` 的 `id` 當值；沒有登入帳號的成員列出但停用
+（平台自己的 8 頁成員下拉已照此改，#2230）。
+
+⚠️ **自建表目前不能把 relation 欄位指向 `users`**——它不在 `GET /relation-targets` 的清單內
+（`_DENIED_RELATION_TABLES`；選了會 422，前端建欄選單也已排除身分表）。要在自建表記「哪個使用者」：
 
 1. 開一般 `text` 欄存 user UUID（寫入時 action 用 `ctx.user_id` 覆蓋，見核心規則 23）
 2. 顯示時用 `GET /api/v1/users` 的結果解 UUID → name（建個 id→name 的 Map 快取）

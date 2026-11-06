@@ -15,6 +15,8 @@ def compile_app(base_url: str, token: str, slug: str, dev: bool = True) -> dict:
     resp = httpx.post(url, headers=headers, timeout=60)
     resp.raise_for_status()
     result = resp.json()
+    if result.get("kind") == "cdn":  # dev=false 且 CDN 命中：回 bundle_url／css_url，沒有 success／skipped_files
+        return result
     warning = format_skipped_files(result.get("skipped_files"))
     if warning:
         print(warning)
