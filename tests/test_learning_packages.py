@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import build_skill_packages as pack
 
-scope = runpy.run_path(str(ROOT / "learning/scripts/learning_scope.py"))
+scope = runpy.run_path(str(ROOT / "scripts/aigo_learning_scope.py"))
 integrity = runpy.run_path(str(ROOT / "learning/scripts/check_update.py"))
 ROLE = "11111111-1111-4111-8111-111111111111"
 APP = "22222222-2222-4222-8222-222222222222"
@@ -54,14 +54,14 @@ class PackageTests(unittest.TestCase):
         for name in pack.TOOLS:
             self.assertEqual(self.files[f"scripts/{name}"], (ROOT / "scripts" / name).read_bytes())
 
-    def test_original_professional_files_unchanged_and_package_has_single_entry(self):
-        original = subprocess.check_output(["git", "ls-tree", "-r", "--name-only", "main"], cwd=ROOT).decode().splitlines()
-        for name in original:
-            expected = subprocess.check_output(["git", "show", f"main:{name}"], cwd=ROOT)
-            self.assertEqual((ROOT / name).read_bytes(), expected, name)
+    def test_professional_package_is_exact_tracked_bytes_without_student_subtree(self):
+        # Compare against the tracked tree of HEAD, not a local "main" ref that CI checkouts may lack.
         professional = pack.builder_files(ROOT)
-        for name in original:
+        for name in ("SKILL.md", "VERSION", "scripts/check_update.py", "scripts/aigo_auth.py"):
+            self.assertEqual(professional[name], subprocess.check_output(["git", "show", f"HEAD:{name}"], cwd=ROOT), name)
+        for name in professional:
             self.assertEqual(professional[name], (ROOT / name).read_bytes(), name)
+        self.assertFalse([n for n in professional if n.startswith(("learning/", "docs/learning/", "evals/learning/"))])
         self.assertEqual([n for n in professional if n.endswith("SKILL.md")], ["SKILL.md"])
 
     def test_source_drift_blocks_student_build_before_output(self):

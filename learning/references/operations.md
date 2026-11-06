@@ -27,7 +27,7 @@
 - `aigo_publish.publish_app(...)`：僅在發布範圍與授權已確認後，經預檢發布；保留預設閘門，
   不用 `skip_preflight` 或 `confirm_*` 繞過錯誤，不呼叫 `full_deploy()` 自動刪遠端內容。
 
-每次平台寫入前使用 `scripts/learning_scope.py --workspace <工作區> --app <別名>` 做唯讀核對。
+每次平台寫入前使用 `scripts/aigo_learning_scope.py --workspace <工作區> --app <別名>` 做唯讀核對。
 工作區 `.aigo/learning.json` 由課程提供的資料建立，格式如下；不是權限憑證或資料隔離機制：
 
 ```json

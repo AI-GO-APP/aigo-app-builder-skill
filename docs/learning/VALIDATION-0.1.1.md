@@ -39,3 +39,11 @@
 
 這次未重跑全部舊測試；既有 Windows 六項失敗與根文件 501 行超限的 main 對照，見 VALIDATION-2026-10-26.md。
 未改動一般版，不把本次 PDF 驗證當成指定租戶存取、發布或實際學生客戶端安裝的驗收。
+
+## 2026-11-07 補記：併入 Builder 1.77.0
+
+- 分支併入 main `ecf8df5`（1.77.0）。`learning/sources.lock.json` 以 `--review-sources` 重鎖；`aigo_auth` 的 `resolve_base_url`／`get_token`／`get_app_info` 介面與 9 個摘錄章節標題均未變。
+- 移除 `learning/scripts/learning_scope.py`，學生包改附一般版 #125 的 `scripts/aigo_learning_scope.py`（`aigo_compile`／`aigo_publish`／`aigo_sync` 已依賴它）；原 scope 測試改對這份執行。
+- `test_learning_packages` 不再依賴本機 `main` ref，改比對 HEAD 追蹤內容。
+- 實跑：`uv run --project scripts python -m unittest discover -s tests` → 178 項，OK（skipped=6）；`-p test_learning_scope.py` → 8 項 OK。
+- 本次打包：aigo-builder.zip 78 檔 `1552b6dab5f76ae3764a5315642a772b63892e8038641576d74228029c85e79b`；aigo-learning.zip 29 檔 `0277afbc14e048451ba921a0366c64b067d1dc05e386e72e864a7bbfb6e53d78`。上表 0.1.1 雜湊是 bd5317c 快照，已過時。
