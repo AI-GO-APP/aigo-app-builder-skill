@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "builder_version": "1.72.0",
+  "review_note": "Reviewed Custom App excerpts, scope identity contract and complete tool dependency closure for learning 0.1.0 / Builder 1.72.0",
+  "sources": {
+    "VERSION": "872bafa7f46c23bfe8885cb453e5f88ae13bf84b71654ffb35a94ce4b07ab8b6",
+    "references/custom-app-dev-guide.md": "ba105a773e4a9bdbc961f433217f6d42027fbf03fb134f1bb828369034a5b18c",
+    "scripts/aigo_auth.py": "6a3b5deb173b8493e666522d0bf986b069c26c4464e77bfb7a1ecec643de0c2e",
+    "scripts/aigo_cli_check.py": "6da6d188983ef07e70533e4dcd8e3fb0a1aa33da49e75f4086489506ad4667e9",
+    "scripts/aigo_compile.py": "d3e2fe0e0b16be51def3dcf68cf66b20cb7f43ecc99de232c5ecd0d502a342b8",
+    "scripts/aigo_limits.py": "3db815fbababdbb13bdfbbeb6c02f669369df7b4ce78191adf2db2713b07b8dd",
+    "scripts/aigo_publish.py": "d8aa8ad9620523e16f1c4ff326bf8a790b103fd62ff26aa11344a7fc9667ef99",
+    "scripts/aigo_scaffold.py": "0441acef9a4636ef9013be63ffeef5def5647e4d8da7049ebff783442b50067c",
+    "scripts/aigo_sync.py": "41ae6ebb1fdb4acc0a53213dd866ae07c5ce4d127c21c486c6c13172b133e03d",
+    "scripts/aigo_typecheck.py": "c121b284c49e5a77159594288f765dc22803bc8fe3b98e2210b719909f74254b",
+    "scripts/pyproject.toml": "6fa61572886f0b99b3660d1ce8ccfbab4373b4249e6b40e08ef06362a9b8524c",
+    "scripts/uv.lock": "5609300d56ffbf03a8128da19da4aa8d7dda45495028050cfbdd88a4fff3a661"
+  }
+}
