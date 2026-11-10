@@ -251,6 +251,34 @@ app 仍帶舊的 30 秒 ceiling，**要 republish 一次**才會換上 manifest 
 超過 120000 的宣告會被夾回 120000；webhook（90 秒）與排程（300 秒）的 dispatcher 外層上限
 另算（`event-triggers.md` §1.6／§2.6），兩道取小。逾時回 `status: "timeout"`，長工作仍要切批次。
 
+**逾時後停不下來的寫法會讓這個 app 的 runner 重啟（AI-GO #1839，平台文件 `custom-app-agent.md` §8.5）**：
+逾時當下平台對 action 送出 `SystemExit`，再等 3 秒。Python 只在兩行程式之間送達這個例外，
+所以卡在**單一個**阻塞呼叫裡時收不到；3 秒後還沒結束，runner 行程會自行結束並重啟。
+當次仍回 `status: "timeout"`，但重啟完成前同一個 app 的其他呼叫可能收到 503（`retry_after: 30`）。
+影響只到這個 app，不影響同租戶其他 app。平台 v1.16.2 起重啟後會自己恢復。
+
+| 寫法 | 逾時後 |
+|------|--------|
+| `for …: time.sleep(0.2)`（短等待的迴圈） | 停得下來 |
+| `time.sleep(6)`（單次長等待，超過逾時） | runner 重啟 |
+| 迴圈內 `try: … except BaseException: pass`（裸 `except:` 相同） | runner 重啟，`SystemExit` 被吞掉 |
+| 迴圈內 `try: … except Exception: pass` | 停得下來 |
+| socket 設 0.5 秒 timeout 後在迴圈內等待 | 停得下來 |
+
+（2026-11-10 以 `timeout_ms=1000`、等待 1 秒直接呼叫 runner 的執行函式實測；裸 `except:` 未單獨跑，依 Python 語意。）
+
+寫 action 時照做這 4 條：
+
+1. 每個會等待的呼叫都帶 timeout，而且比這支 action 的 `timeout_ms` 短。適用自己 `import` 的
+   `requests`、`httpx`、`socket`、資料庫 driver；`requests` 不帶 `timeout` 會無限期等待。
+2. 不寫單次長等待。要等就切成 1 秒以內的短等待放進迴圈。
+3. 不用裸 `except:` 或 `except BaseException:` 包住迴圈；要攔錯誤寫 `except Exception:`。
+4. 超過 120 秒的工作切批次：每次處理一批，進度存進資料表，由前端或排程接著呼叫下一批。
+
+action 還在 `timeout_ms` 內執行時不會觸發重啟，但會占住一個 runner 實例（一個實例同時只跑一支 action，
+實例數預設上限 2）；同 app 其他呼叫會排隊或等新實例冷啟動。這一點寫法避免不了，長任務多的 app 請用戶
+向平台管理員申請調高上限。
+
 > ⚠️ **走 `ctx.http.call` 的 action 另有一道更早的牆，跟 manifest 無關。**
 > 那道是 egress 閘道的 `timeout_ms`：**預設 10000、硬上限 30000**（設定在該外部服務上，
 > 不是 manifest）。到期時平台砍掉的是**整支 action**，回 `status: "timeout"`、`result: null`、
