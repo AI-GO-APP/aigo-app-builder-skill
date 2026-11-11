@@ -255,7 +255,8 @@ app 仍帶舊的 30 秒 ceiling，**要 republish 一次**才會換上 manifest 
 逾時當下平台對 action 送出 `SystemExit`，再等 3 秒。Python 只在兩行程式之間送達這個例外，
 所以卡在**單一個**阻塞呼叫裡時收不到；3 秒後還沒結束，runner 行程會自行結束並重啟。
 當次仍回 `status: "timeout"`，但重啟完成前同一個 app 的其他呼叫可能收到 503（`retry_after: 30`）。
-影響只到這個 app，不影響同租戶其他 app。平台 v1.16.2 起重啟後會自己恢復。
+其他 app 的呼叫不會送到這個 runner；但同租戶的 app 共用運算配額，卡住的 app 多擴出來的實例會占用配額。
+平台 v1.16.2 起重啟後會自己恢復。帶 `retryable: false` 的 503 是另一回事，重試無用（見 `troubleshooting.md`）。
 
 | 寫法 | 逾時後 |
 |------|--------|
