@@ -10,7 +10,7 @@
 | 檔案 | 用途（一句） | 載入時機 | 入口 | 邊界 |
 |---|---|---|---|---|
 | `CONTEXT.md` | 統一資料承載體、事件觸發、App 模式與資料邊界術語。 | 核心 | 兩者 | 資料結構 |
-| `references/dev-rules.md` | 展開 Phase 3 規則 18–34 的資料、事件、權限、時間與部署硬規則。 | 核心 | 兩者 | 資料結構 |
+| `references/dev-rules.md` | 展開 Phase 3 規則 18–35 的資料、事件、權限、時間、部署硬規則與介面文字原則。 | 核心 | 兩者 | 資料結構 |
 | `references/reference-index.md` | 列出兩種入口共用的核心與按需知識載入契約。 | 按需 | 兩者 | 無 |
 | `references/custom-app-dev-guide.md` | 提供 Custom App 架構、SDK、API、Actions 與存取通道規格。 | 按需 | 兩者 | 資料結構 |
 | `references/data-center.md` | 說明自建表與延伸欄位的結構、權限、配額及操作契約。 | 按需 | 兩者 | 資料結構 |
