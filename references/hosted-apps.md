@@ -39,7 +39,7 @@
 
 ## 目錄
 
-- 1. 是什麼：與 Custom App 的邊界
+- 1. 是什麼：與 Custom App 的邊界——含前端介面設計（介面文字從簡）
 - 2. 應用形狀硬規則（★ 失敗率最高的來源，動手前逐條核）——2.1 定時工作與長任務
 - 3. 部署
 - 4. 環境變數（詳情頁「環境變數」tab；`PUT /{id}/runtime-settings`）
@@ -76,6 +76,12 @@
 - 詳情頁：`/dashboard/ai-apps/hosted/{id}?tab=...`，九分頁
   （`overview│deploy│logs│files│terminal│domain│env│data│settings`）
 - 權限：**`hosted_apps.deploy`**——權限不足時整塊 UI **不渲染**（不是報錯）
+
+### 前端介面設計（有畫面的 Hosted App）
+
+框架與 CSS 方案自選，不受 Custom App 的技術限制；但**介面文字預設從簡**與 Custom App 同一條——
+不加多餘的副標與說明文字，讓介面自己說話（`dev-rules.md` 規則 35：預設不寫哪些字、哪些不算多餘、
+用戶另有要求時照用戶）。遷入既有系統時以原畫面為準，不藉機增刪文字。
 
 ## 2. 應用形狀硬規則（★ 失敗率最高的來源，動手前逐條核）
 
