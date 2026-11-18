@@ -1,3 +1,17 @@
+## 1.81.0
+
+### 新增規則 36：介面預設不用 emoji——圖示用圖示元件，狀態用文字加顏色
+
+- `references/dev-rules.md` 規則 36（預設原則，Custom App 與 Hosted App 的前端都適用）：標題、導覽、按鈕、狀態標示、toast、空資料與錯誤文字、app 發出的訊息預設不放 emoji；圖示改用圖示元件（Custom App 用 Runtime 內建的 `lucide-react`，Hosted App 用 SVG 圖示庫），狀態用文字加顏色的標籤。使用者輸入或資料裡本來就有的 emoji 照原樣顯示；用戶明講要用、設計稿或原畫面本來就有時照用戶。
+- `references/dev-rules.md` 規則 35：「用圖示表達層級與關係」補明是圖示元件、不是 emoji——原句沒界定，拿 emoji 當圖示也不算違反。
+- `SKILL.md`：速查表補規則 36，範圍 18–35 → 18–36。
+- `references/hosted-apps.md` §1：「前端介面設計」小節補上規則 36。
+- `references/custom-app-dev-guide.md` §30.5：交付前自查加一格「介面上沒有 emoji」。
+- `references/reference-index.md`：`dev-rules.md` 一列的範圍同步。
+
+**⚠️ 對既有使用者的影響**
+- 只改文件。之後由 skill 新做的畫面預設不再帶 emoji；既有 app 的畫面不會被主動改動，要用 emoji 時在需求裡講明即可。
+
 ## 1.80.0
 
 ### 新增規則 35：介面文字預設從簡——不加多餘的副標與說明文字，讓介面自己說話
