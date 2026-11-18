@@ -2093,3 +2093,5 @@ export default function DataState({ loading, error, empty, emptyText = "目前�
 - [ ] 命中簽核時顯示「已送簽核」，不是成功也不是失敗
 - [ ] 畫面上沒有多餘的副標與說明文字（`dev-rules.md` 規則 35）：逐段問「拿掉它使用者會不會卡住」，不會就刪；
       上面幾格的狀態文字不在此列
+- [ ] 介面上沒有 emoji（`dev-rules.md` 規則 36）：標題、按鈕、狀態標示、toast、空資料與錯誤文字逐一看過；
+      圖示用 `lucide-react`。使用者輸入或資料裡本來就有的 emoji 不在此列
