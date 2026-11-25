@@ -7,7 +7,7 @@
 
 - §1.0 需求盤點：四問與產出的需求形狀結論
 - §1.0.5 模板盤點：a／b／c 結論與效果繫結表（完整做法在 `template-workflow.md`）
-- 計畫內容必須包含：第 1 項需求分析 → 第 1.3 項模板盤點 → 第 1.5 項產品線與模式 → 第 1.7 項授權架構 → 第 3 項資料承載表 → 第 4.x 項外部整合
+- 計畫內容必須包含：第 1 項需求分析 → 第 1.3 項模板盤點 → 第 1.5 項產品線與模式 → 第 1.7 項授權架構 → 第 3 項資料承載表 → 第 4.x 項外部整合（含 4.8 平台 AI）
 - 計畫閘門：七條，缺一不得進 Phase 2
 
 ---
@@ -204,6 +204,21 @@
    - 提醒用戶在 Builder（`/builder/{app_id}`）「API 權限」分頁把這些群開啟
      （寫入需 `builder.manage_access`）
    - 詳見 `references/platform-behaviors.md` §12
+
+4.8. **平台 AI（AI Hub）盤點**（★ 需求裡有任何 AI 功能就不可省：摘要、分類、抽欄位、讀 PDF／圖片、聊天）
+   - **先查能不能用**：`GET /api/v1/tenant/compute` 回 `dedicated: true` 才能呼叫 AI Hub；`false` 或 403
+     （免費租戶）→ 計畫改成自帶金鑰走第 4.6 項外部服務，並向用戶講清楚差別（AI Hub 扣租戶 AI Credit、
+     平台管金鑰；自帶金鑰由客戶自己的供應商帳單付、金鑰放 `ctx.secrets`）。`/ai-hub/models` 列得出模型**不算數**
+   - **對照能力邊界**：要生圖、語音、embedding、聯網搜尋、function calling、調 `temperature` → AI Hub 做不到，
+     那部分改自帶金鑰
+   - 寫明**呼叫面**（internal 前端 `AI_SDK`／Action `ctx.ai`／Hosted `/open/ai-hub`；external app 優先 Action）、
+     **授權**（internal 前端用 → 第 1.7 項授權架構表裡要用 AI 的角色都要開 `ai.hub.invoke`，預設角色都沒有；
+     external／Hosted → 列一步「請擁有者自己在 UI 開 `ai.hub.invoke`，要輸入密碼」）、**模型選擇條件**（不寫死 id）
+   - ⚠️ **要讀檔（PDF／圖片）的功能**：Action `ctx.ai` 的檔案工作目前跑不起來，internal 改前端 `AI_SDK`、Hosted 用
+     `/open`，external 沒有已驗證的讀檔路徑要先告訴用戶
+   - **用量估算**：每次大約多少 tokens、一天幾次，對照模型成本級距換算 AI Credit；批次或排程大量呼叫要寫明會吃
+     **全租戶共用**的額度與併發（全租戶突發約 4 個、滿載最多 8 個同時推論）
+   - 詳見 `references/ai-hub.md` §2、§3、§5、§9、§12、§14，模型清單 `ai-hub-models.md`
 
 5. **app_domain 標籤設計**
    - 確定此 App 的 `app_domain` 值（snake_case，如 `patent_os`、`crm_leads`）

@@ -13,6 +13,8 @@
 | `references/dev-rules.md` | 展開 Phase 3 規則 18–36 的資料、事件、權限、時間、部署硬規則與介面文字、不用 emoji 兩條介面原則。 | 核心 | 兩者 | 資料結構 |
 | `references/reference-index.md` | 列出兩種入口共用的核心與按需知識載入契約。 | 按需 | 兩者 | 無 |
 | `references/custom-app-dev-guide.md` | 提供 Custom App 架構、SDK、API、Actions 與存取通道規格。 | 按需 | 兩者 | 資料結構 |
+| `references/ai-hub.md` | 說明平台 AI Hub 的開放條件、能力邊界、四個呼叫面、請求契約、錯誤處置、吞吐上限與 AI Credit 計費。 | 按需 | 兩者 | 無 |
+| `references/ai-hub-models.md` | 列出 AI Hub 模型目錄快照、逐一實打結果、能力旗標實測矩陣與成本級距。 | 按需 | 兩者 | 無 |
 | `references/data-center.md` | 說明自建表與延伸欄位的結構、權限、配額及操作契約。 | 按需 | 兩者 | 資料結構 |
 | `references/data-operations.md` | 規範不開發 app 時的正式資料查詢、寫入、匯入與匯出閘門。 | 按需 | IDE | 業務資料 |
 | `references/default-table-lookup.md` | 將業務語言對照預設表、欄位、必填值域與唯讀限制。 | 按需 | 兩者 | 資料結構 |

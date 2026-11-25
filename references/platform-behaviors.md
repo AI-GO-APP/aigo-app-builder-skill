@@ -537,7 +537,8 @@ SDK 檔案有兩個來源，涵蓋範圍不同：
 | 檔案 | 建立 App 時就有 | 到 Builder 後台開「開發」分頁才補上 |
 |---|:-:|:-:|
 | `src/api.ts`、`src/action.ts` | ✅ | 沿用 |
-| `src/db.ts`（有引用表時）、`src/approval.ts`、`src/user.ts` | ✗ | ✅ |
+| `src/db.ts` | 從 `starter-internal`／`starter-external` 新建的 app ✅（2026-11-24／25 prod 實打）；其他建法未驗證 | ✅（有引用表時） |
+| `src/approval.ts`、`src/user.ts` | ✗ | ✅ |
 
 也就是說**純走 API 建立、從未在 Builder 後台開過的 App，VFS 裡不會有 `src/user.ts`**——
 本 skill 的開發流程正是這一種。`import { hasPermission } from "../user"` 會直接編譯失敗。

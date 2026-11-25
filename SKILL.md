@@ -199,7 +199,7 @@ uv run --project scripts python scripts/aigo_auth.py app add <alias> --id <uuid>
 | 2 | 功能群拆分（2 群以上不同目的才拆 app） | `product-line-decision.md` §7 |
 | 3 | **資料架構雙軌分流** → 產出 **資料承載表**（每張自建表都要「已對照的預設表／不採用理由」） | `custom-app-dev-guide.md` §19、`default-table-lookup.md` |
 | 4 | 頁面與元件規劃、路由結構 | — |
-| 4.5–4.7 | 外部 API（egress）、webhook、排程、檔案 | `event-triggers.md`、`custom-app-dev-guide.md` §25 |
+| 4.5–4.8 | 外部 API（egress）、webhook、排程、檔案、**平台 AI（AI Hub）與 AI Credit** | `event-triggers.md`、`custom-app-dev-guide.md` §25、`ai-hub.md` §14 |
 | 5 | 驗證方式與里程碑 | `verification-details.md` |
 
 **常駐（`always_on`）兩條線都要有結論，預設都是 `false`**——Hosted 過 `hosted-apps.md` §3.0 三問；
@@ -297,7 +297,7 @@ def execute(ctx):
     ctx.response.json({"result": data})
 ```
 
-1. **對外呼叫一律走 `ctx.http.call(<egress-slug>, <path>)`**——runner 是 default-deny egress，
+1. **對外呼叫一律走 `ctx.http.call(<egress-slug>, <path>)`**（呼叫 AI 預設改用平台 AI Hub 的 `ctx.ai`／前端 `AI_SDK`，扣租戶 AI Credit、要付費專屬池 → `references/ai-hub.md`）——runner 是 default-deny egress，
    raw `import httpx / requests / urllib.request` 連不出去（實測 20 秒 timeout）。
    ⚠️ 這些套件 **import 得進來**（語言級沙箱已拆，2026-09-13 實打）——擋的是**網路層**，
    別把「能 import」當成能用
@@ -313,8 +313,7 @@ def execute(ctx):
 > 逾時有兩道且原文同形：manifest `timeout_ms`（1000～120000，舊 app 要 republish 才換上新值）
 > 與 egress 閘道的服務 `timeout_ms`（預設 10000、硬上限 30000）。走 `ctx.http.call` 的 action
 > 提早被切是後者，**不是 manifest 沒生效**。閘道另有請求 8 MiB／回應 5 MiB／每分鐘 120 次上限
-> → `custom-app-dev-guide.md` §25.4。資料層 403 帶 `reason`／`rule_id` 是租戶資料存取規則擋的，
-> 改 code 無解 → dev-guide §27。
+> → `custom-app-dev-guide.md` §25.4。資料層 403 帶 `reason`／`rule_id` 是租戶資料存取規則擋的，改 code 無解 → dev-guide §27。
 
 ### 前端呼叫 Action
 
@@ -505,6 +504,7 @@ timeout／連不出去＝raw `httpx` 直連（改 `ctx.http.call`）或 slug 沒
 | `references/environment.md`<br>`references/review-workflow.md` | **Phase 1 的完整版**：租戶網址規則的推導與 401 同形成因、三層模型、`config.json` schema 2 與 `base_url` 三層來源、設定六步、憑證規則；**Phase 0 的完整版**：九步各自打哪個端點、Review 報告要列什麼、哪些情況標「必改」 |
 | `references/custom-app-dev-guide.md` | 核心 API 規格與架構理念；**§6.0 SDK 依模式分流表**、**§29 四條存取通道端點總表（internal／external／匿名／open）**、**§15.1 匿名存取的平台核可三態**、§12 Storage 坑表、**§27 租戶資料存取規則（Auth gate：403 帶 `reason` 的來源）**、§28 冷啟動／常駐（`always_on`）＋**§28.1 Custom 線常駐決策閘（預設關）** |
 | `references/data-center.md` | 自建表完整規格（型別、配額、權限、SDK）＋ 延伸欄位（§10） |
+| `references/ai-hub.md` | **app 要呼叫 AI 時**：平台 AI Hub 的開放條件（付費專屬池、`ai.hub.invoke`）、**能力邊界（做得到／做不到）**、模型目錄與挑法、四個呼叫面的授權與實打狀態（Action 檔案工作目前不可用）、請求契約、錯誤碼與「有沒有扣錢、能不能重送」、吞吐上限、AI Credit 換算與查詢、規劃與交付清單；**逐一模型實打清單在 `ai-hub-models.md`** |
 | `references/default-table-lookup.md` | **判「平台有沒有同語意實體」時（Phase 1.5 第 3 項、遷入 §2.4 每張表必查）**：業務語言→預設表速查、表名前綴讀法、Meta 面↔引用面對照、必填欄與唯讀表、遷入常見誤判 |
 | `references/event-triggers.md` | Webhook 與 App 排程（冪等要求、宣告、限制） |
 | `references/product-line-decision.md` | **Phase 1.5 判產品線與模式時（兩條路共用 SSOT）**：預設 Custom App 與偏離訊號、Custom App 能力邊界核對表、兩問四象限（登入者一律 internal）、混合方案分工（含 Hosted 當 Custom 後端）、不可逆前提、app 分配表 |
