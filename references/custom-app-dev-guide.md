@@ -89,8 +89,8 @@ actions/manifest.json Action 註冊
 actions/*.py          Action 實作
 ```
 
-> **★ 標記的 SDK 檔案不是建立 App 時就有的**——只有 `api.ts` / `action.ts` 隨 App 建立產生，
-> `db.ts` / `approval.ts` / `user.ts` 要**到 Builder 後台開一次「開發」分頁**才會補進 VFS。
+> **★ 標記的 SDK 檔案不是建立 App 時就有的**——`api.ts` / `action.ts` 隨 App 建立產生（從 `starter-internal`／`starter-external` 新建的 app 也已帶 `db.ts`，2026-11-24／25 prod 實打）；
+> `approval.ts` / `user.ts` 要**到 Builder 後台開一次「開發」分頁**才會補進 VFS（其他建法的 app 一開始有沒有 `db.ts` 未驗證）。
 > 純走 API 的開發流程 `import "../user"` 會編譯失敗，補救見 `platform-behaviors.md` §10.2。
 > SDK 檔案開頭都有 `/* @ai-go-sdk */` 標記，平台以此判斷可否覆寫——**不要動它們**。
 
@@ -146,6 +146,7 @@ SDK 模板在執行期讀 `!!window.__IS_EXTERNAL__` 自動分流；**程式碼�
 | `approval.ts` | `/api/v1/approvals/*` | **不支援**——SDK 直接拋錯（§24.4） |
 | `user.ts` | 讀注入的 `__USER_ROLES__`／`__USER_PERMISSIONS__` | 快照恆空（§13） |
 | Storage（無 SDK 檔） | `/api/v1/storage/upload`（`files.access`）＋ `data-center` 圖片端點 | `/api/v1/ext/storage/{upload,url,list,file}`（§12） |
+| `api.ts` 的 `AI_SDK`（平台 AI；⚠️ 新建 app 的 `api.ts` 預設**沒有**它、也補不進去（開「開發」分頁也不會進草稿），要把 SDK 放進自己的非保護檔再 import，`ai-hub.md` §8） | `/api/v1/ai-hub/{complete,models,jobs/…}`（**登入者**要有 `ai.hub.invoke`） | `/api/v1/ext/ai-hub/…`（看 app scope `ai.hub.invoke`）——開放條件、扣 AI Credit 與錯誤處置見 `ai-hub.md` |
 | 編譯（Builder 側） | `/api/v1/compile/compile/{slug}` | 同一支；另有 `/api/v1/ext/compile/compile/{slug}` 給 external 執行期鏈路 |
 
 - `/ext/*` 只收 **external／self_built** app 由 `custom-app-auth` 發的使用者 token（2026-09-09 測試租戶實打）：
@@ -199,7 +200,7 @@ if (isAdmin()) { /* system.admin 全開 */ }
 ```
 
 ⚠️ **`src/user.ts` 不是每個 App 的 VFS 都有**——它是**在 Builder 後台開「開發」分頁時**
-才注入的 SDK 檔（`api.ts` / `action.ts` 建立 App 就有，`db.ts` / `approval.ts` / `user.ts` 沒有）。
+才注入的 SDK 檔（`api.ts` / `action.ts` 建立 App 就有，起手式新建的 app 也帶 `db.ts`（2026-11-24／25 prod 實打）；`approval.ts` / `user.ts` 沒有）。
 純走 API 建立的 App 直接 `import "../user"` 會編譯失敗；
 快照全域本身仍有注入，可自行讀取——兩條補救路徑見 `platform-behaviors.md` §10.2。
 
@@ -232,6 +233,7 @@ def execute(ctx):
     ctx.response.json(d)    # 回應
     ctx.csv.export(r)       # CSV
     ctx.erp.confirm_sale_order(id)  # 觸發平台業務流程（方法級白名單，見 §24 與下方註）
+    ctx.ai.complete(messages, max_tokens=...)  # 平台 AI（AI Hub，扣租戶 AI Credit；回傳先查 status；帶檔案的 job 目前跑不起來，見 ai-hub.md §9）
 ```
 
 > 上面是常用的一組，`ctx` 實測共有 20 個命名空間。`ctx.erp` 只開放白名單內的 **10 個方法**
@@ -1699,7 +1701,7 @@ POST /api/v1/builder/apps          （權限：builder.access）
 - **起手式不是全空白**：實測 `starter-internal` seed 了 23 個檔案，
   含示範 action（`export_leads_csv.py`／`summarize_leads.py` 等 leads 範例）——
   走 Phase 0 review 時會看到，與需求無關就清掉，不要在範例上疊功能
-- **★ 起手式自帶 `_template.json`，宣告 `required_egress: {"openai": …}`**（`starter-internal` 1.6.0／
+- **★ 起手式自帶 `_template.json`，宣告 `required_egress: {"openrouter": …}`**（2026-09-09 實打時是 `openai`，2026-11-24 prod 實打已是 `openrouter`）（`starter-internal` 1.6.0／
   `starter-external` 1.4.0 皆是，2026-09-09 prod 實打；`GET /templates/{slug}` 看不到這個欄位，只有 VFS 裡看得到）：
   什麼都沒改直接發布就 409 `EGRESS_NOT_READY`。清示範時 **`actions/summarize_leads.py` 與 `_template.json`
   兩個都要刪**（只刪 action 仍擋；README、`actions/manifest.json` 的殘留不影響閘門）。刪遠端檔用
@@ -1869,7 +1871,7 @@ agent 不自行開、也不把「要不要常駐」丟給 owner 選。決策的�
 
 | 通道 | 誰在用 | 憑證 | 前綴 | 權限閘 |
 |---|---|---|---|---|
-| **internal** | internal Custom App 前端（登入者） | `__APP_TOKEN__`＝app-scoped JWT（代表登入者；`POST /app-scoped-token/{app_id}`／`app-runtime-session` 發） | `/api/v1/data-center`、`/proxy/{app_id}`、`/actions/apps/{app_id}`、`/storage`、`/approvals`（★ `/refs` 與平台管理面**不在** route catalog 內，今天打得到是 audit 放行，見下） | 登入者的權限（自建表記錄 CRUD 掛 `builder.access`，§7.5；預設表看 Data Reference 授權） |
+| **internal** | internal Custom App 前端（登入者） | `__APP_TOKEN__`＝app-scoped JWT（代表登入者；`POST /app-scoped-token/{app_id}`／`app-runtime-session` 發） | `/api/v1/data-center`、`/proxy/{app_id}`、`/actions/apps/{app_id}`、`/storage`、`/approvals`、`/ai-hub`（`ai-hub.md` §5）（★ `/refs` 與平台管理面**不在** route catalog 內，今天打得到是 audit 放行，見下） | 登入者的權限（自建表記錄 CRUD 掛 `builder.access`，§7.5；預設表看 Data Reference 授權） |
 | **external** | external／self_built Custom App 前端（app 使用者） | `__APP_TOKEN__`＝`custom-app-auth` 發的使用者 token（claim 帶 `custom_app_id`） | `/api/v1/ext/{data-center,proxy,actions,storage,data,compile,preview-token,runtime-errors,ai-hub}`＋`/custom-app-auth/{slug}/*`（另有 `/ext/request-evidence` JWKS，SDK 不用） | app 脈絡，不驗使用者權限；別種憑證一律 401「無效或已過期的 Token」（實打） |
 | **匿名** | 未登入訪客（只有 external／self_built 可開） | 無 | `/api/v1/pub/{data-center,proxy,data}/{slug}/…`（**唯讀**：只有 GET／`query`） | 表要 `is_public_readable`＋app 開旗標＋**平台核可**（§15.1）；120 次/分/IP |
 | **Hosted／self_built 後端** | Hosted App 容器、第三方自建應用 | `Authorization: Bearer <API key>`（容器內 `AIGO_API_TOKEN`；`X-API-Key` 相容） | `/api/v1/open/{data-center,proxy,data,members,storage,ai-hub}`（`/open/members` 只有 `GET /{user_id}/context`，prod v1.15.4 起；`storage`／`ai-hub` prod v1.16.0 起，另需 scope 開關，`hosted-apps.md` §5.2） | app 身分（API key 本身沒有 user；internal Hosted 的登入者由 proxy 注入 header 帶進來）；預設表零授權起步，600 次/分/key（`hosted-apps.md` §5） |

@@ -1,3 +1,61 @@
+## 1.82.0
+
+### 新增 AI Hub（平台內建 AI 與 AI Credit）的開發引用指引——全面實打、列出能力邊界與逐一模型清單
+
+skill 原本只在 `hosted-apps.md` §5.2 提到 Hosted 線的 `/open/ai-hub`，Custom App 前端的 `AI_SDK`、
+Action 的 `ctx.ai`、開放條件與 AI Credit 都沒有寫——agent 會以為「列得出模型就能用」，或改用自帶金鑰卻不知道
+平台有現成的 AI 閘道。2026-11-24／25 在測試租戶（付費專屬池）prod 全面實打：173 個模型逐一呼叫、四個呼叫面、
+串流、檔案、`ctx.ai`、錯誤路徑、吞吐，600 多次 HTTP 呼叫，總花費約 USD 0.125；再對照平台 `origin/main`
+（tag v1.22.1）原始碼。內文逐條標「實打」或「原始碼」，沒能實打的列在 `ai-hub.md` §13。
+
+- 新增 `references/ai-hub.md`：
+  - 何時用 AI Hub、何時自帶金鑰；**四個開放條件**（付費專屬池、executor 就緒、租戶 AI 金鑰、授權）與事先查法
+  - **能力邊界總表**：只有文字輸出；圖片與 PDF 只能用平台 `file_id`；沒有 `temperature` 等參數、tools／function
+    calling、生圖、語音、embedding、聯網搜尋、指定託管商
+  - 模型目錄怎麼來（每小時同步、8 家供應商、自動上架規則、下架 7 天才停用）、怎麼挑、**能力旗標可信度**
+    （讀圖與原生 PDF 有擋、JSON schema 平台不擋）
+  - 四個呼叫面的授權與實打狀態：app 憑證的發法與 900 秒效期、prod 閘門現況沒在擋、預設角色都沒有 `ai.hub.invoke`、
+    發布掃描實測（internal 自動核可、external 只宣告）
+  - 請求契約的實測細節：`models` 實際只能 3 個、`max_tokens` 含推理 tokens 且不是硬上限、`tool` 角色不能用、
+    超過 context 的長輸入在小模型被默默截斷、pydantic 422 沒有 `code`
+  - 檔案輸入：每個呼叫面拿 `file_id` 的端點、app 擁有的檔在 internal 面一律 404、**預設 PDF 引擎實際約 5 MiB 上限**、
+    兩種 PDF 引擎怎麼選、小圖會被小模型誤讀
+  - 前端 `AI_SDK`：**新建 app 的 `src/api.ts` 預設沒有它、也補不進去**（開「開發」分頁不會進草稿；改放進自己的非保護檔）、錯誤物件欄位、
+    `listModels` 會自動重試而 `complete` 不會、串流格式、**預設模型不逐字串流**、串流錯誤碼全集、取消的計費
+  - `ctx.ai`：關鍵字參數、多種錯誤形狀（含 `httpx.HTTPStatusError`）、dev runner 30 秒封頂、`ai_busy` 以 pod 計、
+    **帶檔案的工作在測試租戶三支 app 共 11 次全部 `ai_job_not_started`（目前不可用）**
+  - 錯誤碼表標明有沒有扣錢、能不能重送（`ai_upstream_unavailable` 含上游限流、可退避重送；`ai_inference_indeterminate`
+    不可自動重送；`detail.upstream` 不要給使用者看）
+  - 吞吐：頻率限制（平台使用者每人 600 次／分鐘、external 每 app 600、internal app 憑證在 prod 退回每個來源 IP 600、
+    租戶 3000；`/open` 一般 API key 每把 600，Hosted App 容器的 `AIGO_API_TOKEN` 每把 1200）、全租戶突發約 4 個、
+    滿載最多 8 個同時推論、各項時間上限
+  - AI Credit：實測倍數 465（`usage.cost` × 1.5 × 匯率 31.0 × 10）、三道額度閘、monthly 即時而 daily 隔天、
+    `key_limit_credits` 欄位、租戶看不到依 app 的用量
+  - 規劃與交付檢查清單
+- 新增 `references/ai-hub-models.md`：173 個模型的快照與逐一實打結果（可叫 168、已下架或上游不認 4、限流未定 1、
+  推理型 44）、能力實測矩陣、成本級距
+- 以第二支工作流（10 個 agent）逐條對照證據與原始碼對抗核對兩份新文件，修正 36 處標示或數字（實打／原始碼標籤、
+  成本倍數、PDF 上限邊界、頻率限制的計數單位、併發實測、`listModels` 重試次數等）
+- `references/planning.md`：新增第 4.8 項「平台 AI 盤點」（先查專屬池、對照能力邊界、呼叫面、授權、讀檔限制、用量估算）
+- `SKILL.md`：計畫表 4.5–4.7 → 4.5–4.8；Server Action 第 1 條硬規則補「呼叫 AI 預設改用 AI Hub」；
+  參考文件表新增 `ai-hub.md`（行數不變，仍是 520）
+- `references/custom-app-dev-guide.md`：§6.0 分流表補 `AI_SDK` 一列（註明預設沒有）；§7 `ctx` 速查補 `ctx.ai`；
+  §29 internal 前綴補 `/ai-hub`
+- `references/hosted-apps.md` §5.2：平台 AI 一段改指 `ai-hub.md`，補容器內實打結果（帶檔案在 `/open` 是同步回結果）
+- `references/member-admin.md` §1：`ai.hub.invoke` 何時要給角色、預設角色都沒有、外部人員預設不給
+- `references/troubleshooting.md`：平台 AI 錯誤碼兩列
+- `references/migration-workflow.md` §2.2：原系統直呼 LLM 供應商要定落點
+- `references/reference-index.md`：新增 `ai-hub.md`、`ai-hub-models.md` 兩列
+- `references/platform-behaviors.md` §10.2、`custom-app-dev-guide.md` §3：起手式新建的 app 已帶 `src/db.ts`（實打）；
+  `template-workflow.md`、`custom-app-dev-guide.md` §26、`troubleshooting.md`：起手式 `_template.json` 宣告的服務已是 `openrouter`（實打 409 `gaps[]`）
+
+**⚠️ 對既有使用者的影響**
+- 只改文件。之後 skill 規劃 AI 功能會先查租戶是否為付費專屬池、對照能力邊界；免費或共用運算的租戶、或需要
+  AI Hub 沒有的能力，會被導向自帶金鑰。
+- 需要讀檔的 AI 功能不再建議放進 Action（檔案工作目前不可用），改走前端 `AI_SDK` 或 Hosted `/open`。
+- external app 面的成功路徑、Action 檔案工作的成功路徑、各種 429／503 仍未實打，文件已標明。
+- 已回報平台（2026-11-25，不必重複開單）：Action 帶檔案的 AI 工作一律 `ai_job_not_started`；新建 app 的 `src/api.ts` 沒有 `AI_SDK`、也補不進去（文件寫了自放非保護檔的繞法）；`models` 填 4–8 個必被上游拒收（文件寫了只用 1–3 個）。
+
 ## 1.81.0
 
 ### 新增規則 36：介面預設不用 emoji——圖示用圖示元件，狀態用文字加顏色

@@ -193,6 +193,10 @@
 
 - 頁面／路由、後端 API endpoints、背景排程、對外 webhook 接收
 - 檔案儲存、第三方 API 呼叫、環境變數與金鑰
+  - **原系統直接呼叫 LLM 供應商**（OpenAI／Anthropic／Gemini SDK、OpenRouter）要逐處列出並定落點：
+    改走平台 AI Hub（扣租戶 AI Credit、只限付費專屬池，請求只收平台的欄位、`temperature` 之類會 422；
+    沒有 tools／function calling、embedding、生圖、語音）或保留原金鑰走外部服務（客戶自付）——
+    判準與改寫要點見 `ai-hub.md` §1、§3、§6、§10
   - ★ **環境變數要逐顆盤，不是寫一句「env 要設」**：從程式碼、`.env.example`、**原託管平台的
     env 設定頁**、本機排程四個來源盤出全部 key，做成對帳表，遷入後逐顆核對 AI GO 上有沒有設；
     沒設的列給用戶、提醒負責人設定——做法與常見漏項見 `hosted-apps.md` §4「遷入既有系統時要重新

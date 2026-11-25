@@ -115,7 +115,7 @@ uv run --project scripts python scripts/aigo_template.py effects <slug>         
 1. **建空殼**：`POST /api/v1/builder/apps {name, template_slug: "starter-internal" | "starter-external"}`
    （依 §4 第一題）→ `aigo_auth.py app add` 登錄。starter 是空白腳手架，平台的表／引用 provisioning 實質是 no-op
 2. **清 starter 的示範**：示範 action（`actions/summarize_leads.py` 等 leads 範例）與 **`_template.json`**
-   （宣告 `required_egress: openai`）**一起刪**——不刪，發布會 409 `EGRESS_NOT_READY`（只刪 action 仍擋）。
+   （宣告 `required_egress: openrouter`；2026-09-09 實打時是 `openai`）**一起刪**——不刪，發布會 409 `EGRESS_NOT_READY`（只刪 action 仍擋）。
    `_template.json` 是 starter 的宣告，不是本 app 的：本 app 的對外呼叫以 action 裡的字面 `ctx.http.call` slug 為準，
    發布閘門與 `egress_preflight()` 都會掃；**只有動態 slug**（第一參數不是字面字串）才需要自己寫一份
    `_template.json` 的 `required_egress` 把它宣告出來。刪法見 `custom-app-dev-guide.md` §26.2

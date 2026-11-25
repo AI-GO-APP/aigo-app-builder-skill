@@ -729,11 +729,16 @@ Custom App 介面 ＋ Hosted App 承接常駐進程／自選框架時，呼叫�
 - ⚠️ **刪 Hosted App 不會清掉它的 App 檔案**（原始碼核對，未實打）：刪除是軟刪，隨附整合翻 `draft`、
   服務權杖（`AIGO_API_TOKEN`）**立即撤銷**（v1.20.0 #2168 起；之前只翻 `draft`），`file_nodes` 沒有對應的清除路徑。app 退場前要自己 `list`＋`DELETE` 清乾淨——
   刪了之後就沒有 key 能再清
-- **平台 AI**：`POST /open/ai-hub/complete` 收 `messages`（純文字）＋選填 `model`（要在 `/models` 清單內）、
-  `file_id`（本 app 上傳且 `ready` 的檔，就是上面拿到的那個）、`response_format`；回上游 chat completion 原樣。
-  2026-10-02 只實打 `/models`（200，回模型清單與預設模型），`complete` 會扣 AI Credit **未實打**。
-  錯誤表（422 `model_not_allowed`、429 `quota_exceeded` 依 `event_type` 分企業空間／AI Credit…）以
-  平台 `public-api.md` §1.4 為準
+- **平台 AI**：`POST /open/ai-hub/complete` 與瀏覽器面共用同一份請求契約——`messages`（純文字）、
+  `model`／`models`、`max_tokens`、`file_id`／`file_ids`（本 app 上傳且 `ready` 的檔，就是上面拿到的那個）、
+  `engine`、`response_format`、`stream`；回上游 chat completion 原樣。**只有付費專屬池的租戶能用**
+  （其他一律 403 `dedicated_compute_required`；`/models` 不檢查這條，列得出模型不算數）。
+  能力邊界、欄位、錯誤碼與「有沒有扣錢、能不能重送」、頻率上限、AI Credit 怎麼算 → **`ai-hub.md`**（§3、§6、§10–§12）。
+  2026-11-24 在容器內實打（`ai-hub.md` §13）：`models`、`complete`（預設模型、`models` 備援、`response_format`、
+  串流）、`/open/storage/upload` 後帶 `file_id`／`file_ids` 讀圖與 PDF 都 200——**帶檔案在 `/open` 是同步回結果**，
+  不像 Action 回 `job_id`；錯誤形狀與瀏覽器面相同；隨機 id、已刪的檔 404（別的 app 的檔照原始碼也是 404，未實打）；`DELETE /jobs/{id}/result` 405。
+  隨附整合 scope 全空時照樣 200（閘門現況沒在擋，仍照規範開 `ai.hub.invoke`）。`AIGO_API_TOKEN` 打瀏覽器面
+  `/api/v1/ai-hub` 會 401
 
 **怎麼測（agent 自己驗證時）**：`AIGO_API_TOKEN` 只經 k8s Secret 注入容器、不出現在任何 API 回應，
 本機拿不到——**測試一律在容器內跑**。做法：部署一支一次性探針 app（`internal`、只有 Python 標準庫），
