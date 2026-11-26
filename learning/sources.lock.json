@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "builder_version": "1.78.0",
+  "review_note": "Relocked for Builder 1.78.0 (#121): only VERSION changed since the 1.77.0 review; aigo_auth API and all 9 excerpt headings unchanged",
+  "sources": {
+    "VERSION": "b983697fa79e6dc7320b2c54f89409307d49b5cafcb56194866cdfa5dab0b5e5",
+    "references/custom-app-dev-guide.md": "89a45fecb50bd290d03aebb7c89a42ce2cd9336d4b22b40025c7e4e98d9d3a9a",
+    "scripts/aigo_auth.py": "e6009f35a6bdf37f6ab236b5fae3d1221be51b7bb6c5ede4eb01213273189368",
+    "scripts/aigo_cli_check.py": "6da6d188983ef07e70533e4dcd8e3fb0a1aa33da49e75f4086489506ad4667e9",
+    "scripts/aigo_compile.py": "cee7840c24ccef4311b506ed73445f2f63a27421b4e3bef094d62df13a851f9a",
+    "scripts/aigo_learning_scope.py": "b029cff0bf49dbec3ee4834b76fb6f23d8b704af0cf31d4cb83bba3ef1072ad4",
+    "scripts/aigo_limits.py": "3db815fbababdbb13bdfbbeb6c02f669369df7b4ce78191adf2db2713b07b8dd",
+    "scripts/aigo_publish.py": "110f4c5ba1a42a50d1ae91bbe3a70ab57c1e737663ac254c7bd7445050d15b99",
+    "scripts/aigo_scaffold.py": "0441acef9a4636ef9013be63ffeef5def5647e4d8da7049ebff783442b50067c",
+    "scripts/aigo_sync.py": "409e16024747a28ca9d808156927042683899d03d6b1b25d0480102b5e7324c4",
+    "scripts/aigo_typecheck.py": "c121b284c49e5a77159594288f765dc22803bc8fe3b98e2210b719909f74254b",
+    "scripts/pyproject.toml": "6fa61572886f0b99b3660d1ce8ccfbab4373b4249e6b40e08ef06362a9b8524c",
+    "scripts/uv.lock": "5609300d56ffbf03a8128da19da4aa8d7dda45495028050cfbdd88a4fff3a661"
+  }
+}
